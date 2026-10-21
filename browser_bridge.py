@@ -47,6 +47,8 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
         self.send_header("Content-Type", content_type)
+        self.send_header("Connection", "close")
+        self.close_connection = True
 
     def do_OPTIONS(self):
         """Handle CORS preflight requests from browser extensions."""
@@ -72,14 +74,67 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
             self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except Exception:
+                pass
+        elif path in ("/show", "/wake", "/restore"):
+            server = getattr(self.server, "bridge_server_instance", None)
+            if server and getattr(server, "on_show", None):
+                try:
+                    server.on_show()
+                except Exception as e:
+                    server.log(f"[BROWSER BRIDGE] Error in on_show callback: {e}")
+            payload = {
+                "status": "ok",
+                "app": "Turbo Download Manager Pro",
+                "message": "Window restored"
+            }
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except Exception:
+                pass
         else:
             self._send_json_error(404, f"Endpoint '{self.path}' not found")
 
     def do_POST(self):
-        """Handle incoming download interception from browser extension."""
+        """Handle incoming download interception or window restore from browser extension or second instance."""
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+
+        if path in ("/show", "/wake", "/restore"):
+            try:
+                cl = int(self.headers.get("Content-Length", 0))
+                if cl > 0:
+                    self.rfile.read(cl)
+            except Exception:
+                pass
+            server = getattr(self.server, "bridge_server_instance", None)
+            if server and getattr(server, "on_show", None):
+                try:
+                    server.on_show()
+                except Exception as e:
+                    server.log(f"[BROWSER BRIDGE] Error in on_show callback: {e}")
+            payload = {
+                "success": True,
+                "app": "Turbo Download Manager Pro",
+                "message": "Window restored"
+            }
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except Exception:
+                pass
+            return
 
         if path != "/download":
             self._send_json_error(404, f"Unknown POST endpoint '{self.path}'")
@@ -183,12 +238,14 @@ class BrowserBridgeServer:
         host: str = DEFAULT_BRIDGE_HOST,
         port: int = DEFAULT_BRIDGE_PORT,
         on_download: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_log: Optional[Callable[[str], None]] = None
+        on_log: Optional[Callable[[str], None]] = None,
+        on_show: Optional[Callable[[], None]] = None
     ):
         self.host = host
         self.port = port
         self.on_download = on_download
         self.on_log = on_log
+        self.on_show = on_show
 
         self.httpd: Optional[ThreadedHTTPServer] = None
         self._thread: Optional[threading.Thread] = None

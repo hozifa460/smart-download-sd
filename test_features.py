@@ -61,10 +61,19 @@ from turbo_downloader import (
     SafeModalDialog,
     ModernFramelessGUI,
     QualitySelectionModal,
+    DownloadConfirmationModal,
     is_downloadable_url,
     get_clipboard_text,
     derive_download_filename,
-    COMMON_DOWNLOAD_EXTENSIONS
+    COMMON_DOWNLOAD_EXTENSIONS,
+    is_startup_enabled,
+    enable_startup,
+    disable_startup,
+    get_startup_command,
+    get_startup_entry,
+    notify_running_instance,
+    WINDOWS_RUN_KEY,
+    STARTUP_REG_KEY_NAME
 )
 
 
@@ -2463,6 +2472,333 @@ class TestIDMDownloadConfirmationDialog(unittest.TestCase):
                 pass
 
 
+
+class TestWindowsStartupRegistryIntegration(unittest.TestCase):
+    """Verifies Windows Startup Registry helper functions and executable resolution."""
+
+    def setUp(self):
+        # Record initial state to restore after test
+        self.initial_enabled = is_startup_enabled()
+        self.initial_entry = get_startup_entry()
+
+    def tearDown(self):
+        # Restore initial state
+        if self.initial_enabled and self.initial_entry:
+            enable_startup(minimized="--minimized" in self.initial_entry)
+        else:
+            disable_startup()
+
+    def test_startup_command_script_mode(self):
+        cmd_min = get_startup_command(minimized=True)
+        self.assertIn("--minimized", cmd_min)
+        self.assertTrue(cmd_min.endswith(" --minimized"))
+        self.assertIn("turbo_downloader.py", cmd_min)
+
+        cmd_full = get_startup_command(minimized=False)
+        self.assertNotIn("--minimized", cmd_full)
+        self.assertIn("turbo_downloader.py", cmd_full)
+
+    def test_startup_command_frozen_mode(self):
+        with patch.object(sys, "frozen", True, create=True):
+            with patch.object(sys, "executable", r"C:\Program Files\TurboDownloader\TurboDownloader.exe"):
+                cmd_min = get_startup_command(minimized=True)
+                self.assertEqual(cmd_min, r'"C:\Program Files\TurboDownloader\TurboDownloader.exe" --minimized')
+
+                cmd_full = get_startup_command(minimized=False)
+                self.assertEqual(cmd_full, r'"C:\Program Files\TurboDownloader\TurboDownloader.exe"')
+
+    def test_startup_lifecycle_enable_disable(self):
+        # Enable with minimized=True
+        ok = enable_startup(minimized=True)
+        self.assertTrue(ok)
+        self.assertTrue(is_startup_enabled())
+        entry = get_startup_entry()
+        self.assertIsNotNone(entry)
+        self.assertIn("--minimized", entry)
+
+        # Re-enable with minimized=False
+        ok2 = enable_startup(minimized=False)
+        self.assertTrue(ok2)
+        self.assertTrue(is_startup_enabled())
+        entry2 = get_startup_entry()
+        self.assertIsNotNone(entry2)
+        self.assertNotIn("--minimized", entry2)
+
+        # Disable
+        ok3 = disable_startup()
+        self.assertTrue(ok3)
+        self.assertFalse(is_startup_enabled())
+        self.assertIsNone(get_startup_entry())
+
+        # Disabling when already disabled is idempotent
+        ok4 = disable_startup()
+        self.assertTrue(ok4)
+        self.assertFalse(is_startup_enabled())
+
+    def test_registry_error_handling(self):
+        with patch("winreg.CreateKey", side_effect=PermissionError("Access denied")):
+            self.assertFalse(enable_startup(minimized=True))
+
+        with patch("winreg.OpenKey", side_effect=OSError("Registry error")):
+            self.assertFalse(disable_startup())
+            self.assertFalse(is_startup_enabled())
+            self.assertIsNone(get_startup_entry())
+
+    def test_non_windows_platform_graceful_noops(self):
+        with patch("turbo_downloader.IS_WINDOWS", False):
+            self.assertFalse(is_startup_enabled())
+            self.assertFalse(enable_startup(minimized=True))
+            self.assertFalse(disable_startup())
+            self.assertIsNone(get_startup_entry())
+
+    def test_startup_command_script_mode_fallback(self):
+        with patch("os.path.isfile", return_value=False):
+            cmd = get_startup_command(minimized=True)
+            self.assertIn("--minimized", cmd)
+            self.assertIn("turbo_downloader.py", cmd)
+
+    def test_startup_command_strip_quotes(self):
+        with patch.object(sys, "frozen", True, create=True):
+            with patch.object(sys, "executable", r'"C:\Path With Spaces\TurboDownloader.exe"'):
+                cmd = get_startup_command(minimized=True)
+                self.assertNotIn('""', cmd)
+                self.assertEqual(cmd, r'"C:\Path With Spaces\TurboDownloader.exe" --minimized')
+
+    def test_is_startup_enabled_whitespace_or_empty(self):
+        with patch("winreg.OpenKey"):
+            with patch("winreg.QueryValueEx", return_value=("   ", 1)):
+                self.assertFalse(is_startup_enabled())
+            with patch("winreg.QueryValueEx", return_value=("", 1)):
+                self.assertFalse(is_startup_enabled())
+            with patch("winreg.QueryValueEx", return_value=(None, 1)):
+                self.assertFalse(is_startup_enabled())
+
+
+class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
+    """Verifies silent background launch, IPC/sniffer preservation, and window restore on intercept."""
+
+    def setUp(self):
+        import tkinter as tk
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def test_start_hidden_flag_withdraws_root(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            self.assertTrue(gui._start_hidden)
+            self.assertFalse(self.root.winfo_viewable(), "Window must be hidden/withdrawn on start_hidden=True")
+            self.assertTrue(gui.bridge_server.is_running, "Loopback IPC bridge server must remain active")
+            self.assertTrue(gui._clipboard_sniffer_active, "Clipboard URL sniffer must remain active")
+            self.assertIsNotNone(gui._clipboard_job, "Periodic clipboard sniffer job must be scheduled")
+
+            # Verify restore_window
+            gui.restore_window()
+            self.assertFalse(gui._start_hidden)
+            self.root.update_idletasks()
+            self.assertTrue(self.root.winfo_viewable(), "Window must be visible after restore_window()")
+        finally:
+            gui._cleanup_resources()
+
+    def test_cli_flags_detection(self):
+        with patch.object(sys, "argv", ["turbo_downloader.py", "--minimized"]):
+            gui1 = ModernFramelessGUI(self.root)
+            self.assertTrue(gui1._start_hidden)
+            gui1._cleanup_resources()
+
+        with patch.object(sys, "argv", ["turbo_downloader.py", "--background"]):
+            gui2 = ModernFramelessGUI(self.root)
+            self.assertTrue(gui2._start_hidden)
+            gui2._cleanup_resources()
+
+        with patch.object(sys, "argv", ["turbo_downloader.py"]):
+            gui3 = ModernFramelessGUI(self.root)
+            self.assertFalse(gui3._start_hidden)
+            gui3._cleanup_resources()
+
+    def test_clipboard_detection_restores_window_and_shows_modal(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            self.assertTrue(gui._start_hidden)
+            target_url = "https://speed.cloudflare.com/__down?bytes=25000000"
+            gui._on_clipboard_url_detected(target_url)
+
+            # Window must be restored
+            self.assertFalse(gui._start_hidden)
+            # Confirmation modal must be created and active
+            self.assertIsNotNone(gui._confirm_modal)
+            self.assertTrue(gui._confirm_modal.winfo_exists())
+            self.assertEqual(gui.entry_url.get().strip(), target_url)
+        finally:
+            if gui._confirm_modal:
+                try:
+                    gui._confirm_modal.destroy()
+                except Exception:
+                    pass
+            gui._cleanup_resources()
+
+    def test_browser_download_restores_window_and_shows_modal(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            self.assertTrue(gui._start_hidden)
+            target_url = "https://speed.cloudflare.com/files/archive_bundle.zip"
+            payload = {
+                "url": target_url,
+                "filename": "archive_bundle.zip",
+                "start_immediately": False
+            }
+            gui._apply_browser_download(payload)
+
+            # Window must be restored
+            self.assertFalse(gui._start_hidden)
+            # Confirmation modal must be displayed
+            self.assertIsNotNone(gui._confirm_modal)
+            self.assertTrue(gui._confirm_modal.winfo_exists())
+            self.assertEqual(gui.entry_url.get().strip(), target_url)
+        finally:
+            if gui._confirm_modal:
+                try:
+                    gui._confirm_modal.destroy()
+                except Exception:
+                    pass
+            gui._cleanup_resources()
+
+    def test_gui_startup_toggle_button(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=False)
+        try:
+            self.assertTrue(hasattr(gui, "btn_startup"))
+            # Initial state
+            init_state = is_startup_enabled()
+            if init_state:
+                self.assertEqual(gui.btn_startup.cget("text"), "🚀 Boot: ON")
+            else:
+                self.assertEqual(gui.btn_startup.cget("text"), "🚀 Boot: OFF")
+
+            # Toggle state
+            toggled = gui.toggle_startup_setting()
+            self.assertEqual(toggled, not init_state)
+            if toggled:
+                self.assertEqual(gui.btn_startup.cget("text"), "🚀 Boot: ON")
+            else:
+                self.assertEqual(gui.btn_startup.cget("text"), "🚀 Boot: OFF")
+
+            # Toggle back to restore
+            gui.toggle_startup_setting()
+            self.assertEqual(is_startup_enabled(), init_state)
+        finally:
+            gui._cleanup_resources()
+
+    def test_browser_integration_dialog_startup_card(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=False)
+        try:
+            gui._open_browser_integration_dialog()
+            self.assertTrue(hasattr(gui, "_update_dlg_startup_ui"))
+            # Test triggering update callback
+            gui._update_dlg_startup_ui()
+        finally:
+            gui._cleanup_resources()
+
+    def test_cli_flags_case_insensitivity_and_variants(self):
+        variants = [
+            ["turbo_downloader.py", "-minimized"],
+            ["turbo_downloader.py", "--MINIMIZED"],
+            ["turbo_downloader.py", "/minimized"],
+            ["turbo_downloader.py", "-background"],
+            ["turbo_downloader.py", "--BACKGROUND"],
+            ["turbo_downloader.py", "/background"],
+        ]
+        for v in variants:
+            with patch.object(sys, "argv", v):
+                gui = ModernFramelessGUI(self.root)
+                self.assertTrue(gui._start_hidden, f"Flag {v} failed to activate _start_hidden")
+                self.assertTrue(gui._was_started_hidden, f"Flag {v} failed to set _was_started_hidden")
+                gui._cleanup_resources()
+
+    def test_was_started_hidden_preserves_confirmation_modal(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            gui._auto_start_clipboard = False
+            payload = {
+                "url": "https://speed.cloudflare.com/__down?bytes=50000000",
+                "filename": "big_file.bin",
+                "start_immediately": True
+            }
+            gui._apply_browser_download(payload)
+            self.assertIsNotNone(gui._confirm_modal)
+            self.assertTrue(gui._confirm_modal.winfo_exists())
+        finally:
+            if gui._confirm_modal:
+                try:
+                    gui._confirm_modal.destroy()
+                except Exception:
+                    pass
+            gui._cleanup_resources()
+
+    def test_single_instance_show_endpoint(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            self.assertTrue(gui._start_hidden)
+            self.assertFalse(self.root.winfo_viewable())
+
+            # Request /show via loopback HTTP bridge
+            req = urllib.request.Request("http://127.0.0.1:9242/show")
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                self.assertEqual(resp.status, 200)
+                body = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(body.get("status"), "ok")
+
+            for _ in range(25):
+                gui._drain_dispatch_queue()
+                self.root.update()
+                if not gui._start_hidden:
+                    break
+                time.sleep(0.02)
+
+            self.assertFalse(gui._start_hidden)
+            self.assertTrue(self.root.winfo_viewable())
+        finally:
+            gui._cleanup_resources()
+
+    def test_notify_running_instance_helper(self):
+        # 1. When GUI is active and listening
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            self.assertTrue(gui._start_hidden)
+            handled = notify_running_instance(show=True)
+            self.assertTrue(handled, "notify_running_instance should succeed when instance is listening")
+            for _ in range(25):
+                gui._drain_dispatch_queue()
+                self.root.update()
+                if not gui._start_hidden:
+                    break
+                time.sleep(0.02)
+            self.assertFalse(gui._start_hidden)
+        finally:
+            gui._cleanup_resources()
+
+        # 2. When no GUI is listening
+        handled_stopped = notify_running_instance(show=True)
+        self.assertFalse(handled_stopped, "notify_running_instance should return False when no server is running")
+
+    def test_clipboard_detection_youtube_url_restores_window(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            self.assertTrue(gui._start_hidden)
+            with patch.object(gui, "_start_youtube_download") as mock_yt:
+                gui._on_clipboard_url_detected("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+                self.assertFalse(gui._start_hidden)
+                self.root.update()
+                self.assertTrue(self.root.winfo_viewable())
+                mock_yt.assert_called_once()
+        finally:
+            gui._cleanup_resources()
+
+
 class TestStandaloneExeBuild(unittest.TestCase):
     """Verifies that the PyInstaller standalone Windows executable exists and has valid PE structure."""
 
@@ -2488,6 +2824,34 @@ class TestStandaloneExeBuild(unittest.TestCase):
         # Run with --test-startup (DEVNULL for windowed GUI executables)
         proc = subprocess.run([exe_path, "--test-startup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
         self.assertEqual(proc.returncode, 0, f"Standalone exe failed to start cleanly with returncode {proc.returncode}")
+
+    def test_exe_binary_minimized_background_launch(self):
+        dist_dir = os.path.join(os.path.dirname(__file__), "dist")
+        exe_path = os.path.join(dist_dir, "TurboDownloader.exe")
+        if not os.path.exists(exe_path):
+            self.skipTest(f"{exe_path} not found")
+        proc = subprocess.Popen([exe_path, "--minimized"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            connected = False
+            for _ in range(25):
+                time.sleep(0.4)
+                try:
+                    req = urllib.request.Request("http://127.0.0.1:9242/ping")
+                    with urllib.request.urlopen(req, timeout=1.0) as resp:
+                        if resp.status == 200:
+                            connected = True
+                            break
+                except Exception:
+                    pass
+            self.assertTrue(connected, "Standalone binary with --minimized failed to activate loopback server")
+        finally:
+            try:
+                subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":

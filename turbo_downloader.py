@@ -48,13 +48,14 @@ import shutil
 import tempfile
 import hashlib
 import threading
+import queue
 import ssl
 import urllib.request
 import json
 import urllib.parse
 import urllib.error
 from dataclasses import dataclass, field
-from typing import List, Optional, Callable, Dict, Any, Union
+from typing import List, Optional, Callable, Dict, Any, Union, Tuple
 
 def get_resource_path(relative_path: str) -> str:
     """Resolve absolute path for bundled assets in development or PyInstaller frozen bundle."""
@@ -166,12 +167,17 @@ IS_WINDOWS = sys.platform.startswith("win")
 if IS_WINDOWS:
     import ctypes
     from ctypes import wintypes
+    try:
+        import winreg
+    except ImportError:
+        winreg = None
     GWL_STYLE = -16
     GWL_EXSTYLE = -20
     WS_EX_APPWINDOW = 0x00040000
     WS_EX_TOOLWINDOW = 0x00000080
     WS_MINIMIZEBOX = 0x00020000
     WS_SYSMENU = 0x00080000
+    SW_HIDE = 0
     SW_MINIMIZE = 6
     SW_RESTORE = 9
     SW_SHOW = 5
@@ -199,6 +205,97 @@ if IS_WINDOWS:
         kernel32.GlobalUnlock.restype = wintypes.BOOL
     except Exception:
         pass
+else:
+    winreg = None
+
+
+# ======================================================================================
+# WINDOWS STARTUP REGISTRY INTEGRATION (AUTO-RUN ON BOOT)
+# ======================================================================================
+
+WINDOWS_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+STARTUP_REG_KEY_NAME = "TurboDownloader"
+
+def get_startup_command(minimized: bool = True) -> str:
+    """
+    Constructs the command line string to launch TurboDownloader on system startup.
+    Accurately resolves executable path for both standalone frozen binary (.exe)
+    and Python development script runs.
+    """
+    flag = " --minimized" if minimized else ""
+    if getattr(sys, "frozen", False):
+        exe_path = os.path.abspath(str(sys.executable).strip('"'))
+        return f'"{exe_path}"{flag}'
+    else:
+        # Script mode: prefer pythonw.exe if available so no console window flashes
+        py_exe = str(sys.executable).strip('"')
+        py_dir = os.path.dirname(py_exe)
+        pyw_exe = os.path.join(py_dir, "pythonw.exe")
+        if os.path.isfile(pyw_exe):
+            py_exe = pyw_exe
+        raw_file = __file__ if "__file__" in globals() and isinstance(__file__, str) else "turbo_downloader.py"
+        script_path = os.path.abspath(raw_file.strip('"'))
+        return f'"{py_exe}" "{script_path}"{flag}'
+
+def is_startup_enabled() -> bool:
+    """
+    Checks if TurboDownloader is currently registered in Windows HKCU Run registry key.
+    Returns True if present with a non-empty command value, False otherwise.
+    """
+    if not IS_WINDOWS or winreg is None:
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_READ) as key:
+            val, _ = winreg.QueryValueEx(key, STARTUP_REG_KEY_NAME)
+            return bool(val and str(val).strip())
+    except (FileNotFoundError, OSError):
+        return False
+
+def enable_startup(minimized: bool = True) -> bool:
+    """
+    Registers TurboDownloader in HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run.
+    When minimized=True, adds the --minimized flag so it starts silently in background.
+    Returns True on success, False otherwise.
+    """
+    if not IS_WINDOWS or winreg is None:
+        return False
+    try:
+        cmd = get_startup_command(minimized=minimized)
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY) as key:
+            winreg.SetValueEx(key, STARTUP_REG_KEY_NAME, 0, winreg.REG_SZ, cmd)
+        return True
+    except (OSError, PermissionError):
+        return False
+
+def disable_startup() -> bool:
+    """
+    Removes TurboDownloader from HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run.
+    Returns True on success or if already absent, False on unexpected error.
+    """
+    if not IS_WINDOWS or winreg is None:
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            try:
+                winreg.DeleteValue(key, STARTUP_REG_KEY_NAME)
+            except FileNotFoundError:
+                pass
+        return True
+    except FileNotFoundError:
+        return True
+    except (OSError, PermissionError):
+        return False
+
+def get_startup_entry() -> Optional[str]:
+    """Returns the registered command string from Windows Run registry, or None."""
+    if not IS_WINDOWS or winreg is None:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_READ) as key:
+            val, _ = winreg.QueryValueEx(key, STARTUP_REG_KEY_NAME)
+            return str(val) if val else None
+    except (FileNotFoundError, OSError):
+        return None
 
 
 # ======================================================================================
@@ -503,6 +600,47 @@ def get_clipboard_text(root: Optional[Any] = None) -> Optional[str]:
         except Exception:
             pass
     return None
+
+
+def notify_running_instance(url: Optional[str] = None, show: bool = True) -> bool:
+    """
+    Checks if an existing instance of Turbo Downloader is running by probing the
+    loopback IPC port. If active, wakes up the existing instance and optionally
+    dispatches the download URL. Returns True if an existing instance was handled.
+    """
+    try:
+        req = urllib.request.Request("http://127.0.0.1:9242/ping", headers={"User-Agent": "TurboDownloader-Launcher"})
+        with urllib.request.urlopen(req, timeout=0.6) as resp:
+            if resp.status == 200:
+                raw = resp.read().decode("utf-8")
+                data = json.loads(raw)
+                if data.get("app") == "Turbo Download Manager Pro":
+                    if url and is_downloadable_url(url):
+                        try:
+                            post_data = json.dumps({"url": url, "start_immediately": False}).encode("utf-8")
+                            post_req = urllib.request.Request(
+                                "http://127.0.0.1:9242/download",
+                                data=post_data,
+                                headers={"Content-Type": "application/json"}
+                            )
+                            with urllib.request.urlopen(post_req, timeout=1.0) as _:
+                                pass
+                        except Exception:
+                            pass
+                    if show:
+                        try:
+                            show_req = urllib.request.Request(
+                                "http://127.0.0.1:9242/show",
+                                headers={"User-Agent": "TurboDownloader-Launcher"}
+                            )
+                            with urllib.request.urlopen(show_req, timeout=1.0) as _:
+                                pass
+                        except Exception:
+                            pass
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 # ======================================================================================
@@ -2752,8 +2890,15 @@ class ModernFramelessGUI:
     - Real-time performance metrics (speed, progress, ETA, active threads).
     - Detailed chunk status table and event logging console.
     """
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, start_hidden: Optional[bool] = None, initial_url: Optional[str] = None):
         self.root = root
+        if start_hidden is None:
+            start_hidden = any(arg.lower() in ("--background", "-background", "/background",
+                                                "--minimized", "-minimized", "/minimized")
+                               for arg in sys.argv[1:])
+        self._start_hidden: bool = bool(start_hidden)
+        self._was_started_hidden: bool = bool(start_hidden)
+        self._startup_enabled: bool = is_startup_enabled()
         self.engine: Optional[Union[TurboDownloadEngine, StreamDownloadCoordinator]] = None
         self._yt_cancel_event = threading.Event()
         self._quality_modal: Optional[tk.Toplevel] = None
@@ -2761,6 +2906,7 @@ class ModernFramelessGUI:
         self._refresh_job = None
         self._closing = False
         self._log_jobs: List[Any] = []
+        self._gui_dispatch_queue: queue.Queue = queue.Queue()
 
         # Clipboard URL Sniffer (Automatic clipboard monitor)
         self._clipboard_sniffer_active: bool = True
@@ -2795,11 +2941,19 @@ class ModernFramelessGUI:
         self._init_theme()
         self._build_ui()
 
+        if initial_url:
+            try:
+                self.entry_url.delete(0, tk.END)
+                self.entry_url.insert(0, initial_url)
+            except Exception:
+                pass
+
         # Initialize Browser Bridge loopback IPC server
         self.bridge_server = BrowserBridgeServer(
             port=DEFAULT_BRIDGE_PORT,
             on_download=self._on_browser_download_received,
-            on_log=self.log
+            on_log=self.log,
+            on_show=lambda: self.dispatch_to_main_thread(self.restore_window)
         )
         self.bridge_server.start()
 
@@ -3062,13 +3216,60 @@ class ModernFramelessGUI:
                     except Exception:
                         pass
 
-                ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
+                if getattr(self, "_start_hidden", False):
+                    try:
+                        ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
+                    except Exception:
+                        pass
+                    try:
+                        self.root.withdraw()
+                    except Exception:
+                        pass
+                else:
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
+            except Exception:
+                pass
+
+        if getattr(self, "_start_hidden", False):
+            try:
+                self.root.withdraw()
             except Exception:
                 pass
 
         # Draggable title bar coordinate tracking (Root-relative to prevent jitter)
         self._drag_offset_x = 0
         self._drag_offset_y = 0
+
+    def restore_window(self):
+        """Restores and brings the main window to foreground if hidden or minimized."""
+        self._start_hidden = False
+        try:
+            self.root.deiconify()
+        except Exception:
+            pass
+        if IS_WINDOWS:
+            try:
+                hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+                ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
+                # Elevation pulse to overcome Windows OS focus-stealing prevention
+                HWND_TOPMOST = -1
+                HWND_NOTOPMOST = -2
+                SWP_NOMOVE = 0x0002
+                SWP_NOSIZE = 0x0001
+                SWP_SHOWWINDOW = 0x0040
+                ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+                ctypes.windll.user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+        try:
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after_idle(lambda: self.root.attributes("-topmost", False) if hasattr(self, "root") and self.root else None)
+            self.root.focus_force()
+        except Exception:
+            pass
 
     def _init_theme(self):
         """Palette and styling definitions."""
@@ -3577,6 +3778,21 @@ class ModernFramelessGUI:
             command=self.toggle_clipboard_sniffer
         )
         self.btn_clipboard_sniffer.pack(side=tk.RIGHT, padx=(0, 8))
+
+        self.btn_startup = tk.Button(
+            row2,
+            text="🚀 Boot: OFF",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            command=self.toggle_startup_setting
+        )
+        self.btn_startup.pack(side=tk.RIGHT, padx=(0, 8))
+        self._update_startup_btn()
 
     def _on_slider_moved(self, val_str):
         """Dynamic slider movement throttles engine in real-time."""
@@ -4180,19 +4396,7 @@ class ModernFramelessGUI:
             pass
 
         # Restore and focus window
-        if IS_WINDOWS:
-            try:
-                hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
-                ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
-        try:
-            self.root.deiconify()
-            self.root.lift()
-            self.root.focus_force()
-        except Exception:
-            pass
+        self.restore_window()
 
         # Non-blocking IDM-style download handling (no blocking modal dialogs / grab_set traps)
         if is_youtube_url(url):
@@ -4291,13 +4495,79 @@ class ModernFramelessGUI:
                 )
                 self.log("[CLIPBOARD] Sniffer Paused: Clipboard monitoring paused.")
 
+    def _update_startup_btn(self):
+        """Refreshes the visual state of the Windows auto-start button."""
+        if hasattr(self, "btn_startup"):
+            try:
+                if not self.btn_startup.winfo_exists():
+                    return
+            except Exception:
+                return
+            enabled = is_startup_enabled()
+            self._startup_enabled = enabled
+            if enabled:
+                self.btn_startup.configure(
+                    text="🚀 Boot: ON",
+                    fg=self.c_success,
+                    bg=self.c_panel_light
+                )
+            else:
+                self.btn_startup.configure(
+                    text="🚀 Boot: OFF",
+                    fg=self.c_text_muted,
+                    bg=self.c_panel
+                )
+
+    def toggle_startup_setting(self) -> bool:
+        """Toggles Windows startup on boot registry entry with live feedback."""
+        current = is_startup_enabled()
+        if current:
+            success = disable_startup()
+            if success:
+                self._startup_enabled = False
+                self.log("[STARTUP] Windows Run on Boot: Disabled.")
+            else:
+                self.log("[STARTUP ERROR] Failed to disable Windows Run on Boot.")
+        else:
+            success = enable_startup(minimized=True)
+            if success:
+                self._startup_enabled = True
+                self.log("[STARTUP] Windows Run on Boot: Enabled (Silent background mode).")
+            else:
+                self.log("[STARTUP ERROR] Failed to enable Windows Run on Boot.")
+
+        self._update_startup_btn()
+        if hasattr(self, "_update_dlg_startup_ui") and callable(self._update_dlg_startup_ui):
+            try:
+                self._update_dlg_startup_ui()
+            except Exception:
+                pass
+        return self._startup_enabled
+
     # ----------------------------------------------------------------------------------
     # Browser Bridge Integration Callbacks & Modal Dialog
     # ----------------------------------------------------------------------------------
 
+    def dispatch_to_main_thread(self, fn: Callable, *args, **kwargs):
+        """Safely queues a callable to be executed on the Tkinter main thread."""
+        if hasattr(self, "_gui_dispatch_queue"):
+            self._gui_dispatch_queue.put((fn, args, kwargs))
+        if threading.current_thread() == threading.main_thread():
+            self._drain_dispatch_queue()
+
+    def _drain_dispatch_queue(self):
+        """Executes all pending dispatch tasks on the main thread."""
+        if hasattr(self, "_gui_dispatch_queue"):
+            while not self._gui_dispatch_queue.empty():
+                try:
+                    action, a_args, a_kwargs = self._gui_dispatch_queue.get_nowait()
+                    action(*a_args, **a_kwargs)
+                except Exception:
+                    pass
+
     def _on_browser_download_received(self, download_info: Dict[str, Any]):
         """Dispatches intercepted download from browser bridge thread to Tkinter main thread."""
-        self.root.after(0, lambda: self._apply_browser_download(download_info))
+        self.dispatch_to_main_thread(self._apply_browser_download, download_info)
 
     def _apply_browser_download(self, download_info: Dict[str, Any]):
         """Applies intercepted download parameters to the GUI and starts transfer if requested."""
@@ -4331,26 +4601,31 @@ class ModernFramelessGUI:
         self.entry_dest.insert(0, new_dest)
 
         # Restore and focus window
-        if IS_WINDOWS:
-            try:
-                hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
-                ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
-        try:
-            self.root.deiconify()
-            self.root.lift()
-            self.root.focus_force()
-        except Exception:
-            pass
+        self.restore_window()
 
-        # Trigger download if auto-start requested
-        if start_immediately:
-            if not self.engine or not self.engine.is_running:
-                self._on_start_download()
+        # Handle YouTube vs regular file downloads
+        if is_youtube_url(url):
+            if self.engine and self.engine.is_running:
+                self.log(f"[BROWSER] Note: Active task is running. YouTube stream queued in URL field.")
             else:
-                self.log(f"[BROWSER] Note: Download '{os.path.basename(new_dest)}' queued in inputs while active task finishes.")
+                self.log(f"[BROWSER] YouTube stream detected: {url}. Starting format analysis...")
+                try:
+                    max_conn = int(self.conn_var.get())
+                except Exception:
+                    max_conn = 8
+                try:
+                    kb_limit = float(self.entry_custom_speed.get().strip())
+                except Exception:
+                    kb_limit = 0.0
+                bytes_limit = kb_limit * 1024.0 if kb_limit > 0 else 0.0
+                self._start_youtube_download(url, new_dest, max_conn, bytes_limit)
+        else:
+            if self.engine and self.engine.is_running:
+                self.log(f"[BROWSER] Note: Active transfer in progress. URL '{os.path.basename(new_dest)}' queued in inputs.")
+            elif not start_immediately or getattr(self, "_auto_start_clipboard", True) or getattr(self, "_was_started_hidden", False):
+                self._show_download_confirmation_dialog(url, new_dest)
+            else:
+                self._on_start_download()
 
     def _open_browser_integration_dialog(self):
         """Displays settings, connection status, and extension installation instructions."""
@@ -4370,7 +4645,7 @@ class ModernFramelessGUI:
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         dlg_w = min(int(680 * dpi_scale), max(600, int(sw * 0.92)))
-        dlg_h = min(int(580 * dpi_scale), max(480, int(sh * 0.88)))
+        dlg_h = min(int(660 * dpi_scale), max(560, int(sh * 0.90)))
         try:
             px = self.root.winfo_x()
             py = self.root.winfo_y()
@@ -4381,7 +4656,7 @@ class ModernFramelessGUI:
         x = max(0, px + (pw - dlg_w) // 2)
         y = max(0, py + (ph - dlg_h) // 2)
         dlg.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
-        dlg.minsize(min(580, dlg_w), min(420, dlg_h))
+        dlg.minsize(min(580, dlg_w), min(480, dlg_h))
         dlg.configure(bg=self.c_bg)
 
         # Apply application icon to dialog window
@@ -4599,7 +4874,56 @@ class ModernFramelessGUI:
         btn_reg.pack(side=tk.RIGHT)
         _update_reg_status_label()
 
-        # 3. Extension Directory Card
+        # 3. Windows Startup Auto-Boot Card (Silent Background Mode)
+        card_boot = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
+        card_boot.pack(fill=tk.X, pady=(0, 10))
+
+        lbl_boot_title = tk.Label(card_boot, text="🚀 WINDOWS STARTUP AUTO-BOOT (SILENT BACKGROUND MODE)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl_boot_title.pack(anchor="w")
+
+        boot_row = tk.Frame(card_boot, bg=self.c_panel)
+        boot_row.pack(fill=tk.X, pady=(6, 0))
+
+        lbl_boot_status = tk.Label(boot_row, text="", font=("Segoe UI", 9, "bold"), bg=self.c_panel)
+        lbl_boot_status.pack(side=tk.LEFT)
+
+        def _update_dlg_boot_status():
+            try:
+                if not dlg.winfo_exists() or not lbl_boot_status.winfo_exists():
+                    return
+            except Exception:
+                return
+            enabled = is_startup_enabled()
+            if enabled:
+                lbl_boot_status.configure(text="● Start with Windows: Enabled (Silent Background)", fg=self.c_success)
+                btn_dlg_boot.configure(text="🚀 Start on Boot: Enabled", fg=self.c_success, bg=self.c_panel_light)
+            else:
+                lbl_boot_status.configure(text="● Start with Windows: Disabled", fg=self.c_warning)
+                btn_dlg_boot.configure(text="🚀 Start on Boot: Disabled", fg=self.c_text_muted, bg=self.c_panel)
+
+        self._update_dlg_startup_ui = _update_dlg_boot_status
+        try:
+            dlg.bind("<Destroy>", lambda e: setattr(self, "_update_dlg_startup_ui", None) if e.widget == dlg else None, add="+")
+        except Exception:
+            pass
+
+        def _on_dlg_boot_toggle():
+            self.toggle_startup_setting()
+            _update_dlg_boot_status()
+
+        btn_dlg_boot = tk.Button(
+            boot_row,
+            text="",
+            font=("Segoe UI", 8, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=10,
+            command=_on_dlg_boot_toggle
+        )
+        btn_dlg_boot.pack(side=tk.RIGHT)
+        _update_dlg_boot_status()
+
+        # 4. Extension Directory Card
         if getattr(sys, "frozen", False):
             exe_dir = os.path.dirname(os.path.abspath(sys.executable))
             persistent_ext_dir = os.path.join(exe_dir, "extension")
@@ -4843,7 +5167,7 @@ class ModernFramelessGUI:
             self.tree_chunks.delete(stale_id)
 
     def _gui_refresh_tick(self):
-        """Periodic tick ensuring smooth chunk visualization animation."""
+        """Periodic tick ensuring smooth chunk visualization animation and processing queued thread tasks."""
         if getattr(self, "_closing", False):
             return
         try:
@@ -4851,6 +5175,8 @@ class ModernFramelessGUI:
                 return
         except Exception:
             return
+
+        self._drain_dispatch_queue()
 
         if self.engine and self.engine.is_running and not self.engine.is_paused:
             try:
@@ -4997,6 +5323,28 @@ def main():
         res = register_native_host()
         return
 
+    # Check for CLI download URLs (e.g. TurboDownloader.exe https://example.com/file.zip)
+    cli_url = None
+    for arg in sys.argv[1:]:
+        if not arg.startswith("-") and not arg.startswith("/"):
+            if arg.startswith("http://") or arg.startswith("https://") or arg.startswith("ftp://"):
+                cli_url = arg.strip()
+                break
+
+    # Check for background / minimized startup (case-insensitive)
+    start_in_background = any(arg.lower() in ("--background", "-background", "/background",
+                                              "--minimized", "-minimized", "/minimized")
+                              for arg in sys.argv[1:])
+
+    # Single-instance check: if already running, forward URL or wake window, then exit
+    if not any(arg in sys.argv for arg in ("--force-new-instance", "--multi-instance")):
+        if start_in_background:
+            if notify_running_instance(url=cli_url, show=False):
+                sys.exit(0)
+        else:
+            if notify_running_instance(url=cli_url, show=True):
+                sys.exit(0)
+
     # Ensure Windows High-DPI Awareness is active before root creation
     enable_high_dpi_awareness()
 
@@ -5019,7 +5367,19 @@ def main():
         except Exception:
             pass
 
-    app = ModernFramelessGUI(root)
+    if start_in_background:
+        try:
+            root.withdraw()
+        except Exception:
+            pass
+
+    app = ModernFramelessGUI(root, start_hidden=start_in_background, initial_url=cli_url)
+    if start_in_background:
+        try:
+            root.withdraw()
+        except Exception:
+            pass
+
     root.mainloop()
 
 if __name__ == "__main__":
