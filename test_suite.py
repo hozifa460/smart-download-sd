@@ -652,9 +652,8 @@ class TestClipboardNonBlockingInterception(unittest.TestCase):
                 mock_yesno.assert_not_called()
                 self.assertIsNotNone(gui._confirm_modal)
                 self.assertIsNone(root.grab_current(), "Grab must not be held on root")
-                mock_start.assert_not_called()
-
-                gui._confirm_modal._on_start()
+                # Open in Main App delegates download to main GUI:
+                gui._confirm_modal._on_open_in_main()
                 mock_start.assert_called_once()
 
             gui._cleanup_resources()

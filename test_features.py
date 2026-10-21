@@ -83,7 +83,10 @@ from turbo_downloader import (
     load_settings,
     save_settings,
     get_setting,
-    set_setting
+    set_setting,
+    parse_speed_limit,
+    open_downloaded_file,
+    open_containing_folder
 )
 
 
@@ -1990,8 +1993,8 @@ class TestClipboardSnifferAndUrlValidation(unittest.TestCase):
                 # Download has not started yet until confirmed
                 mock_start.assert_not_called()
 
-                # User confirms download via modal
-                gui._confirm_modal._on_start()
+                # User chooses to open in main app via modal
+                gui._confirm_modal._on_open_in_main()
                 mock_start.assert_called_once()
                 self.assertIsNone(gui._confirm_modal)
 
@@ -2631,19 +2634,25 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             self.assertFalse(gui3._start_hidden)
             gui3._cleanup_resources()
 
-    def test_clipboard_detection_restores_window_and_shows_modal(self):
+    def test_clipboard_detection_suppresses_window_and_shows_modal(self):
         gui = ModernFramelessGUI(self.root, start_hidden=True)
         try:
             self.assertTrue(gui._start_hidden)
             target_url = "https://speed.cloudflare.com/__down?bytes=25000000"
             gui._on_clipboard_url_detected(target_url)
 
-            # Window must be restored
-            self.assertFalse(gui._start_hidden)
+            # Main window must remain hidden (suppressed)
+            self.assertTrue(gui._start_hidden)
+            self.assertEqual(self.root.state(), "withdrawn")
             # Confirmation modal must be created and active
             self.assertIsNotNone(gui._confirm_modal)
             self.assertTrue(gui._confirm_modal.winfo_exists())
             self.assertEqual(gui.entry_url.get().strip(), target_url)
+
+            # User chooses 'Open in Main App': restores window
+            gui._confirm_modal._on_open_in_main()
+            self.assertFalse(gui._start_hidden)
+            self.assertEqual(self.root.state(), "normal")
         finally:
             if gui._confirm_modal:
                 try:
@@ -2652,7 +2661,7 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
                     pass
             gui._cleanup_resources()
 
-    def test_browser_download_restores_window_and_shows_modal(self):
+    def test_browser_download_suppresses_window_and_shows_modal(self):
         gui = ModernFramelessGUI(self.root, start_hidden=True)
         try:
             self.assertTrue(gui._start_hidden)
@@ -2664,12 +2673,18 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             }
             gui._apply_browser_download(payload)
 
-            # Window must be restored
-            self.assertFalse(gui._start_hidden)
+            # Main window must remain hidden (suppressed)
+            self.assertTrue(gui._start_hidden)
+            self.assertEqual(self.root.state(), "withdrawn")
             # Confirmation modal must be displayed
             self.assertIsNotNone(gui._confirm_modal)
             self.assertTrue(gui._confirm_modal.winfo_exists())
             self.assertEqual(gui.entry_url.get().strip(), target_url)
+
+            # User chooses 'Open in Main App': restores window
+            gui._confirm_modal._on_open_in_main()
+            self.assertFalse(gui._start_hidden)
+            self.assertEqual(self.root.state(), "normal")
         finally:
             if gui._confirm_modal:
                 try:
@@ -2795,15 +2810,14 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
         handled_stopped = notify_running_instance(show=True)
         self.assertFalse(handled_stopped, "notify_running_instance should return False when no server is running")
 
-    def test_clipboard_detection_youtube_url_restores_window(self):
+    def test_clipboard_detection_youtube_url_keeps_window_hidden(self):
         gui = ModernFramelessGUI(self.root, start_hidden=True)
         try:
             self.assertTrue(gui._start_hidden)
             with patch.object(gui, "_start_youtube_download") as mock_yt:
                 gui._on_clipboard_url_detected("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-                self.assertFalse(gui._start_hidden)
-                self.root.update()
-                self.assertTrue(self.root.winfo_viewable())
+                self.assertTrue(gui._start_hidden)
+                self.assertEqual(self.root.state(), "withdrawn")
                 mock_yt.assert_called_once()
         finally:
             gui._cleanup_resources()
@@ -3521,7 +3535,7 @@ class TestSystemTrayAndBackgroundMinimization(unittest.TestCase):
         finally:
             gui.exit_completely()
 
-    def test_clipboard_detection_wakes_from_tray_and_shows_modal(self):
+    def test_clipboard_detection_keeps_tray_state_and_shows_modal(self):
         self.root = tk.Tk()
         gui = ModernFramelessGUI(self.root)
         try:
@@ -3533,12 +3547,16 @@ class TestSystemTrayAndBackgroundMinimization(unittest.TestCase):
             target_url = "https://speed.cloudflare.com/__down?bytes=15000000"
             gui._on_clipboard_url_detected(target_url)
 
-            # Window must wake up / restore
-            self.assertEqual(self.root.state(), "normal")
+            # Main window must remain withdrawn in tray
+            self.assertEqual(self.root.state(), "withdrawn")
             # IDM confirmation modal must be open
             self.assertIsNotNone(gui._confirm_modal)
             self.assertTrue(gui._confirm_modal.winfo_exists())
             self.assertEqual(gui.entry_url.get().strip(), target_url)
+
+            # Clicking 'Open in Main App' restores the main window
+            gui._confirm_modal._on_open_in_main()
+            self.assertEqual(self.root.state(), "normal")
         finally:
             if gui._confirm_modal:
                 try:
@@ -3547,7 +3565,7 @@ class TestSystemTrayAndBackgroundMinimization(unittest.TestCase):
                     pass
             gui.exit_completely()
 
-    def test_browser_download_wakes_from_tray_and_shows_modal(self):
+    def test_browser_download_keeps_tray_state_and_shows_modal(self):
         self.root = tk.Tk()
         gui = ModernFramelessGUI(self.root)
         try:
@@ -3563,12 +3581,16 @@ class TestSystemTrayAndBackgroundMinimization(unittest.TestCase):
                 "start_immediately": False
             })
 
-            # Window must wake up / restore
-            self.assertEqual(self.root.state(), "normal")
+            # Main window must remain withdrawn in tray
+            self.assertEqual(self.root.state(), "withdrawn")
             # IDM confirmation modal must be open
             self.assertIsNotNone(gui._confirm_modal)
             self.assertTrue(gui._confirm_modal.winfo_exists())
             self.assertEqual(gui.entry_url.get().strip(), target_url)
+
+            # Clicking 'Open in Main App' restores the main window
+            gui._confirm_modal._on_open_in_main()
+            self.assertEqual(self.root.state(), "normal")
         finally:
             if gui._confirm_modal:
                 try:
@@ -3592,6 +3614,455 @@ class TestSystemTrayAndBackgroundMinimization(unittest.TestCase):
             exists = False
         self.assertFalse(exists)
         self.root = None
+
+
+class TestIDMConfirmationAndStandaloneProgress(unittest.TestCase):
+    """
+    Verifies IDM-style confirmation modal features and standalone progress handling:
+    1. Speed limiter parsing across various units (Unlimited, KB/s, MB/s, custom numbers).
+    2. Connection count selector (1, 2, 4, 8, 16, 32) and speed selector in DownloadConfirmationModal.
+    3. Three action buttons: 'Start Download', 'Open in Main App', and 'Cancel'.
+    4. Transition to standalone compact progress view and canvas progress bar rendering.
+    5. Standalone download controls: Pause / Resume toggling and Cancel aborting engine.
+    6. Completion state actions: 'Open File', 'Open Folder', and 'Close'.
+    7. QualitySelectionModal 'Open in Main App' action.
+    """
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.theme = {
+            "c_bg": "#121214",
+            "c_panel": "#1b1b1f",
+            "c_panel_light": "#25252b",
+            "c_border": "#2c2c34",
+            "c_accent": "#6366f1",
+            "c_accent_dark": "#4f46e5",
+            "c_success": "#10b981",
+            "c_warning": "#f59e0b",
+            "c_error": "#ef4444",
+            "c_text_bright": "#ffffff",
+            "c_text_muted": "#9ca3af",
+            "c_input_bg": "#18181b",
+        }
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def test_speed_limit_parser(self):
+        """Tests parsing of speed limit presets and custom strings to bytes per second."""
+        self.assertEqual(parse_speed_limit("Unlimited"), 0.0)
+        self.assertEqual(parse_speed_limit("none"), 0.0)
+        self.assertEqual(parse_speed_limit("256 KB/s"), 256 * 1024.0)
+        self.assertEqual(parse_speed_limit("512 KB/s"), 512 * 1024.0)
+        self.assertEqual(parse_speed_limit("1 MB/s"), 1024 * 1024.0)
+        self.assertEqual(parse_speed_limit("2 MB/s"), 2 * 1024 * 1024.0)
+        self.assertEqual(parse_speed_limit("5 MB/s"), 5 * 1024 * 1024.0)
+        self.assertEqual(parse_speed_limit("10 MB/s"), 10 * 1024 * 1024.0)
+        self.assertEqual(parse_speed_limit("20 MB/s"), 20 * 1024 * 1024.0)
+        self.assertEqual(parse_speed_limit("1024"), 1024 * 1024.0)
+        self.assertEqual(parse_speed_limit("500000"), 500000.0)
+        self.assertEqual(parse_speed_limit(""), 0.0)
+        self.assertEqual(parse_speed_limit("invalid_limit"), 0.0)
+
+    def test_confirmation_dialog_controls_and_options(self):
+        """Verifies DownloadConfirmationModal thread and speed options and helper getters."""
+        modal = DownloadConfirmationModal(
+            parent=self.root,
+            url="https://example.com/testfile.iso",
+            default_dest_path="C:\\Downloads\\testfile.iso",
+            theme=self.theme,
+            on_confirm=lambda *a: None,
+            default_connections=8,
+            default_speed_limit=0.0
+        )
+        try:
+            # Check thread count combobox values
+            thread_values = list(modal.combo_threads["values"])
+            for t in ["1", "2", "4", "8", "16", "32"]:
+                self.assertIn(t, thread_values)
+            self.assertEqual(modal.get_max_connections(), 8)
+
+            modal.combo_threads.set("16")
+            self.assertEqual(modal.get_max_connections(), 16)
+
+            modal.combo_threads.set("invalid")
+            self.assertEqual(modal.get_max_connections(), 8)  # Fallback
+
+            # Check speed limiter combobox values
+            speed_values = list(modal.combo_speed["values"])
+            self.assertIn("Unlimited", speed_values)
+            self.assertIn("1 MB/s", speed_values)
+            self.assertEqual(modal.get_speed_limit_bytes(), 0.0)
+
+            modal.combo_speed.set("2 MB/s")
+            self.assertEqual(modal.get_speed_limit_bytes(), 2 * 1024 * 1024.0)
+
+            # Check that grab is not held
+            self.assertIsNone(self.root.grab_current())
+        finally:
+            try:
+                modal.destroy()
+            except Exception:
+                pass
+
+    def test_confirmation_dialog_three_action_buttons(self):
+        """Verifies presence of Start Download, Open in Main App, and Cancel buttons."""
+        modal = DownloadConfirmationModal(
+            parent=self.root,
+            url="https://example.com/software.zip",
+            default_dest_path="C:\\Downloads\\software.zip",
+            theme=self.theme,
+            on_confirm=lambda *a: None
+        )
+        try:
+            self.assertTrue(hasattr(modal, "btn_start"))
+            self.assertTrue(hasattr(modal, "btn_open_app"))
+            self.assertTrue(hasattr(modal, "btn_cancel"))
+            self.assertIn("Start Download", modal.btn_start.cget("text"))
+            self.assertIn("Open in Main App", modal.btn_open_app.cget("text"))
+            self.assertIn("Cancel", modal.btn_cancel.cget("text"))
+        finally:
+            try:
+                modal.destroy()
+            except Exception:
+                pass
+
+    def test_confirmation_dialog_transition_to_progress_view(self):
+        """Verifies transitioning modal into standalone progress view and updating progress."""
+        started = []
+        def mock_start_in_window(dest, conns, speed, modal_ref):
+            started.append((dest, conns, speed, modal_ref))
+
+        modal = DownloadConfirmationModal(
+            parent=self.root,
+            url="https://example.com/data.tar.gz",
+            default_dest_path="C:\\Downloads\\data.tar.gz",
+            theme=self.theme,
+            on_confirm=lambda *a: None,
+            on_start_in_window=mock_start_in_window
+        )
+        try:
+            self.assertFalse(modal.is_in_progress_view)
+            modal._on_start_in_window()
+            self.assertTrue(modal.is_in_progress_view)
+            self.assertEqual(len(started), 1)
+
+            # Check progress view widgets exist
+            self.assertTrue(hasattr(modal, "canvas_prog"))
+            self.assertTrue(hasattr(modal, "lbl_prog_size"))
+            self.assertTrue(hasattr(modal, "lbl_prog_speed"))
+            self.assertTrue(hasattr(modal, "lbl_prog_eta"))
+            self.assertTrue(hasattr(modal, "lbl_prog_threads"))
+            self.assertTrue(hasattr(modal, "btn_pause_resume"))
+            self.assertTrue(hasattr(modal, "btn_cancel_prog"))
+
+            # Update progress
+            modal.update_progress(5000000, 10000000, 1048576, "00:00:05", 8)
+            self.root.update()
+            self.assertIn("50.0%", modal.lbl_prog_size.cget("text"))
+            self.assertIn("00:00:05", modal.lbl_prog_eta.cget("text"))
+            self.assertIn("8 Active", modal.lbl_prog_threads.cget("text"))
+        finally:
+            try:
+                modal.destroy()
+            except Exception:
+                pass
+
+    def test_confirmation_dialog_pause_resume_and_cancel_standalone(self):
+        """Verifies pause/resume toggling and cancellation in standalone modal view."""
+        modal = DownloadConfirmationModal(
+            parent=self.root,
+            url="https://example.com/archive.7z",
+            default_dest_path="C:\\Downloads\\archive.7z",
+            theme=self.theme,
+            on_confirm=lambda *a: None
+        )
+        try:
+            modal.show_progress_view()
+            mock_engine = MagicMock()
+            mock_engine.is_running = True
+            mock_engine.is_paused = False
+            modal.engine = mock_engine
+
+            # Pause
+            modal._on_pause_resume()
+            mock_engine.pause.assert_called_once()
+            self.assertIn("Resume", modal.btn_pause_resume.cget("text"))
+
+            # Resume
+            mock_engine.is_paused = True
+            modal._on_pause_resume()
+            mock_engine.resume.assert_called_once()
+            self.assertIn("Pause", modal.btn_pause_resume.cget("text"))
+
+            # Cancel
+            modal._on_close()
+            mock_engine.cancel.assert_called_once()
+        finally:
+            try:
+                if modal.winfo_exists():
+                    modal.destroy()
+            except Exception:
+                pass
+
+    def test_confirmation_dialog_completion_actions(self):
+        """Verifies completion state actions: Open File, Open Folder, and Close."""
+        modal = DownloadConfirmationModal(
+            parent=self.root,
+            url="https://example.com/app.exe",
+            default_dest_path="C:\\Downloads\\app.exe",
+            theme=self.theme,
+            on_confirm=lambda *a: None
+        )
+        try:
+            modal.show_progress_view()
+            test_file = "C:\\Downloads\\app.exe"
+            modal.on_download_complete(test_file, 1048576, 2.5)
+            self.root.update()
+
+            self.assertTrue(modal.is_completed)
+            self.assertTrue(hasattr(modal, "btn_open_file"))
+            self.assertTrue(hasattr(modal, "btn_open_folder"))
+            self.assertTrue(hasattr(modal, "btn_close_prog"))
+
+            with patch("turbo_downloader.open_downloaded_file") as mock_open_file, \
+                 patch("turbo_downloader.open_containing_folder") as mock_open_folder:
+                modal._on_open_file()
+                mock_open_file.assert_called_once_with(test_file)
+
+                modal._on_open_folder()
+                mock_open_folder.assert_called_once_with(test_file)
+        finally:
+            try:
+                modal.destroy()
+            except Exception:
+                pass
+
+    def test_quality_selection_modal_open_in_main(self):
+        """Verifies QualitySelectionModal 'Open in Main App' button invokes the on_open_in_main callback."""
+        opened_in_main = []
+        def mock_open_in_main(opt, dest):
+            opened_in_main.append((opt, dest))
+
+        opt1 = VideoFormatOption(
+            format_id="137+140",
+            resolution_label="1080p (Full HD)",
+            height=1080,
+            ext="mp4",
+            filesize_approx=50000000,
+            fps=30,
+            vcodec="avc1",
+            acodec="mp4a"
+        )
+        modal = QualitySelectionModal(
+            parent=self.root,
+            video_title="Test Video Title",
+            duration=120,
+            options=[opt1],
+            default_dest_path="C:\\Downloads\\Test Video Title.mp4",
+            theme=self.theme,
+            on_confirm=lambda *a: None,
+            on_open_in_main=mock_open_in_main
+        )
+        try:
+            self.assertTrue(hasattr(modal, "btn_open_app"))
+            self.assertIn("Open in Main App", modal.btn_open_app.cget("text"))
+            modal._on_open_in_main()
+            self.assertEqual(len(opened_in_main), 1)
+            self.assertEqual(opened_in_main[0][0], opt1)
+            self.assertEqual(opened_in_main[0][1], "C:\\Downloads\\Test Video Title.mp4")
+        finally:
+            try:
+                if modal.winfo_exists():
+                    modal.destroy()
+            except Exception:
+                pass
+
+    def test_modal_viewable_when_parent_is_iconic_or_withdrawn(self):
+        """Verifies DownloadConfirmationModal and QualitySelectionModal remain viewable when parent is iconic/withdrawn."""
+        self.root.withdraw()
+        modal = DownloadConfirmationModal(
+            parent=self.root,
+            url="https://example.com/file.bin",
+            default_dest_path="C:\\Downloads\\file.bin",
+            theme=self.theme
+        )
+        try:
+            self.root.update()
+            modal.update()
+            self.assertEqual(modal.state(), "normal")
+            self.assertEqual(modal.winfo_viewable(), 1, "DownloadConfirmationModal must be viewable on screen when parent is hidden")
+        finally:
+            try:
+                modal.destroy()
+            except Exception:
+                pass
+
+        opt = VideoFormatOption(
+            format_id="137",
+            resolution_label="1080p",
+            height=1080,
+            ext="mp4",
+            filesize_approx=5000,
+            fps=30,
+            vcodec="h264",
+            acodec="aac"
+        )
+        qmodal = QualitySelectionModal(
+            parent=self.root,
+            video_title="Test YT",
+            duration=60,
+            options=[opt],
+            default_dest_path="C:\\Downloads\\Test.mp4",
+            theme=self.theme,
+            on_confirm=lambda *a: None
+        )
+        try:
+            self.root.update()
+            qmodal.update()
+            self.assertEqual(qmodal.state(), "normal")
+            self.assertEqual(qmodal.winfo_viewable(), 1, "QualitySelectionModal must be viewable on screen when parent is hidden")
+        finally:
+            try:
+                qmodal.destroy()
+            except Exception:
+                pass
+
+    def test_open_in_main_while_download_active_transitions_cleanly_without_restart(self):
+        """Verifies clicking 'Open in Main App' while download is active restores main window without restarting transfer."""
+        gui = ModernFramelessGUI(self.root)
+        try:
+            mock_engine = MagicMock()
+            mock_engine.is_running = True
+            mock_engine.is_paused = False
+            gui.engine = mock_engine
+
+            modal = DownloadConfirmationModal(
+                parent=self.root,
+                url="https://example.com/large.iso",
+                default_dest_path="C:\\Downloads\\large.iso",
+                theme=self.theme,
+                parent_app=gui
+            )
+            modal.engine = mock_engine
+            modal.show_progress_view()
+            self.assertTrue(modal.is_in_progress_view)
+
+            with patch.object(gui, "_on_start_download") as mock_start_dl:
+                modal._on_open_in_main()
+                mock_start_dl.assert_not_called()
+
+            self.assertEqual(self.root.state(), "normal")
+            self.assertEqual(gui.btn_start.cget("state"), "disabled")
+            self.assertEqual(gui.btn_cancel.cget("state"), "normal")
+            self.assertEqual(gui.btn_pause.cget("text"), "⏸ Pause")
+        finally:
+            gui.exit_completely()
+
+    def test_standalone_modal_cancellation_restores_main_window_controls(self):
+        """Verifies cancelling active download in standalone modal restores main GUI btn_start to normal."""
+        gui = ModernFramelessGUI(self.root)
+        try:
+            mock_engine = MagicMock()
+            mock_engine.is_running = True
+            gui.engine = mock_engine
+            gui.btn_start.configure(state="disabled")
+            gui.btn_cancel.configure(state="normal")
+
+            modal = DownloadConfirmationModal(
+                parent=self.root,
+                url="https://example.com/test.zip",
+                default_dest_path="C:\\Downloads\\test.zip",
+                theme=self.theme,
+                parent_app=gui
+            )
+            gui._confirm_modal = modal
+            modal.engine = mock_engine
+            modal.show_progress_view()
+
+            modal._on_close()
+
+            mock_engine.cancel.assert_called_once()
+            self.assertIsNone(gui.engine)
+            self.assertEqual(gui.btn_start.cget("state"), "normal", "Main GUI btn_start must be re-enabled on modal cancel")
+            self.assertEqual(gui.btn_cancel.cget("state"), "disabled")
+            self.assertIn("Cancelled", gui.card_size.cget("text"))
+        finally:
+            gui.exit_completely()
+
+    def test_duplicate_completion_dialog_suppressed_when_modal_present(self):
+        """Verifies _engine_complete_cb suppresses redundant popup dialog when standalone modal is present."""
+        gui = ModernFramelessGUI(self.root)
+        try:
+            with patch.object(gui, "show_safe_info") as mock_safe_info:
+                # With suppress_dialog=True (standalone modal active)
+                gui._engine_complete_cb("C:\\Downloads\\file.bin", 1024, 1.0, suppress_dialog=True)
+                self.root.update()
+                mock_safe_info.assert_not_called()
+
+                # Without suppress_dialog (normal main window completion)
+                gui._engine_complete_cb("C:\\Downloads\\file.bin", 1024, 1.0, suppress_dialog=False)
+                self.root.update()
+                mock_safe_info.assert_called_once()
+        finally:
+            gui.exit_completely()
+
+    def test_subsequent_clipboard_url_does_not_destroy_active_modal(self):
+        """Verifies copying a new URL while modal is actively downloading does not destroy it."""
+        gui = ModernFramelessGUI(self.root)
+        try:
+            modal = DownloadConfirmationModal(
+                parent=self.root,
+                url="https://example.com/active.zip",
+                default_dest_path="C:\\Downloads\\active.zip",
+                theme=self.theme,
+                parent_app=gui
+            )
+            gui._confirm_modal = modal
+            modal.show_progress_view()
+            self.assertTrue(modal.is_in_progress_view)
+
+            # A subsequent download confirmation request arrives
+            gui._show_download_confirmation_dialog("https://example.com/second.zip", "C:\\Downloads\\second.zip")
+
+            # The original active modal must still be alive!
+            self.assertTrue(modal.winfo_exists())
+            self.assertIs(gui._confirm_modal, modal)
+        finally:
+            gui.exit_completely()
+
+    def test_pause_resume_synchronizes_parent_app_button(self):
+        """Verifies toggling pause/resume in standalone modal synchronizes parent_app btn_pause text."""
+        gui = ModernFramelessGUI(self.root)
+        try:
+            mock_engine = MagicMock()
+            mock_engine.is_running = True
+            mock_engine.is_paused = False
+            gui.engine = mock_engine
+
+            modal = DownloadConfirmationModal(
+                parent=self.root,
+                url="https://example.com/sync.zip",
+                default_dest_path="C:\\Downloads\\sync.zip",
+                theme=self.theme,
+                parent_app=gui
+            )
+            modal.engine = mock_engine
+            modal.show_progress_view()
+
+            # Pause in modal
+            modal._on_pause_resume()
+            self.assertIn("Resume", gui.btn_pause.cget("text"))
+
+            # Resume in modal
+            mock_engine.is_paused = True
+            modal._on_pause_resume()
+            self.assertIn("Pause", gui.btn_pause.cget("text"))
+        finally:
+            gui.exit_completely()
 
 
 class TestStandaloneExeBuild(unittest.TestCase):

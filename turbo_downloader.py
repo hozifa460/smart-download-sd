@@ -2489,7 +2489,8 @@ class QualitySelectionModal(tk.Toplevel):
         default_dest_path: str,
         theme: Dict[str, str],
         on_confirm: Callable[[VideoFormatOption, str], None],
-        on_cancel: Optional[Callable[[], None]] = None
+        on_cancel: Optional[Callable[[], None]] = None,
+        on_open_in_main: Optional[Callable[[VideoFormatOption, str], None]] = None
     ):
         super().__init__(parent)
         self.video_title = str(video_title or "YouTube Video")
@@ -2499,17 +2500,13 @@ class QualitySelectionModal(tk.Toplevel):
         self.theme = theme
         self.on_confirm = on_confirm
         self.on_cancel = on_cancel
+        self.on_open_in_main = on_open_in_main
 
         self.selected_option: Optional[VideoFormatOption] = self.options[0] if self.options else None
         self._confirmed = False
 
         self.title("Select Video Quality — Turbo Downloader")
         self.configure(bg=self.theme["c_bg"])
-        if parent:
-            try:
-                self.transient(parent)
-            except Exception:
-                pass
         # Do not use grab_set(): Overrideredirect parent causes Win32 message pump traps and UI freezes
 
         # Determine parent DPI scale
@@ -2519,20 +2516,46 @@ class QualitySelectionModal(tk.Toplevel):
             dpi = 96.0
         dpi_scale = max(1.0, dpi / 96.0)
 
-        # Center on parent window with DPI scaling
+        # Center on parent window with DPI scaling (or center on screen if parent is hidden/minimized)
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         dlg_w = min(int(740 * dpi_scale), max(640, int(sw * 0.92)))
         dlg_h = min(int(580 * dpi_scale), max(480, int(sh * 0.88)))
+
+        is_parent_visible = False
         try:
-            px = parent.winfo_x()
-            py = parent.winfo_y()
-            pw = parent.winfo_width() or dlg_w
-            ph = parent.winfo_height() or dlg_h
+            if parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal":
+                is_parent_visible = True
         except Exception:
-            px, py, pw, ph = 0, 0, dlg_w, dlg_h
-        x = max(0, px + (pw - dlg_w) // 2)
-        y = max(0, py + (ph - dlg_h) // 2)
+            is_parent_visible = False
+
+        if is_parent_visible:
+            try:
+                self.transient(parent)
+            except Exception:
+                pass
+        else:
+            try:
+                self.transient("")
+                self.deiconify()
+            except Exception:
+                pass
+
+        if is_parent_visible:
+            try:
+                px = parent.winfo_x()
+                py = parent.winfo_y()
+                pw = parent.winfo_width() or dlg_w
+                ph = parent.winfo_height() or dlg_h
+                x = max(0, px + (pw - dlg_w) // 2)
+                y = max(0, py + (ph - dlg_h) // 2)
+            except Exception:
+                x = max(0, (sw - dlg_w) // 2)
+                y = max(0, (sh - dlg_h) // 2)
+        else:
+            x = max(0, (sw - dlg_w) // 2)
+            y = max(0, (sh - dlg_h) // 2)
+
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
         self.minsize(min(640, dlg_w), min(480, dlg_h))
 
@@ -2677,7 +2700,7 @@ class QualitySelectionModal(tk.Toplevel):
         btn_row = tk.Frame(body, bg=c_bg)
         btn_row.pack(fill=tk.X)
 
-        btn_download = tk.Button(
+        self.btn_download = tk.Button(
             btn_row,
             text="⚡ Download Selected Quality",
             font=("Segoe UI", 9, "bold"),
@@ -2690,9 +2713,9 @@ class QualitySelectionModal(tk.Toplevel):
             pady=6,
             command=self._on_download
         )
-        btn_download.pack(side=tk.LEFT)
+        self.btn_download.pack(side=tk.LEFT)
 
-        btn_cancel = tk.Button(
+        self.btn_cancel = tk.Button(
             btn_row,
             text="✕ Cancel",
             font=("Segoe UI", 9, "bold"),
@@ -2705,7 +2728,22 @@ class QualitySelectionModal(tk.Toplevel):
             pady=6,
             command=self._on_close
         )
-        btn_cancel.pack(side=tk.RIGHT)
+        self.btn_cancel.pack(side=tk.RIGHT)
+
+        self.btn_open_app = tk.Button(
+            btn_row,
+            text="📋 Open in Main App",
+            font=("Segoe UI", 9),
+            bg=c_panel_light,
+            fg=c_text_bright,
+            relief="flat",
+            activebackground=c_border,
+            cursor="hand2",
+            padx=14,
+            pady=6,
+            command=self._on_open_in_main
+        )
+        self.btn_open_app.pack(side=tk.RIGHT, padx=(0, 8))
 
     def _on_tree_double_click(self, event):
         item = self.tree.identify_row(event.y)
@@ -2771,6 +2809,40 @@ class QualitySelectionModal(tk.Toplevel):
         except Exception:
             pass
         self.on_confirm(self.selected_option, final_dest)
+
+    def _on_open_in_main(self):
+        if not self.selected_option:
+            return
+        final_dest = self.entry_dest.get().strip()
+        if not final_dest:
+            if self.dest_path:
+                base, _ = os.path.splitext(self.dest_path)
+                final_dest = f"{base}.{self.selected_option.ext}"
+            else:
+                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                clean_title = sanitize_filename(self.video_title)
+                final_dest = os.path.join(downloads_dir, f"{clean_title}.{self.selected_option.ext}")
+        self._confirmed = True
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        if self.on_open_in_main:
+            try:
+                self.on_open_in_main(self.selected_option, final_dest)
+            except Exception:
+                pass
+        else:
+            if self.master and hasattr(self.master, "restore_window"):
+                try:
+                    self.master.restore_window()
+                except Exception:
+                    pass
+            self.on_confirm(self.selected_option, final_dest)
 
     def grab_set(self):
         """No-op: Eliminates Win32 input capture and message pump locking."""
@@ -2850,11 +2922,6 @@ class SafeModalDialog(tk.Toplevel):
 
         self.title(title)
         self.configure(bg=c_bg)
-        if parent:
-            try:
-                self.transient(parent)
-            except Exception:
-                pass
         # Do not use grab_set(): with borderless / overrideredirect windows,
         # grab_set traps Win32 input messages and locks the main window pump.
 
@@ -2865,21 +2932,42 @@ class SafeModalDialog(tk.Toplevel):
             dpi = 96.0
         dpi_scale = max(1.0, dpi / 96.0)
 
-        dlg_w = int(520 * dpi_scale)
-        dlg_h = int(260 * dpi_scale)
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        dlg_w = min(int(520 * dpi_scale), max(440, int(sw * 0.90)))
+        dlg_h = min(int(260 * dpi_scale), max(220, int(sh * 0.70)))
+
+        is_parent_visible = False
         try:
-            if parent and parent.winfo_exists():
+            if parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal":
+                is_parent_visible = True
+        except Exception:
+            is_parent_visible = False
+
+        if is_parent_visible:
+            try:
+                self.transient(parent)
+            except Exception:
+                pass
+            try:
                 px = parent.winfo_x()
                 py = parent.winfo_y()
-                pw = parent.winfo_width() or 800
-                ph = parent.winfo_height() or 600
-            else:
-                px, py, pw, ph = 100, 100, 800, 600
-        except Exception:
-            px, py, pw, ph = 100, 100, 800, 600
+                pw = parent.winfo_width() or dlg_w
+                ph = parent.winfo_height() or dlg_h
+                x = max(0, px + (pw - dlg_w) // 2)
+                y = max(0, py + (ph - dlg_h) // 2)
+            except Exception:
+                x = max(0, (sw - dlg_w) // 2)
+                y = max(0, (sh - dlg_h) // 2)
+        else:
+            try:
+                self.transient("")
+                self.deiconify()
+            except Exception:
+                pass
+            x = max(0, (sw - dlg_w) // 2)
+            y = max(0, (sh - dlg_h) // 2)
 
-        x = max(0, px + (pw - dlg_w) // 2)
-        y = max(0, py + (ph - dlg_h) // 2)
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
         self.minsize(min(440, dlg_w), min(220, dlg_h))
 
@@ -3056,14 +3144,126 @@ def get_file_category_and_icon(filename_or_url: str) -> Tuple[str, str]:
         return ("General", "📥")
 
 
+def open_downloaded_file(file_path: str):
+    """Opens downloaded file with default OS application."""
+    if not file_path or not os.path.exists(file_path):
+        return
+    try:
+        if IS_WINDOWS and hasattr(os, "startfile"):
+            os.startfile(file_path)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", file_path])
+        else:
+            subprocess.Popen(["xdg-open", file_path])
+    except Exception:
+        pass
+
+
+def open_containing_folder(file_path: str):
+    """Opens folder containing downloaded file and highlights it on Windows."""
+    if not file_path:
+        return
+    folder = os.path.dirname(file_path) if os.path.exists(file_path) else file_path
+    if not os.path.exists(folder):
+        folder = os.path.expanduser("~")
+    try:
+        if IS_WINDOWS:
+            norm_path = os.path.normpath(file_path)
+            if os.path.exists(norm_path):
+                subprocess.Popen(["explorer", f"/select,{norm_path}"])
+            elif hasattr(os, "startfile"):
+                os.startfile(folder)
+            else:
+                subprocess.Popen(["explorer", folder])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", file_path])
+        else:
+            subprocess.Popen(["xdg-open", folder])
+    except Exception:
+        pass
+
+
+def parse_speed_limit(val_str: Any) -> float:
+    """
+    Parses speed limit string into bytes per second. Returns 0.0 for unlimited.
+    Accepts: 'Unlimited', '500 KB/s', '1 MB/s', '2.5 MB/s', '1024', etc.
+    """
+    if not val_str:
+        return 0.0
+    s = str(val_str).strip().lower()
+    if s in ("unlimited", "0", "0.0", "none", "off", "max", ""):
+        return 0.0
+    import re
+    # 1. Gigabytes per second
+    m_gb = re.search(r"([\d\.]+)\s*(gb/s|g/s|gbps|gib/s|gib|gb)", s)
+    if m_gb:
+        try:
+            return float(m_gb.group(1)) * 1024.0 * 1024.0 * 1024.0
+        except ValueError:
+            return 0.0
+    # 2. Megabytes per second
+    m_mb = re.search(r"([\d\.]+)\s*(mb/s|m/s|mbps|mib/s|mib|mb)", s)
+    if m_mb:
+        try:
+            return float(m_mb.group(1)) * 1024.0 * 1024.0
+        except ValueError:
+            return 0.0
+    # 3. Kilobytes per second
+    m_kb = re.search(r"([\d\.]+)\s*(kb/s|k/s|kbps|kib/s|kib|kb)", s)
+    if m_kb:
+        try:
+            return float(m_kb.group(1)) * 1024.0
+        except ValueError:
+            return 0.0
+    # 4. Bytes per second
+    m_b = re.search(r"([\d\.]+)\s*(bytes/s|byte/s|bytes|b/s|bps|b)", s)
+    if m_b:
+        try:
+            return float(m_b.group(1))
+        except ValueError:
+            return 0.0
+    # 5. Short single-letter suffixes e.g. '10m', '500k', '1g'
+    m_suf = re.search(r"^([\d\.]+)\s*([gmkb])$", s)
+    if m_suf:
+        try:
+            val = float(m_suf.group(1))
+            unit = m_suf.group(2)
+            if unit == "g":
+                return val * 1024.0 * 1024.0 * 1024.0
+            if unit == "m":
+                return val * 1024.0 * 1024.0
+            if unit == "k":
+                return val * 1024.0
+            if unit == "b":
+                return val
+        except ValueError:
+            return 0.0
+    try:
+        val = float(s)
+        if val < 100000.0:
+            return val * 1024.0
+        return val
+    except ValueError:
+        return 0.0
+
+
 class DownloadConfirmationModal(tk.Toplevel):
     """
-    Modern dark-themed IDM-style Download Confirmation Dialog:
+    Modern dark-themed IDM-style Download Confirmation & Standalone Progress Dialog:
     - Displays intercepted URL, extracted filename, file category badge & icon, and target save path.
-    - Allows user to inspect and edit the destination path directly or via '📁 Browse...'.
-    - Clear action buttons: [▶ Start Download] and [✕ Cancel].
+    - Connection count selector (1, 2, 4, 8, 16, 32 threads).
+    - Speed limiter control (presets: Unlimited, 256 KB/s, 512 KB/s, 1 MB/s, 2 MB/s, 5 MB/s, 10 MB/s, 20 MB/s or custom).
+    - Three clear action buttons:
+        1. [▶ Start Download] ("بدء التحميل هنا"): Keeps main window hidden and transitions into standalone compact progress view.
+        2. [📋 Open in Main App] ("فتح في التطبيق"): Restores main window and manages download in main UI.
+        3. [✕ Cancel] ("إلغاء"): Closes dialog cleanly without starting a download.
+    - Standalone compact download progress view:
+        * Live Canvas progress bar with percentage overlay.
+        * Transferred / total size, current speed (MB/s or KB/s), and ETA (time remaining).
+        * Pause / Resume and Cancel buttons.
+        * Completion view with [📂 Open File], [📁 Open Folder], and [Close] buttons.
     - Grab-free: strictly avoids grab_set() / grab_set_global() to eliminate Win32 message pump deadlocks.
-    - High-DPI scaled, dark-themed, centered over parent, and focused.
+    - High-DPI scaled, dark-themed, centered on screen (or parent), and focused.
     """
     def __init__(
         self,
@@ -3071,15 +3271,29 @@ class DownloadConfirmationModal(tk.Toplevel):
         url: str,
         default_dest_path: str,
         theme: Optional[Dict[str, str]] = None,
-        on_confirm: Optional[Callable[[str], None]] = None,
-        on_cancel: Optional[Callable[[], None]] = None
+        on_confirm: Optional[Callable] = None,
+        on_cancel: Optional[Callable[[], None]] = None,
+        on_start_in_window: Optional[Callable] = None,
+        on_open_in_main: Optional[Callable] = None,
+        parent_app: Optional[Any] = None,
+        default_connections: int = 8,
+        default_speed_limit: float = 0.0,
+        show_progress_immediately: bool = False
     ):
         super().__init__(parent)
         self.url = str(url or "").strip()
         self.dest_path = str(default_dest_path or "").strip()
         self.on_confirm = on_confirm
         self.on_cancel = on_cancel
+        self.on_start_in_window = on_start_in_window
+        self.on_open_in_main = on_open_in_main
+        self.parent_app = parent_app
+        self.default_connections = default_connections
+        self.default_speed_limit = default_speed_limit
         self._confirmed = False
+        self.is_in_progress_view = False
+        self.is_completed = False
+        self.engine: Optional[Any] = None
 
         self.file_name = os.path.basename(self.dest_path) if self.dest_path else derive_download_filename(self.url)
         self.category, self.icon = get_file_category_and_icon(self.file_name or self.url)
@@ -3095,16 +3309,13 @@ class DownloadConfirmationModal(tk.Toplevel):
         self.c_accent_dark = th.get("c_accent_dark", "#0284c7")
         self.c_danger = th.get("c_danger", "#ef4444")
         self.c_success = th.get("c_success", "#10b981")
+        self.c_warning = th.get("c_warning", "#f59e0b")
         self.c_input_bg = th.get("c_input_bg", "#0b1220")
 
         self.title("Download File Info — Turbo Downloader")
         self.configure(bg=self.c_bg)
+        self._last_pct = 0.0
 
-        if parent:
-            try:
-                self.transient(parent)
-            except Exception:
-                pass
         # Do not use grab_set(): Overrideredirect parent causes Win32 message pump traps and UI freezes
 
         # Determine parent DPI scale
@@ -3112,28 +3323,47 @@ class DownloadConfirmationModal(tk.Toplevel):
             dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
         except Exception:
             dpi = 96.0
-        dpi_scale = max(1.0, dpi / 96.0)
+        self.dpi_scale = max(1.0, dpi / 96.0)
 
-        # Center on parent window with DPI scaling
+        # Center on parent window with DPI scaling (or center on screen if parent is hidden/minimized)
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        dlg_w = min(int(620 * dpi_scale), max(500, int(sw * 0.88)))
-        dlg_h = min(int(360 * dpi_scale), max(300, int(sh * 0.75)))
+        dlg_w = min(int(630 * self.dpi_scale), max(500, int(sw * 0.90)))
+        dlg_h = min(int(410 * self.dpi_scale), max(340, int(sh * 0.80)))
+
+        is_parent_visible = False
         try:
-            if parent and parent.winfo_exists():
+            if parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal":
+                is_parent_visible = True
+        except Exception:
+            is_parent_visible = False
+
+        if is_parent_visible:
+            try:
+                self.transient(parent)
+            except Exception:
+                pass
+            try:
                 px = parent.winfo_x()
                 py = parent.winfo_y()
                 pw = parent.winfo_width() or dlg_w
                 ph = parent.winfo_height() or dlg_h
-            else:
-                px, py, pw, ph = 100, 100, dlg_w, dlg_h
-        except Exception:
-            px, py, pw, ph = 100, 100, dlg_w, dlg_h
+                x = max(0, px + (pw - dlg_w) // 2)
+                y = max(0, py + (ph - dlg_h) // 2)
+            except Exception:
+                x = max(0, (sw - dlg_w) // 2)
+                y = max(0, (sh - dlg_h) // 2)
+        else:
+            try:
+                self.transient("")
+                self.deiconify()
+            except Exception:
+                pass
+            x = max(0, (sw - dlg_w) // 2)
+            y = max(0, (sh - dlg_h) // 2)
 
-        x = max(0, px + (pw - dlg_w) // 2)
-        y = max(0, py + (ph - dlg_h) // 2)
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
-        self.minsize(min(480, dlg_w), min(280, dlg_h))
+        self.minsize(min(480, dlg_w), min(270, dlg_h))
 
         # Apply application icon to modal window
         ico_path = get_resource_path("app_icon.ico")
@@ -3166,17 +3396,26 @@ class DownloadConfirmationModal(tk.Toplevel):
         self.bind("<Escape>", lambda e: self._on_close())
         self.bind("<Return>", lambda e: self._on_start())
 
+        if show_progress_immediately:
+            self.show_progress_view()
+
     def _build_ui(self):
         # Outer border
         outer = tk.Frame(self, bg=self.c_border, padx=1, pady=1)
         outer.pack(fill=tk.BOTH, expand=True)
 
-        body = tk.Frame(outer, bg=self.c_bg, padx=18, pady=16)
-        body.pack(fill=tk.BOTH, expand=True)
+        self.body = tk.Frame(outer, bg=self.c_bg, padx=18, pady=16)
+        self.body.pack(fill=tk.BOTH, expand=True)
+
+        # -------------------------------------------------------------
+        # View 1: Download Confirmation View (Initial View)
+        # -------------------------------------------------------------
+        self.frame_confirmation = tk.Frame(self.body, bg=self.c_bg)
+        self.frame_confirmation.pack(fill=tk.BOTH, expand=True)
 
         # Header Title row
-        hdr_frame = tk.Frame(body, bg=self.c_bg)
-        hdr_frame.pack(fill=tk.X, pady=(0, 12))
+        hdr_frame = tk.Frame(self.frame_confirmation, bg=self.c_bg)
+        hdr_frame.pack(fill=tk.X, pady=(0, 10))
 
         lbl_icon = tk.Label(hdr_frame, text="📥", font=("Segoe UI", 16), bg=self.c_bg, fg=self.c_accent)
         lbl_icon.pack(side=tk.LEFT, padx=(0, 8))
@@ -3202,12 +3441,12 @@ class DownloadConfirmationModal(tk.Toplevel):
         lbl_sub.pack(side=tk.RIGHT)
 
         # Details Card
-        card = tk.Frame(body, bg=self.c_panel, padx=14, pady=12, highlightbackground=self.c_border, highlightthickness=1)
-        card.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
+        card = tk.Frame(self.frame_confirmation, bg=self.c_panel, padx=14, pady=10, highlightbackground=self.c_border, highlightthickness=1)
+        card.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
 
         # 1. URL Row
         url_frame = tk.Frame(card, bg=self.c_panel)
-        url_frame.pack(fill=tk.X, pady=(0, 8))
+        url_frame.pack(fill=tk.X, pady=(0, 6))
 
         lbl_url = tk.Label(url_frame, text="URL:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=9, anchor="w")
         lbl_url.pack(side=tk.LEFT)
@@ -3227,9 +3466,9 @@ class DownloadConfirmationModal(tk.Toplevel):
 
         # 2. File details row: Category and Filename
         info_row = tk.Frame(card, bg=self.c_panel)
-        info_row.pack(fill=tk.X, pady=(0, 8))
+        info_row.pack(fill=tk.X, pady=(0, 6))
 
-        cat_box = tk.Frame(info_row, bg=self.c_panel_light, padx=8, pady=4, highlightbackground=self.c_border, highlightthickness=1)
+        cat_box = tk.Frame(info_row, bg=self.c_panel_light, padx=8, pady=3, highlightbackground=self.c_border, highlightthickness=1)
         cat_box.pack(side=tk.LEFT, padx=(0, 12))
 
         self.lbl_category_val = tk.Label(
@@ -3259,7 +3498,7 @@ class DownloadConfirmationModal(tk.Toplevel):
 
         # 3. Save Destination Row
         dest_frame = tk.Frame(card, bg=self.c_panel)
-        dest_frame.pack(fill=tk.X, pady=(4, 0))
+        dest_frame.pack(fill=tk.X, pady=(0, 6))
 
         lbl_dest = tk.Label(dest_frame, text="Save To:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=9, anchor="w")
         lbl_dest.pack(side=tk.LEFT)
@@ -3293,8 +3532,65 @@ class DownloadConfirmationModal(tk.Toplevel):
         )
         self.btn_browse.pack(side=tk.RIGHT)
 
-        # Bottom Buttons Row
-        btn_row = tk.Frame(body, bg=self.c_bg)
+        # 4. Settings Row: Connections & Speed Limiter
+        cfg_row = tk.Frame(card, bg=self.c_panel)
+        cfg_row.pack(fill=tk.X, pady=(4, 0))
+
+        # Connections subframe
+        conn_frame = tk.Frame(cfg_row, bg=self.c_panel)
+        conn_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        lbl_conn = tk.Label(
+            conn_frame,
+            text="Connections / Threads:",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel,
+            fg=self.c_text_muted
+        )
+        lbl_conn.pack(anchor="w", pady=(0, 2))
+
+        self.combo_threads = ttk.Combobox(
+            conn_frame,
+            values=["1", "2", "4", "8", "16", "32"],
+            state="readonly",
+            width=10,
+            font=("Segoe UI", 9)
+        )
+        def_conn_str = str(self.default_connections) if str(self.default_connections) in ["1", "2", "4", "8", "16", "32"] else "8"
+        self.combo_threads.set(def_conn_str)
+        self.combo_threads.pack(anchor="w")
+
+        # Speed limiter subframe
+        spd_frame = tk.Frame(cfg_row, bg=self.c_panel)
+        spd_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+
+        lbl_spd = tk.Label(
+            spd_frame,
+            text="Speed Limiter:",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel,
+            fg=self.c_text_muted
+        )
+        lbl_spd.pack(anchor="w", pady=(0, 2))
+
+        self.combo_speed = ttk.Combobox(
+            spd_frame,
+            values=["Unlimited", "256 KB/s", "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s"],
+            width=16,
+            font=("Segoe UI", 9)
+        )
+        if self.default_speed_limit > 0:
+            if self.default_speed_limit >= 1024 * 1024:
+                spd_str = f"{self.default_speed_limit / (1024*1024):.0f} MB/s"
+            else:
+                spd_str = f"{self.default_speed_limit / 1024:.0f} KB/s"
+            self.combo_speed.set(spd_str)
+        else:
+            self.combo_speed.set("Unlimited")
+        self.combo_speed.pack(anchor="w")
+
+        # Confirmation Bottom Buttons Row
+        btn_row = tk.Frame(self.frame_confirmation, bg=self.c_bg)
         btn_row.pack(fill=tk.X)
 
         lbl_hint = tk.Label(
@@ -3315,11 +3611,26 @@ class DownloadConfirmationModal(tk.Toplevel):
             relief="flat",
             activebackground=self.c_border,
             cursor="hand2",
-            padx=16,
+            padx=14,
             pady=6,
             command=self._on_close
         )
         self.btn_cancel.pack(side=tk.RIGHT, padx=(8, 0))
+
+        self.btn_open_app = tk.Button(
+            btn_row,
+            text="📋 Open in Main App",
+            font=("Segoe UI", 9),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_border,
+            cursor="hand2",
+            padx=14,
+            pady=6,
+            command=self._on_open_in_main
+        )
+        self.btn_open_app.pack(side=tk.RIGHT, padx=(8, 0))
 
         self.btn_start = tk.Button(
             btn_row,
@@ -3330,11 +3641,396 @@ class DownloadConfirmationModal(tk.Toplevel):
             relief="flat",
             activebackground="#059669",
             cursor="hand2",
-            padx=18,
+            padx=16,
             pady=6,
-            command=self._on_start
+            command=self._on_start_in_window
         )
         self.btn_start.pack(side=tk.RIGHT)
+
+        # -------------------------------------------------------------
+        # View 2: Compact Download Progress View (Transitions on start)
+        # -------------------------------------------------------------
+        self.frame_progress = tk.Frame(self.body, bg=self.c_bg)
+        # Initially not packed
+
+        # Header Title row
+        prog_hdr = tk.Frame(self.frame_progress, bg=self.c_bg)
+        prog_hdr.pack(fill=tk.X, pady=(0, 8))
+
+        self.lbl_prog_icon = tk.Label(prog_hdr, text=self.icon, font=("Segoe UI", 16), bg=self.c_bg, fg=self.c_accent)
+        self.lbl_prog_icon.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.lbl_prog_filename = tk.Label(
+            prog_hdr,
+            text=self.file_name,
+            font=("Segoe UI", 10, "bold"),
+            bg=self.c_bg,
+            fg=self.c_text_bright,
+            anchor="w"
+        )
+        self.lbl_prog_filename.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.lbl_prog_cat = tk.Label(
+            prog_hdr,
+            text=f"{self.icon}  {self.category}",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            padx=6,
+            pady=2
+        )
+        self.lbl_prog_cat.pack(side=tk.RIGHT)
+
+        # Progress Card
+        prog_card = tk.Frame(self.frame_progress, bg=self.c_panel, padx=14, pady=10, highlightbackground=self.c_border, highlightthickness=1)
+        prog_card.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # Status row
+        self.lbl_status = tk.Label(
+            prog_card,
+            text="Status: Connecting...",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel,
+            fg=self.c_accent,
+            anchor="w"
+        )
+        self.lbl_status.pack(fill=tk.X, pady=(0, 4))
+
+        # Metrics row 1
+        m_row1 = tk.Frame(prog_card, bg=self.c_panel)
+        m_row1.pack(fill=tk.X, pady=(0, 2))
+
+        self.lbl_prog_size = tk.Label(
+            m_row1,
+            text="Transferred: 0 B / 0 B (0.0%)",
+            font=("Segoe UI", 9),
+            bg=self.c_panel,
+            fg=self.c_text_bright,
+            anchor="w"
+        )
+        self.lbl_prog_size.pack(side=tk.LEFT)
+
+        self.lbl_prog_speed = tk.Label(
+            m_row1,
+            text="Speed: 0.0 KB/s",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel,
+            fg=self.c_success,
+            anchor="e"
+        )
+        self.lbl_prog_speed.pack(side=tk.RIGHT)
+
+        # Metrics row 2
+        m_row2 = tk.Frame(prog_card, bg=self.c_panel)
+        m_row2.pack(fill=tk.X, pady=(0, 6))
+
+        self.lbl_prog_eta = tk.Label(
+            m_row2,
+            text="Time Left: --:--:--",
+            font=("Segoe UI", 8),
+            bg=self.c_panel,
+            fg=self.c_text_muted,
+            anchor="w"
+        )
+        self.lbl_prog_eta.pack(side=tk.LEFT)
+
+        self.lbl_prog_threads = tk.Label(
+            m_row2,
+            text=f"Threads: {self.get_max_connections()} Active",
+            font=("Segoe UI", 8),
+            bg=self.c_panel,
+            fg=self.c_text_muted,
+            anchor="e"
+        )
+        self.lbl_prog_threads.pack(side=tk.RIGHT)
+
+        # Live Canvas Progress Bar
+        self.canvas_prog = tk.Canvas(
+            prog_card,
+            bg=self.c_input_bg,
+            highlightthickness=0,
+            height=int(24 * self.dpi_scale)
+        )
+        self.canvas_prog.pack(fill=tk.X, pady=(2, 0))
+        self.canvas_prog.bind("<Configure>", lambda e: self._draw_modal_progress(getattr(self, "_last_pct", 0.0)))
+
+        # Progress Buttons Row
+        self.prog_btn_row = tk.Frame(self.frame_progress, bg=self.c_bg)
+        self.prog_btn_row.pack(fill=tk.X)
+
+        self.btn_open_app_prog = tk.Button(
+            self.prog_btn_row,
+            text="📋 Open in Main App",
+            font=("Segoe UI", 9),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_border,
+            cursor="hand2",
+            padx=12,
+            pady=5,
+            command=self._on_open_in_main
+        )
+        self.btn_open_app_prog.pack(side=tk.LEFT)
+
+        # Active download buttons
+        self.btn_cancel_prog = tk.Button(
+            self.prog_btn_row,
+            text="✕ Cancel",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_text_muted,
+            relief="flat",
+            activebackground=self.c_border,
+            cursor="hand2",
+            padx=14,
+            pady=5,
+            command=self._on_close
+        )
+        self.btn_cancel_prog.pack(side=tk.RIGHT, padx=(6, 0))
+
+        self.btn_pause_resume = tk.Button(
+            self.prog_btn_row,
+            text="⏸ Pause",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            cursor="hand2",
+            padx=14,
+            pady=5,
+            command=self._on_pause_resume
+        )
+        self.btn_pause_resume.pack(side=tk.RIGHT)
+
+        # Completion buttons (packed when download finishes)
+        self.btn_close_prog = tk.Button(
+            self.prog_btn_row,
+            text="Close",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_border,
+            cursor="hand2",
+            padx=14,
+            pady=5,
+            command=self.destroy
+        )
+
+        self.btn_open_folder = tk.Button(
+            self.prog_btn_row,
+            text="📁 Open Folder",
+            font=("Segoe UI", 9),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            cursor="hand2",
+            padx=12,
+            pady=5,
+            command=self._on_open_folder
+        )
+
+        self.btn_open_file = tk.Button(
+            self.prog_btn_row,
+            text="📂 Open File",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_success,
+            fg="white",
+            relief="flat",
+            activebackground="#059669",
+            cursor="hand2",
+            padx=14,
+            pady=5,
+            command=self._on_open_file
+        )
+
+    def get_max_connections(self) -> int:
+        if hasattr(self, "combo_threads"):
+            try:
+                val = int(str(self.combo_threads.get()).split()[0])
+                return max(1, min(val, 32))
+            except Exception:
+                pass
+        return self.default_connections or 8
+
+    def get_speed_limit_bytes(self) -> float:
+        if hasattr(self, "combo_speed"):
+            try:
+                return parse_speed_limit(self.combo_speed.get())
+            except Exception:
+                pass
+        return float(self.default_speed_limit or 0.0)
+
+    def attach_engine(self, engine: Any):
+        """Attaches an active download engine to this modal for controls and metrics."""
+        self.engine = engine
+
+    def show_progress_view(self):
+        """Transitions modal interface into standalone compact download progress view."""
+        self.is_in_progress_view = True
+        self.title(f"Downloading: {self.file_name} — Turbo Downloader")
+        self.frame_confirmation.pack_forget()
+        self.frame_progress.pack(fill=tk.BOTH, expand=True)
+
+        self.lbl_prog_filename.configure(text=self.file_name)
+        cat, icon = get_file_category_and_icon(self.file_name)
+        self.lbl_prog_cat.configure(text=f"{icon}  {cat}")
+        self.lbl_prog_threads.configure(text=f"Threads: {self.get_max_connections()} Max")
+
+        # Compact size
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        prog_w = min(int(580 * self.dpi_scale), max(500, int(sw * 0.90)))
+        prog_h = min(int(320 * self.dpi_scale), max(270, int(sh * 0.70)))
+        try:
+            cur_x = self.winfo_x()
+            cur_y = self.winfo_y()
+            if cur_x <= 1 and cur_y <= 1:
+                cur_x = max(0, (sw - prog_w) // 2)
+                cur_y = max(0, (sh - prog_h) // 2)
+        except Exception:
+            cur_x = max(0, (sw - prog_w) // 2)
+            cur_y = max(0, (sh - prog_h) // 2)
+        self.geometry(f"{prog_w}x{prog_h}+{cur_x}+{cur_y}")
+        self._draw_modal_progress(0.0)
+
+    def _draw_modal_progress(self, pct: float):
+        try:
+            self._last_pct = float(pct)
+            if not hasattr(self, "canvas_prog") or not self.canvas_prog.winfo_exists():
+                return
+            self.canvas_prog.delete("all")
+            w = self.canvas_prog.winfo_width()
+            if w <= 1:
+                w = int(500 * self.dpi_scale)
+            h = self.canvas_prog.winfo_height() or int(24 * self.dpi_scale)
+
+            # Background track
+            self.canvas_prog.create_rectangle(0, 0, w, h, fill=self.c_input_bg, outline=self.c_border)
+
+            # Progress fill
+            fill_w = max(0.0, min(float(w), (pct / 100.0) * float(w)))
+            if fill_w > 0:
+                fill_color = self.c_success if pct >= 100.0 else self.c_accent_dark
+                line_color = "#34d399" if pct >= 100.0 else self.c_accent
+                self.canvas_prog.create_rectangle(0, 0, fill_w, h, fill=fill_color, outline="")
+                self.canvas_prog.create_line(0, 1, fill_w, 1, fill=line_color)
+
+            # Percentage text overlay
+            text_color = "white" if fill_w > (w * 0.45) else self.c_text_bright
+            self.canvas_prog.create_text(w // 2, h // 2, text=f"{pct:.1f}%", font=("Segoe UI", 9, "bold"), fill=text_color)
+        except Exception:
+            pass
+
+    def update_progress(self, downloaded: int, total: int, speed: float, eta: str, active_chunks: int = 1):
+        """Thread-safe update of live download progress bar, speed, size, and ETA."""
+        if threading.current_thread() != threading.main_thread():
+            try:
+                if self.winfo_exists():
+                    self.after(0, lambda: self.update_progress(downloaded, total, speed, eta, active_chunks))
+            except Exception:
+                pass
+            return
+
+        pct = (downloaded / total * 100.0) if total > 0 else 0.0
+        self._draw_modal_progress(pct)
+
+        # Format speed
+        if speed >= 1024 * 1024:
+            speed_str = f"{speed / (1024*1024):.2f} MB/s"
+        elif speed >= 1024:
+            speed_str = f"{speed / 1024:.1f} KB/s"
+        else:
+            speed_str = f"{int(speed)} B/s"
+
+        # Format sizes
+        def _fmt(b):
+            if b >= 1024 * 1024 * 1024:
+                return f"{b / (1024**3):.2f} GB"
+            if b >= 1024 * 1024:
+                return f"{b / (1024**2):.1f} MB"
+            if b >= 1024:
+                return f"{b / 1024:.1f} KB"
+            return f"{b} B"
+
+        if total > 0:
+            size_str = f"Transferred: {_fmt(downloaded)} / {_fmt(total)} ({pct:.1f}%)"
+        else:
+            size_str = f"Transferred: {_fmt(downloaded)} (Streaming...)"
+
+        try:
+            self.lbl_prog_size.configure(text=size_str)
+            self.lbl_prog_speed.configure(text=f"Speed: {speed_str}")
+            self.lbl_prog_eta.configure(text=f"Time Left: {eta}")
+            self.lbl_prog_threads.configure(text=f"Threads: {active_chunks} Active")
+            if not (self.engine and getattr(self.engine, "is_paused", False)):
+                self.lbl_status.configure(text="Status: Downloading...", fg=self.c_accent)
+        except Exception:
+            pass
+
+    def on_download_complete(self, dest_path: str, total_bytes: int, elapsed: float):
+        """Thread-safe transition to completion view with Open File, Open Folder, and Close buttons."""
+        if threading.current_thread() != threading.main_thread():
+            try:
+                if self.winfo_exists():
+                    self.after(0, lambda: self.on_download_complete(dest_path, total_bytes, elapsed))
+            except Exception:
+                pass
+            return
+
+        self.dest_path = dest_path
+        self.is_completed = True
+        self._draw_modal_progress(100.0)
+        try:
+            self.lbl_status.configure(text="✅ Download Complete!", fg=self.c_success)
+
+            def _fmt(b):
+                if b >= 1024 * 1024 * 1024:
+                    return f"{b / (1024**3):.2f} GB"
+                if b >= 1024 * 1024:
+                    return f"{b / (1024**2):.1f} MB"
+                if b >= 1024:
+                    return f"{b / 1024:.1f} KB"
+                return f"{b} B"
+
+            avg_speed = (total_bytes / elapsed) if elapsed > 0 else 0
+            if avg_speed >= 1024 * 1024:
+                avg_str = f"{avg_speed / (1024*1024):.2f} MB/s"
+            else:
+                avg_str = f"{avg_speed / 1024:.1f} KB/s"
+
+            self.lbl_prog_size.configure(text=f"Total: {_fmt(total_bytes)} in {elapsed:.1f}s")
+            self.lbl_prog_speed.configure(text=f"Avg Speed: {avg_str}")
+            self.lbl_prog_eta.configure(text="Time Left: 00:00:00")
+
+            # Swap buttons to completion action buttons
+            self.btn_pause_resume.pack_forget()
+            self.btn_cancel_prog.pack_forget()
+            self.btn_open_app_prog.pack_forget()
+
+            self.btn_close_prog.pack(side=tk.RIGHT, padx=(6, 0))
+            self.btn_open_folder.pack(side=tk.RIGHT, padx=(6, 0))
+            self.btn_open_file.pack(side=tk.RIGHT)
+        except Exception:
+            pass
+
+    def on_download_error(self, err_msg: str):
+        """Thread-safe display of download failure message."""
+        if threading.current_thread() != threading.main_thread():
+            try:
+                if self.winfo_exists():
+                    self.after(0, lambda: self.on_download_error(err_msg))
+            except Exception:
+                pass
+            return
+        try:
+            self.lbl_status.configure(text=f"❌ Error: {err_msg}", fg=self.c_danger)
+            self.btn_pause_resume.configure(state="disabled")
+        except Exception:
+            pass
 
     def _on_dest_key_release(self, event=None):
         cur = self.entry_dest.get().strip()
@@ -3368,6 +4064,193 @@ class DownloadConfirmationModal(tk.Toplevel):
             if hasattr(self, "lbl_category_val"):
                 self.lbl_category_val.configure(text=f"{icon}  {cat}")
 
+    def _call_on_confirm(self, dest: str, max_conn: int = 8, speed_limit: float = 0.0):
+        if not self.on_confirm:
+            return
+        try:
+            import inspect
+            sig = inspect.signature(self.on_confirm)
+            if len(sig.parameters) == 1:
+                self.on_confirm(dest)
+            else:
+                self.on_confirm(dest, max_conn, speed_limit)
+        except Exception:
+            try:
+                self.on_confirm(dest, max_conn, speed_limit)
+            except TypeError:
+                try:
+                    self.on_confirm(dest)
+                except Exception:
+                    pass
+
+    def _on_start_in_window(self):
+        """Action 1: Starts download inside this window, keeping main window hidden."""
+        final_dest = self.entry_dest.get().strip() or self.dest_path
+        self.dest_path = final_dest
+        self.file_name = os.path.basename(final_dest)
+        conn_count = self.get_max_connections()
+        speed_limit = self.get_speed_limit_bytes()
+        self._confirmed = True
+        self.show_progress_view()
+
+        if self.on_start_in_window:
+            try:
+                self.on_start_in_window(final_dest, conn_count, speed_limit, self)
+            except Exception:
+                pass
+        elif self.on_confirm:
+            self._call_on_confirm(final_dest, conn_count, speed_limit)
+        else:
+            if not self.engine:
+                self.engine = TurboDownloadEngine(
+                    url=self.url,
+                    destination_path=final_dest,
+                    max_connections=conn_count,
+                    rate_limit_bytes_per_sec=speed_limit,
+                    on_progress=self.update_progress,
+                    on_complete=self.on_download_complete,
+                    on_error=self.on_download_error
+                )
+                self.engine.start()
+
+    def _on_open_in_main(self):
+        """Action 2: Restores main application window, populates task, and closes modal."""
+        final_dest = self.entry_dest.get().strip() or self.dest_path
+        conn_count = self.get_max_connections()
+        speed_limit = self.get_speed_limit_bytes()
+        self._confirmed = True
+
+        is_running_now = self.is_in_progress_view or bool(self.engine and getattr(self.engine, "is_running", False))
+
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
+        if is_running_now:
+            # Transfer already active in background engine. Do NOT restart or wipe!
+            if self.parent_app:
+                try:
+                    self.parent_app.restore_window()
+                    if hasattr(self.parent_app, "root") and self.parent_app.root:
+                        try:
+                            self.parent_app.root.lift()
+                            self.parent_app.root.focus_force()
+                        except Exception:
+                            pass
+                    # Sync buttons to active engine state
+                    if hasattr(self.parent_app, "btn_pause") and self.engine:
+                        if getattr(self.engine, "is_paused", False):
+                            self.parent_app.btn_pause.configure(text="▶ Resume", bg=getattr(self.parent_app, "c_warning", "#f59e0b"), state="normal")
+                        else:
+                            self.parent_app.btn_pause.configure(text="⏸ Pause", bg=getattr(self.parent_app, "c_panel_light", "#334155"), state="normal")
+                    if hasattr(self.parent_app, "btn_cancel"):
+                        self.parent_app.btn_cancel.configure(state="normal")
+                    if hasattr(self.parent_app, "btn_start"):
+                        self.parent_app.btn_start.configure(state="disabled")
+                    self.parent_app.log(f"[GUI] Active download transferred to main window: {self.file_name}")
+                except Exception:
+                    pass
+            elif self.master and hasattr(self.master, "restore_window"):
+                try:
+                    self.master.restore_window()
+                except Exception:
+                    pass
+            return
+
+        if self.on_open_in_main:
+            try:
+                self.on_open_in_main(final_dest, conn_count, speed_limit)
+            except Exception:
+                pass
+        elif self.parent_app:
+            try:
+                self.parent_app.restore_window()
+                self.parent_app.entry_url.delete(0, tk.END)
+                self.parent_app.entry_url.insert(0, self.url)
+                self.parent_app.entry_dest.delete(0, tk.END)
+                self.parent_app.entry_dest.insert(0, final_dest)
+                try:
+                    self.parent_app.conn_var.set(str(conn_count))
+                except Exception:
+                    pass
+                if speed_limit > 0:
+                    try:
+                        self.parent_app.entry_custom_speed.delete(0, tk.END)
+                        self.parent_app.entry_custom_speed.insert(0, str(int(speed_limit / 1024.0)))
+                    except Exception:
+                        pass
+                self.parent_app._on_start_download()
+            except Exception:
+                pass
+        elif self.master:
+            try:
+                if hasattr(self.master, "restore_window"):
+                    self.master.restore_window()
+                elif hasattr(self.master, "deiconify"):
+                    self.master.deiconify()
+            except Exception:
+                pass
+
+    def _on_start(self):
+        """Default start handler for Enter key and backward compatibility."""
+        if self.on_start_in_window:
+            self._on_start_in_window()
+        else:
+            final_dest = self.entry_dest.get().strip() or self.dest_path
+            self.dest_path = final_dest
+            conn_count = self.get_max_connections()
+            speed_limit = self.get_speed_limit_bytes()
+            self._confirmed = True
+            try:
+                self.grab_release()
+            except Exception:
+                pass
+            if self.on_confirm:
+                self._call_on_confirm(final_dest, conn_count, speed_limit)
+            try:
+                self.destroy()
+            except Exception:
+                pass
+
+    def _on_pause_resume(self):
+        if not self.engine:
+            return
+        if getattr(self.engine, "is_paused", False):
+            try:
+                self.engine.resume()
+            except Exception:
+                pass
+            self.btn_pause_resume.configure(text="⏸ Pause", bg=self.c_panel_light)
+            self.lbl_status.configure(text="Status: Downloading...", fg=self.c_accent)
+            if self.parent_app and hasattr(self.parent_app, "btn_pause"):
+                try:
+                    self.parent_app.btn_pause.configure(text="⏸ Pause", bg=getattr(self.parent_app, "c_panel_light", "#334155"))
+                except Exception:
+                    pass
+        else:
+            try:
+                self.engine.pause()
+            except Exception:
+                pass
+            self.btn_pause_resume.configure(text="▶ Resume", bg=self.c_success)
+            self.lbl_status.configure(text="Status: Paused", fg=self.c_warning)
+            if self.parent_app and hasattr(self.parent_app, "btn_pause"):
+                try:
+                    self.parent_app.btn_pause.configure(text="▶ Resume", bg=getattr(self.parent_app, "c_warning", "#f59e0b"))
+                except Exception:
+                    pass
+
+    def _on_open_file(self):
+        open_downloaded_file(self.dest_path)
+
+    def _on_open_folder(self):
+        open_containing_folder(self.dest_path)
+
     def grab_set(self):
         """No-op: Eliminates Win32 input capture and message pump locking."""
         pass
@@ -3381,29 +4264,35 @@ class DownloadConfirmationModal(tk.Toplevel):
             self.grab_release()
         except Exception:
             pass
+        if self.parent_app and getattr(self.parent_app, "_confirm_modal", None) is self:
+            self.parent_app._confirm_modal = None
         super().destroy()
 
-    def _on_start(self):
-        final_dest = self.entry_dest.get().strip()
-        if not final_dest:
-            final_dest = self.dest_path
-        self._confirmed = True
-        try:
-            self.grab_release()
-        except Exception:
-            pass
-        try:
-            self.destroy()
-        except Exception:
-            pass
-        if self.on_confirm:
+    def _on_close(self):
+        """Action 3: Clean cancellation without starting download."""
+        self._confirmed = False
+        was_running = False
+        if hasattr(self, "engine") and self.engine:
+            was_running = getattr(self.engine, "is_running", False)
             try:
-                self.on_confirm(final_dest)
+                self.engine.cancel()
             except Exception:
                 pass
 
-    def _on_close(self):
-        self._confirmed = False
+        if self.parent_app:
+            try:
+                if getattr(self.parent_app, "_confirm_modal", None) is self:
+                    self.parent_app._confirm_modal = None
+                if was_running:
+                    self.parent_app.engine = None
+                    self.parent_app.btn_start.configure(state="normal")
+                    self.parent_app.btn_pause.configure(state="disabled", text="⏸ Pause", bg=getattr(self.parent_app, "c_panel_light", "#334155"))
+                    self.parent_app.btn_cancel.configure(state="disabled")
+                    self.parent_app.card_size.configure(text="Cancelled")
+                    self.parent_app.log(f"[CLIPBOARD] Standalone download cancelled: {self.file_name}")
+            except Exception:
+                pass
+
         try:
             self.grab_release()
         except Exception:
@@ -5312,6 +6201,31 @@ class ModernFramelessGUI:
     # Engine Control Callbacks
     # ----------------------------------------------------------------------------------
 
+    def is_window_hidden_or_minimized(self) -> bool:
+        """Determines if the main application window is minimized, iconic, withdrawn, or hidden."""
+        if getattr(self, "_start_hidden", False):
+            return True
+        if not hasattr(self, "root") or not self.root:
+            return False
+        try:
+            if not self.root.winfo_exists():
+                return False
+            state = self.root.state()
+            if state in ("withdrawn", "iconic"):
+                return True
+            if not self.root.winfo_viewable():
+                return True
+            if IS_WINDOWS:
+                try:
+                    hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+                    if ctypes.windll.user32.IsIconic(hwnd):
+                        return True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return False
+
     def _on_start_download(self):
         if self.engine and self.engine.is_running:
             return
@@ -5344,41 +6258,113 @@ class ModernFramelessGUI:
 
         bytes_limit = kb_limit * 1024.0 if kb_limit > 0 else 0.0
 
-        # UI state transitions
-        self.btn_start.configure(state="disabled")
-        self.btn_pause.configure(state="normal", text="⏸ Pause", bg=self.c_panel_light)
-        self.btn_cancel.configure(state="normal")
-        if hasattr(self, "btn_refresh_link"):
-            self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
-        self.txt_log.delete("1.0", tk.END)
+        self._start_download_with_engine(url, dest, max_conn, bytes_limit, modal=None)
 
-        # Clear existing chunk rows from previous downloads
-        for item in self.tree_chunks.get_children():
-            self.tree_chunks.delete(item)
-        self._draw_main_progress(0.0)
-        self._draw_chunk_segments([])
-
-        # Check if URL is a recognized YouTube video or shorts URL
-        if is_youtube_url(url):
-            self._start_youtube_download(url, dest, max_conn, bytes_limit)
+    def _start_download_with_engine(
+        self,
+        url: str,
+        dest: str,
+        max_conn: int = 8,
+        bytes_limit: float = 0.0,
+        modal: Optional[Any] = None
+    ):
+        """Starts download engine, optionally bridging metrics and controls to a standalone modal."""
+        if self.engine and self.engine.is_running:
             return
 
-        # Initialize download engine
+        if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
+            try:
+                self._yt_cancel_event.set()
+            except Exception:
+                pass
+
+        # Populate GUI entry fields
+        try:
+            self.entry_url.delete(0, tk.END)
+            self.entry_url.insert(0, url)
+            self.entry_dest.delete(0, tk.END)
+            self.entry_dest.insert(0, dest)
+            self.conn_var.set(str(max_conn))
+            if bytes_limit > 0:
+                self.entry_custom_speed.delete(0, tk.END)
+                self.entry_custom_speed.insert(0, str(int(bytes_limit / 1024.0)))
+        except Exception:
+            pass
+
+        # UI state transitions in main window
+        try:
+            self.btn_start.configure(state="disabled")
+            self.btn_pause.configure(state="normal", text="⏸ Pause", bg=self.c_panel_light)
+            self.btn_cancel.configure(state="normal")
+            if hasattr(self, "btn_refresh_link"):
+                self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
+            self.txt_log.delete("1.0", tk.END)
+            for item in self.tree_chunks.get_children():
+                self.tree_chunks.delete(item)
+            self._draw_main_progress(0.0)
+            self._draw_chunk_segments([])
+        except Exception:
+            pass
+
+        # Check if URL is YouTube
+        if is_youtube_url(url):
+            self._start_youtube_download(url, dest, max_conn, bytes_limit, modal=modal)
+            return
+
+        # Wrapped callbacks for modal + main UI
+        def _comb_progress(downloaded: int, total: int, speed: float, eta: str, active_chunks: int):
+            if modal:
+                try:
+                    if modal.winfo_exists():
+                        modal.update_progress(downloaded, total, speed, eta, active_chunks)
+                except Exception:
+                    pass
+            self._engine_progress_cb(downloaded, total, speed, eta, active_chunks)
+
+        def _comb_complete(path: str, total_bytes: int, elapsed: float):
+            has_modal = False
+            if modal:
+                try:
+                    if modal.winfo_exists():
+                        modal.on_download_complete(path, total_bytes, elapsed)
+                        has_modal = True
+                except Exception:
+                    pass
+            self._engine_complete_cb(path, total_bytes, elapsed, suppress_dialog=has_modal)
+
+        def _comb_error(err: str):
+            if modal:
+                try:
+                    if modal.winfo_exists():
+                        modal.on_download_error(err)
+                except Exception:
+                    pass
+            self._engine_error_cb(err)
+
         self.engine = TurboDownloadEngine(
             url=url,
             destination_path=dest,
             max_connections=max_conn,
             rate_limit_bytes_per_sec=bytes_limit,
-            on_progress=self._engine_progress_cb,
+            on_progress=_comb_progress,
             on_chunk_update=self._engine_chunk_update_cb,
             on_log=self.log,
-            on_complete=self._engine_complete_cb,
-            on_error=self._engine_error_cb
+            on_complete=_comb_complete,
+            on_error=_comb_error
         )
+        if modal and hasattr(modal, "attach_engine"):
+            modal.attach_engine(self.engine)
 
         self.engine.start()
 
-    def _start_youtube_download(self, url: str, dest: str, max_conn: int, bytes_limit: float):
+    def _start_youtube_download(
+        self,
+        url: str,
+        dest: str,
+        max_conn: int = 8,
+        bytes_limit: float = 0.0,
+        modal: Optional[Any] = None
+    ):
         """Resolves available YouTube qualities and displays modern format selection modal."""
         if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
             try:
@@ -5386,21 +6372,24 @@ class ModernFramelessGUI:
             except Exception:
                 pass
         self._yt_cancel_event = threading.Event()
-        self.btn_start.configure(state="disabled")
-        self.btn_pause.configure(state="disabled")
-        self.btn_cancel.configure(state="normal")
-        if hasattr(self, "btn_refresh_link"):
-            self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
-        self.txt_log.delete("1.0", tk.END)
+        try:
+            self.btn_start.configure(state="disabled")
+            self.btn_pause.configure(state="disabled")
+            self.btn_cancel.configure(state="normal")
+            if hasattr(self, "btn_refresh_link"):
+                self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
+            self.txt_log.delete("1.0", tk.END)
 
-        for item in self.tree_chunks.get_children():
-            self.tree_chunks.delete(item)
-        self._draw_main_progress(0.0)
-        self._draw_chunk_segments([])
+            for item in self.tree_chunks.get_children():
+                self.tree_chunks.delete(item)
+            self._draw_main_progress(0.0)
+            self._draw_chunk_segments([])
+            self.card_size.configure(text="Fetching available formats...")
+        except Exception:
+            pass
 
         self.log(f"[YOUTUBE] Detected YouTube stream URL: {url}")
         self.log("[YOUTUBE] Querying available video resolutions and formats via yt-dlp...")
-        self.card_size.configure(text="Fetching available formats...")
 
         def _resolve_and_prompt():
             try:
@@ -5434,30 +6423,87 @@ class ModernFramelessGUI:
 
                         self.card_size.configure(text="Select Quality")
 
+                        def _start_coordinator(selected_opt: VideoFormatOption, final_dest: str, yt_modal: Optional[Any] = None):
+                            stream_info = resolver.build_stream_info(info, selected_opt)
+
+                            try:
+                                self.entry_dest.delete(0, tk.END)
+                                self.entry_dest.insert(0, final_dest)
+                                self.btn_pause.configure(state="normal", text="⏸ Pause", bg=self.c_panel_light)
+                                self.btn_cancel.configure(state="normal")
+                            except Exception:
+                                pass
+
+                            def _comb_progress(downloaded, total, speed, eta, active):
+                                if yt_modal:
+                                    try:
+                                        if yt_modal.winfo_exists():
+                                            yt_modal.update_progress(downloaded, total, speed, eta, active)
+                                    except Exception:
+                                        pass
+                                self._engine_progress_cb(downloaded, total, speed, eta, active)
+
+                            def _comb_complete(path, total_bytes, elapsed):
+                                has_yt_modal = False
+                                if yt_modal:
+                                    try:
+                                        if yt_modal.winfo_exists():
+                                            yt_modal.on_download_complete(path, total_bytes, elapsed)
+                                            has_yt_modal = True
+                                    except Exception:
+                                        pass
+                                self._engine_complete_cb(path, total_bytes, elapsed, suppress_dialog=has_yt_modal)
+
+                            def _comb_error(err):
+                                if yt_modal:
+                                    try:
+                                        if yt_modal.winfo_exists():
+                                            yt_modal.on_download_error(err)
+                                    except Exception:
+                                        pass
+                                self._engine_error_cb(err)
+
+                            coordinator = StreamDownloadCoordinator(
+                                stream_info=stream_info,
+                                destination_path=final_dest,
+                                max_connections=max_conn,
+                                rate_limit_bytes_per_sec=bytes_limit,
+                                on_progress=_comb_progress,
+                                on_chunk_update=self._engine_chunk_update_cb,
+                                on_log=self.log,
+                                on_complete=_comb_complete,
+                                on_error=_comb_error
+                            )
+                            self.engine = coordinator
+                            if yt_modal and hasattr(yt_modal, "attach_engine"):
+                                yt_modal.attach_engine(coordinator)
+                            coordinator.start()
+
                         def _on_confirm(selected_opt: VideoFormatOption, final_dest: str):
                             self._quality_modal = None
                             try:
-                                stream_info = resolver.build_stream_info(info, selected_opt)
+                                is_hidden = self.is_window_hidden_or_minimized()
+                                yt_prog_modal = None
+                                if is_hidden:
+                                    yt_prog_modal = DownloadConfirmationModal(
+                                        parent=self.root,
+                                        url=url,
+                                        default_dest_path=final_dest,
+                                        theme=self._theme_dict(),
+                                        parent_app=self,
+                                        show_progress_immediately=True
+                                    )
+                                _start_coordinator(selected_opt, final_dest, yt_modal=yt_prog_modal)
+                            except Exception as e:
+                                self._quality_modal = None
+                                self.log(f"[YOUTUBE START ERROR] {e}")
+                                self._engine_error_cb(str(e))
 
-                                self.entry_dest.delete(0, tk.END)
-                                self.entry_dest.insert(0, final_dest)
-
-                                self.btn_pause.configure(state="normal", text="⏸ Pause", bg=self.c_panel_light)
-                                self.btn_cancel.configure(state="normal")
-
-                                coordinator = StreamDownloadCoordinator(
-                                    stream_info=stream_info,
-                                    destination_path=final_dest,
-                                    max_connections=max_conn,
-                                    rate_limit_bytes_per_sec=bytes_limit,
-                                    on_progress=self._engine_progress_cb,
-                                    on_chunk_update=self._engine_chunk_update_cb,
-                                    on_log=self.log,
-                                    on_complete=self._engine_complete_cb,
-                                    on_error=self._engine_error_cb
-                                )
-                                self.engine = coordinator
-                                coordinator.start()
+                        def _on_open_in_main(selected_opt: VideoFormatOption, final_dest: str):
+                            self._quality_modal = None
+                            self.restore_window()
+                            try:
+                                _start_coordinator(selected_opt, final_dest, yt_modal=None)
                             except Exception as e:
                                 self._quality_modal = None
                                 self.log(f"[YOUTUBE START ERROR] {e}")
@@ -5465,10 +6511,13 @@ class ModernFramelessGUI:
 
                         def _on_cancel():
                             self._quality_modal = None
-                            self.btn_start.configure(state="normal")
-                            self.btn_pause.configure(state="disabled")
-                            self.btn_cancel.configure(state="disabled")
-                            self.card_size.configure(text="Ready")
+                            try:
+                                self.btn_start.configure(state="normal")
+                                self.btn_pause.configure(state="disabled")
+                                self.btn_cancel.configure(state="disabled")
+                                self.card_size.configure(text="Ready")
+                            except Exception:
+                                pass
                             self.log("[YOUTUBE] Video quality selection cancelled.")
 
                         theme_dict = {
@@ -5502,7 +6551,8 @@ class ModernFramelessGUI:
                             default_dest_path=initial_dest,
                             theme=theme_dict,
                             on_confirm=_on_confirm,
-                            on_cancel=_on_cancel
+                            on_cancel=_on_cancel,
+                            on_open_in_main=_on_open_in_main
                         )
                     except Exception as e:
                         self._quality_modal = None
@@ -5639,8 +6689,13 @@ class ModernFramelessGUI:
         except Exception:
             pass
 
-        # Restore and focus window
-        self.restore_window()
+        # DO NOT force-restore the main window if hidden or minimized in tray
+        if not self.is_window_hidden_or_minimized():
+            try:
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                pass
 
         # Non-blocking IDM-style download handling (no blocking modal dialogs / grab_set traps)
         if is_youtube_url(url):
@@ -5682,12 +6737,40 @@ class ModernFramelessGUI:
         if hasattr(self, "_confirm_modal") and self._confirm_modal:
             try:
                 if self._confirm_modal.winfo_exists():
+                    if getattr(self._confirm_modal, "is_in_progress_view", False) or getattr(self._confirm_modal, "is_completed", False):
+                        # Modal is actively downloading or displaying completion actions; keep it intact
+                        self.log(f"[CLIPBOARD] Active standalone download in progress; queued '{derive_download_filename(url)}' in inputs.")
+                        return
                     self._confirm_modal.destroy()
             except Exception:
                 pass
             self._confirm_modal = None
 
-        def _on_confirm(final_dest: str):
+        def _on_start_in_window(final_dest: str, max_conn: int, bytes_limit: float, modal: DownloadConfirmationModal):
+            # Keeps the main window hidden/minimized
+            self.log(f"[CLIPBOARD] Download started in standalone window: {os.path.basename(final_dest)} (Threads: {max_conn}, Speed Limit: {bytes_limit} B/s)")
+            self._start_download_with_engine(url, final_dest, max_conn, bytes_limit, modal=modal)
+
+        def _on_open_in_main(final_dest: str, max_conn: int, bytes_limit: float):
+            self._confirm_modal = None
+            self.restore_window()
+            try:
+                self.entry_url.delete(0, tk.END)
+                self.entry_url.insert(0, url)
+                self.entry_dest.delete(0, tk.END)
+                self.entry_dest.insert(0, final_dest)
+                self.conn_var.set(str(max_conn))
+                if bytes_limit > 0:
+                    self.entry_custom_speed.delete(0, tk.END)
+                    self.entry_custom_speed.insert(0, str(int(bytes_limit / 1024.0)))
+                else:
+                    self.entry_custom_speed.delete(0, tk.END)
+            except Exception:
+                pass
+            self.log(f"[CLIPBOARD] Download opened in main app: {os.path.basename(final_dest)}")
+            self._on_start_download()
+
+        def _on_confirm(final_dest: str, *args):
             self._confirm_modal = None
             try:
                 self.entry_dest.delete(0, tk.END)
@@ -5702,13 +6785,30 @@ class ModernFramelessGUI:
             self.log(f"[CLIPBOARD] Download cancelled by user for: {derive_download_filename(url)}")
 
         try:
+            default_conn = 8
+            try:
+                default_conn = int(self.conn_var.get())
+            except Exception:
+                pass
+            default_speed = 0.0
+            try:
+                kb = float(self.entry_custom_speed.get().strip())
+                default_speed = kb * 1024.0 if kb > 0 else 0.0
+            except Exception:
+                pass
+
             self._confirm_modal = DownloadConfirmationModal(
                 parent=self.root,
                 url=url,
                 default_dest_path=default_dest,
                 theme=self._theme_dict(),
                 on_confirm=_on_confirm,
-                on_cancel=_on_cancel
+                on_cancel=_on_cancel,
+                on_start_in_window=_on_start_in_window,
+                on_open_in_main=_on_open_in_main,
+                parent_app=self,
+                default_connections=default_conn,
+                default_speed_limit=default_speed
             )
         except Exception as e:
             self._confirm_modal = None
@@ -5886,8 +6986,13 @@ class ModernFramelessGUI:
         self.entry_dest.delete(0, tk.END)
         self.entry_dest.insert(0, new_dest)
 
-        # Restore and focus window
-        self.restore_window()
+        # DO NOT force-restore the main window if hidden or minimized in tray
+        if not self.is_window_hidden_or_minimized():
+            try:
+                self.root.lift()
+                self.root.focus_force()
+            except Exception:
+                pass
 
         # Handle YouTube vs regular file downloads
         if is_youtube_url(url):
@@ -5908,7 +7013,7 @@ class ModernFramelessGUI:
         else:
             if self.engine and self.engine.is_running:
                 self.log(f"[BROWSER] Note: Active transfer in progress. URL '{os.path.basename(new_dest)}' queued in inputs.")
-            elif not start_immediately or getattr(self, "_auto_start_clipboard", True) or getattr(self, "_was_started_hidden", False):
+            elif self.is_window_hidden_or_minimized() or not start_immediately or getattr(self, "_auto_start_clipboard", True) or getattr(self, "_was_started_hidden", False):
                 self._show_download_confirmation_dialog(url, new_dest)
             else:
                 self._on_start_download()
@@ -6538,7 +7643,7 @@ class ModernFramelessGUI:
         except Exception:
             pass
 
-    def _engine_complete_cb(self, path: str, total_bytes: int, elapsed: float):
+    def _engine_complete_cb(self, path: str, total_bytes: int, elapsed: float, suppress_dialog: bool = False):
         def _done():
             self._draw_main_progress(100.0)
             self._refresh_chunk_displays()
@@ -6547,6 +7652,9 @@ class ModernFramelessGUI:
             self.btn_cancel.configure(state="disabled")
             if hasattr(self, "btn_refresh_link"):
                 self.btn_refresh_link.configure(state="disabled", bg=self.c_panel_light, fg=self.c_text_muted)
+            self.log(f"[COMPLETE] Download complete: {os.path.basename(path)} ({total_bytes:,} bytes in {elapsed:.1f}s)")
+            if suppress_dialog:
+                return
             msg = (
                 f"File verified & assembled without corruption!\n\n"
                 f"Saved to: {path}\n"
