@@ -3,6 +3,7 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 yt_hidden = collect_submodules('yt_dlp')
 yt_datas = collect_data_files('yt_dlp')
+pystray_hidden = collect_submodules('pystray')
 
 a = Analysis(
     ['turbo_downloader.py'],
@@ -21,7 +22,9 @@ a = Analysis(
         'yt_dlp',
         'PIL',
         'PIL.ImageTk',
-    ] + yt_hidden,
+        'pystray',
+        'pystray._win32',
+    ] + yt_hidden + pystray_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

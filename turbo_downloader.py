@@ -129,6 +129,78 @@ from register_browser import (
     get_status as get_browser_reg_status
 )
 
+# Windows System Tray Integration (pystray)
+try:
+    import pystray
+    from pystray import MenuItem as TrayMenuItem, Menu as TrayMenu
+    PYSTRAY_AVAILABLE = True
+except Exception:
+    pystray = None
+    TrayMenuItem = None
+    TrayMenu = None
+    PYSTRAY_AVAILABLE = False
+
+# ======================================================================================
+# APPLICATION SETTINGS & USER PREFERENCES PERSISTENCE
+# ======================================================================================
+
+def get_config_dir() -> str:
+    """Returns persistent application configuration directory path."""
+    if sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            cfg = os.path.join(appdata, "TurboDownloader")
+        else:
+            cfg = os.path.join(os.path.expanduser("~"), ".turbodownloader")
+    else:
+        cfg = os.path.join(os.path.expanduser("~"), ".turbodownloader")
+    try:
+        os.makedirs(cfg, exist_ok=True)
+    except Exception:
+        pass
+    return cfg
+
+def get_settings_file_path() -> str:
+    """Returns absolute path to persistent settings.json."""
+    return os.path.join(get_config_dir(), "settings.json")
+
+def load_settings() -> Dict[str, Any]:
+    """Loads user configuration dictionary from settings.json with robust fallbacks."""
+    path = get_settings_file_path()
+    defaults = {
+        "minimize_to_tray": True,
+    }
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    defaults.update(data)
+        except Exception:
+            pass
+    return defaults
+
+def save_settings(settings_dict: Dict[str, Any]) -> bool:
+    """Persists updated configuration dictionary to settings.json."""
+    path = get_settings_file_path()
+    try:
+        cur = load_settings()
+        cur.update(settings_dict)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cur, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+def get_setting(key: str, default: Any = None) -> Any:
+    """Retrieves a single setting value with fallback default."""
+    return load_settings().get(key, default)
+
+def set_setting(key: str, value: Any) -> bool:
+    """Sets and persists a single setting value."""
+    return save_settings({key: value})
+
+
 # Configure console encoding safely for Windows terminals and PyInstaller --windowed
 if sys.stdout is None:
     class _NullWriter:
@@ -3796,6 +3868,173 @@ RefreshLinkDialog = RefreshLinkModal
 
 
 # ======================================================================================
+# WINDOWS SYSTEM TRAY NOTIFICATION AREA INTEGRATION (NON-BLOCKING PYSTRAY)
+# ======================================================================================
+
+class SystemTrayManager:
+    """
+    Manages the Windows System Tray (Notification Area) icon and right-click context menu.
+    Integrates non-blocking background icon loop with Tkinter main thread.
+    Features:
+    1. Modern application icon (app_icon.ico / app_icon.png) rendered cleanly.
+    2. Single-click and double-click restore and elevate main application window.
+    3. Right-click context menu:
+       - 🖥️ Open Turbo Downloader
+       - 📋 Clipboard Sniffer: Active / Paused
+       - 🚀 Start with Windows: ON / OFF
+       - ❌ Exit Completely
+    4. Non-blocking thread-safe execution communicating with Tkinter main thread.
+    5. Clean teardown unregistering tray icon without leaving ghost icons.
+    """
+    def __init__(self, app: Any):
+        self.app = app
+        self.icon: Optional[Any] = None
+        self._running = False
+        self._lock = threading.Lock()
+
+    def _get_icon_image(self):
+        """Loads application icon image for tray area."""
+        ico_path = get_resource_path("app_icon.ico")
+        png_path = get_resource_path("app_icon.png")
+        if os.path.isfile(png_path):
+            try:
+                from PIL import Image
+                return Image.open(png_path)
+            except Exception:
+                pass
+        if os.path.isfile(ico_path):
+            try:
+                from PIL import Image
+                return Image.open(ico_path)
+            except Exception:
+                pass
+        try:
+            from PIL import Image
+            return Image.new("RGBA", (32, 32), color=(14, 165, 233, 255))
+        except Exception:
+            return None
+
+    def _get_sniffer_text(self, item=None) -> str:
+        active = getattr(self.app, "_clipboard_sniffer_active", True)
+        return f"📋 Clipboard Sniffer: {'Active' if active else 'Paused'}"
+
+    def _get_startup_text(self, item=None) -> str:
+        enabled = is_startup_enabled()
+        return f"🚀 Start with Windows: {'ON' if enabled else 'OFF'}"
+
+    def _on_menu_open(self, icon=None, item=None):
+        if hasattr(self.app, "dispatch_to_main_thread"):
+            self.app.dispatch_to_main_thread(self.app.restore_window)
+        else:
+            self.app.restore_window()
+
+    def _on_menu_toggle_sniffer(self, icon=None, item=None):
+        if hasattr(self.app, "dispatch_to_main_thread"):
+            self.app.dispatch_to_main_thread(self._do_toggle_sniffer)
+        else:
+            self._do_toggle_sniffer()
+
+    def _do_toggle_sniffer(self):
+        if hasattr(self.app, "toggle_clipboard_sniffer"):
+            self.app.toggle_clipboard_sniffer()
+        self.update_menu()
+
+    def _on_menu_toggle_startup(self, icon=None, item=None):
+        if hasattr(self.app, "dispatch_to_main_thread"):
+            self.app.dispatch_to_main_thread(self._do_toggle_startup)
+        else:
+            self._do_toggle_startup()
+
+    def _do_toggle_startup(self):
+        if hasattr(self.app, "toggle_startup_setting"):
+            self.app.toggle_startup_setting()
+        self.update_menu()
+
+    def _on_menu_exit(self, icon=None, item=None):
+        if hasattr(self.app, "dispatch_to_main_thread"):
+            self.app.dispatch_to_main_thread(self.app.exit_completely)
+        else:
+            self.app.exit_completely()
+
+    def _build_menu(self):
+        if not PYSTRAY_AVAILABLE or TrayMenuItem is None or TrayMenu is None:
+            return None
+        return TrayMenu(
+            TrayMenuItem("🖥️ Open Turbo Downloader", self._on_menu_open, default=True),
+            TrayMenuItem(self._get_sniffer_text, self._on_menu_toggle_sniffer),
+            TrayMenuItem(self._get_startup_text, self._on_menu_toggle_startup),
+            TrayMenuItem("❌ Exit Completely", self._on_menu_exit),
+        )
+
+    @property
+    def is_running(self) -> bool:
+        with self._lock:
+            return bool(self._running and self.icon is not None)
+
+    def start(self):
+        """Starts the tray icon in a background worker thread."""
+        if not PYSTRAY_AVAILABLE or pystray is None:
+            return
+        with self._lock:
+            if self._running and self.icon is not None:
+                return
+            img = self._get_icon_image()
+            if img is None:
+                return
+            menu = self._build_menu()
+            try:
+                self.icon = pystray.Icon("TurboDownloader", img, "Turbo Download Manager Pro", menu=menu)
+                # Patch notify to catch both WM_LBUTTONUP (0x0202) and WM_LBUTTONDBLCLK (0x0203)
+                orig_notify = getattr(self.icon, "_on_notify", None)
+                if orig_notify:
+                    def _patched_notify(wparam, lparam):
+                        if lparam in (0x0202, 0x0203):
+                            try:
+                                self.icon()
+                            except Exception:
+                                pass
+                            return
+                        return orig_notify(wparam, lparam)
+                    self.icon._on_notify = _patched_notify
+                # Run in a daemon thread so it never blocks Python process termination
+                tray_thread = threading.Thread(target=self.icon.run, daemon=True, name='TurboDownloaderTrayThread')
+                tray_thread.start()
+                self._running = True
+            except Exception:
+                self._running = False
+                self.icon = None
+
+    def stop(self):
+        """Stops the tray icon and removes it from the Windows notification area."""
+        with self._lock:
+            self._running = False
+            if self.icon is not None:
+                try:
+                    self.icon.stop()
+                except Exception:
+                    pass
+                self.icon = None
+
+    def update_menu(self):
+        """Refreshes dynamic labels in context menu."""
+        with self._lock:
+            if self.icon is not None and getattr(self.icon, "visible", False):
+                try:
+                    self.icon.update_menu()
+                except Exception:
+                    pass
+
+    def notify(self, message: str, title: str = "Turbo Downloader"):
+        """Displays Windows system tray notification balloon if supported."""
+        with self._lock:
+            if self.icon is not None and getattr(self.icon, "visible", False):
+                try:
+                    self.icon.notify(message, title)
+                except Exception:
+                    pass
+
+
+# ======================================================================================
 # 4. MODERN FRAMELESS WINDOW GUI (DARK THEME & SEGMENTED CHUNK VISUALIZER)
 # ======================================================================================
 
@@ -3818,6 +4057,7 @@ class ModernFramelessGUI:
         self._start_hidden: bool = bool(start_hidden)
         self._was_started_hidden: bool = bool(start_hidden)
         self._startup_enabled: bool = is_startup_enabled()
+        self.minimize_to_tray: bool = bool(get_setting("minimize_to_tray", True))
         self.engine: Optional[Union[TurboDownloadEngine, StreamDownloadCoordinator]] = None
         self._yt_cancel_event = threading.Event()
         self._quality_modal: Optional[tk.Toplevel] = None
@@ -3878,6 +4118,13 @@ class ModernFramelessGUI:
 
         # Initialize Clipboard URL Sniffer (IDM-style auto detection)
         self._init_clipboard_sniffer()
+
+        # Initialize Windows System Tray Notification Area Manager
+        self.tray_manager = SystemTrayManager(self)
+        try:
+            self.tray_manager.start()
+        except Exception:
+            pass
 
         # Configure window close and destroy protocols
         try:
@@ -4387,6 +4634,11 @@ class ModernFramelessGUI:
 
     def _cleanup_resources(self):
         self._closing = True
+        if hasattr(self, "tray_manager") and self.tray_manager:
+            try:
+                self.tray_manager.stop()
+            except Exception:
+                pass
         if hasattr(self, "_clipboard_job") and self._clipboard_job:
             try:
                 self.root.after_cancel(self._clipboard_job)
@@ -4427,10 +4679,45 @@ class ModernFramelessGUI:
                 pass
             self._refresh_modal = None
 
-    def _on_close(self):
-        """Graceful application exit."""
+    def _on_close(self, force_exit: bool = False):
+        """
+        Handles the window close button '✕' or WM_DELETE_WINDOW protocol.
+        If minimize_to_tray is True (default) and force_exit is False,
+        minimizes/hides the window to the Windows System Tray while keeping
+        the clipboard sniffer and loopback server running.
+        Otherwise, executes a clean application exit.
+        """
+        if not force_exit and getattr(self, "minimize_to_tray", True):
+            self.minimize_to_tray_action()
+            return
+
+        self.exit_completely()
+
+    def minimize_to_tray_action(self):
+        """Hides the main window to the Windows System Tray while keeping background services alive."""
+        try:
+            self.root.withdraw()
+        except Exception:
+            pass
+
+        if IS_WINDOWS:
+            try:
+                hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+                ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
+            except Exception:
+                pass
+
+        if hasattr(self, "tray_manager") and self.tray_manager:
+            try:
+                self.tray_manager.start()
+            except Exception:
+                pass
+
+        self.log("[SYSTEM TRAY] Application minimized to system tray. Clipboard sniffer & browser bridge remain active.")
+
+    def exit_completely(self):
+        """Cleanly terminates the application, background threads, servers, and system tray icons."""
         self._closing = True
-        self._cleanup_resources()
         if hasattr(self, "_yt_cancel_event"):
             self._yt_cancel_event.set()
         if hasattr(self, "_quality_modal") and self._quality_modal:
@@ -4469,7 +4756,10 @@ class ModernFramelessGUI:
 
         def _do_exit():
             if self.engine and self.engine.is_running:
-                self.engine.cancel()
+                try:
+                    self.engine.cancel()
+                except Exception:
+                    pass
             self._cleanup_resources()
             try:
                 if hasattr(self, "root") and self.root and self.root.winfo_exists():
@@ -4478,9 +4768,10 @@ class ModernFramelessGUI:
                 pass
 
         if self.engine and self.engine.is_running:
+            self.restore_window()
             self.ask_safe_yesno(
                 "Exit Confirmation",
-                "A download is currently active. Stop and exit?",
+                "A download is currently active. Stop and exit completely?",
                 on_yes=_do_exit
             )
             return
@@ -4695,7 +4986,7 @@ class ModernFramelessGUI:
 
         self.btn_browser = tk.Button(
             row2,
-            text="🌐 Browser Integration",
+            text="🌐 Settings & Integration",
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,
@@ -5448,6 +5739,12 @@ class ModernFramelessGUI:
                 )
                 self.log("[CLIPBOARD] Sniffer Paused: Clipboard monitoring paused.")
 
+        if hasattr(self, "tray_manager") and self.tray_manager:
+            try:
+                self.tray_manager.update_menu()
+            except Exception:
+                pass
+
     def _update_startup_btn(self):
         """Refreshes the visual state of the Windows auto-start button."""
         if hasattr(self, "btn_startup"):
@@ -5495,7 +5792,37 @@ class ModernFramelessGUI:
                 self._update_dlg_startup_ui()
             except Exception:
                 pass
+        if hasattr(self, "tray_manager") and self.tray_manager:
+            try:
+                self.tray_manager.update_menu()
+            except Exception:
+                pass
         return self._startup_enabled
+
+    def toggle_minimize_to_tray_setting(self) -> bool:
+        """Toggles the 'minimize to tray on close' preference and persists to settings."""
+        self.minimize_to_tray = not getattr(self, "minimize_to_tray", True)
+        set_setting("minimize_to_tray", self.minimize_to_tray)
+        if self.minimize_to_tray:
+            self.log("[SETTINGS] Close button action set to: Minimize to System Tray.")
+        else:
+            self.log("[SETTINGS] Close button action set to: Exit Completely.")
+        if hasattr(self, "_update_dlg_tray_ui") and callable(self._update_dlg_tray_ui):
+            try:
+                self._update_dlg_tray_ui()
+            except Exception:
+                pass
+        return self.minimize_to_tray
+
+    def set_minimize_to_tray(self, enabled: bool):
+        """Explicitly sets and persists the 'minimize to tray on close' preference."""
+        self.minimize_to_tray = bool(enabled)
+        set_setting("minimize_to_tray", self.minimize_to_tray)
+        if hasattr(self, "_update_dlg_tray_ui") and callable(self._update_dlg_tray_ui):
+            try:
+                self._update_dlg_tray_ui()
+            except Exception:
+                pass
 
     # ----------------------------------------------------------------------------------
     # Browser Bridge Integration Callbacks & Modal Dialog
@@ -5507,6 +5834,12 @@ class ModernFramelessGUI:
             self._gui_dispatch_queue.put((fn, args, kwargs))
         if threading.current_thread() == threading.main_thread():
             self._drain_dispatch_queue()
+        else:
+            if hasattr(self, "root") and self.root:
+                try:
+                    self.root.after(0, self._drain_dispatch_queue)
+                except Exception:
+                    pass
 
     def _drain_dispatch_queue(self):
         """Executes all pending dispatch tasks on the main thread."""
@@ -5598,7 +5931,7 @@ class ModernFramelessGUI:
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         dlg_w = min(int(680 * dpi_scale), max(600, int(sw * 0.92)))
-        dlg_h = min(int(660 * dpi_scale), max(560, int(sh * 0.90)))
+        dlg_h = min(int(740 * dpi_scale), max(640, int(sh * 0.90)))
         try:
             px = self.root.winfo_x()
             py = self.root.winfo_y()
@@ -5609,7 +5942,7 @@ class ModernFramelessGUI:
         x = max(0, px + (pw - dlg_w) // 2)
         y = max(0, py + (ph - dlg_h) // 2)
         dlg.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
-        dlg.minsize(min(580, dlg_w), min(480, dlg_h))
+        dlg.minsize(min(580, dlg_w), min(540, dlg_h))
         dlg.configure(bg=self.c_bg)
 
         # Apply application icon to dialog window
@@ -5875,6 +6208,55 @@ class ModernFramelessGUI:
         )
         btn_dlg_boot.pack(side=tk.RIGHT)
         _update_dlg_boot_status()
+
+        # 3b. Windows System Tray & Background Minimization Card
+        card_tray = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
+        card_tray.pack(fill=tk.X, pady=(0, 10))
+
+        lbl_tray_title = tk.Label(card_tray, text="🔔 WINDOWS SYSTEM TRAY & BACKGROUND MINIMIZATION", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl_tray_title.pack(anchor="w")
+
+        tray_row = tk.Frame(card_tray, bg=self.c_panel)
+        tray_row.pack(fill=tk.X, pady=(6, 0))
+
+        lbl_tray_status = tk.Label(tray_row, text="", font=("Segoe UI", 9, "bold"), bg=self.c_panel)
+        lbl_tray_status.pack(side=tk.LEFT)
+
+        def _update_dlg_tray_status():
+            try:
+                if not dlg.winfo_exists() or not lbl_tray_status.winfo_exists():
+                    return
+            except Exception:
+                return
+            enabled = getattr(self, "minimize_to_tray", True)
+            if enabled:
+                lbl_tray_status.configure(text="● Close (✕) Action: Minimize to System Tray", fg=self.c_success)
+                btn_dlg_tray.configure(text="[✓] Minimize to System Tray on Close (✕)", fg=self.c_success, bg=self.c_panel_light)
+            else:
+                lbl_tray_status.configure(text="● Close (✕) Action: Exit Application Completely", fg=self.c_warning)
+                btn_dlg_tray.configure(text="[  ] Minimize to System Tray on Close (✕)", fg=self.c_text_muted, bg=self.c_panel)
+
+        self._update_dlg_tray_ui = _update_dlg_tray_status
+        try:
+            dlg.bind("<Destroy>", lambda e: (setattr(self, "_update_dlg_startup_ui", None), setattr(self, "_update_dlg_tray_ui", None)) if e.widget == dlg else None, add="+")
+        except Exception:
+            pass
+
+        def _on_dlg_tray_toggle():
+            self.toggle_minimize_to_tray_setting()
+            _update_dlg_tray_status()
+
+        btn_dlg_tray = tk.Button(
+            tray_row,
+            text="",
+            font=("Segoe UI", 8, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=10,
+            command=_on_dlg_tray_toggle
+        )
+        btn_dlg_tray.pack(side=tk.RIGHT)
+        _update_dlg_tray_status()
 
         # 4. Extension Directory Card
         if getattr(sys, "frozen", False):

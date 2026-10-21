@@ -78,7 +78,12 @@ from turbo_downloader import (
     get_startup_entry,
     notify_running_instance,
     WINDOWS_RUN_KEY,
-    STARTUP_REG_KEY_NAME
+    STARTUP_REG_KEY_NAME,
+    SystemTrayManager,
+    load_settings,
+    save_settings,
+    get_setting,
+    set_setting
 )
 
 
@@ -3338,6 +3343,255 @@ class TestRefreshExpiredLinks(unittest.TestCase):
         self.assertTrue(coord.supports_ranges)
         self.assertFalse(coord.has_expired_link)
         self.assertEqual(coord.last_http_status, 0)
+
+
+class TestSystemTrayAndBackgroundMinimization(unittest.TestCase):
+    """
+    Automated test suite verifying Windows System Tray Icon & Background Minimization:
+    1. Settings persistence: load_settings, save_settings, get_setting, set_setting defaults & round-trip.
+    2. SystemTrayManager initialization & 4-item right-click context menu structure.
+    3. Tray menu dynamic labels (Clipboard Sniffer & Start with Windows).
+    4. Tray menu callbacks: Restore window, Toggle sniffer, Toggle startup, Exit completely.
+    5. Window Close (✕) action minimizes to tray when minimize_to_tray is True (default).
+    6. Window Close (✕) action exits completely when minimize_to_tray is False.
+    7. GUI Settings toggle: toggle_minimize_to_tray_setting updates preference and UI.
+    8. Seamless wakeup from tray on clipboard URL interception with DownloadConfirmationModal.
+    9. Seamless wakeup from tray on browser extension download with DownloadConfirmationModal.
+    10. Clean exit: stops tray icon, cancels timers, stops loopback server, and destroys window.
+    """
+
+    def setUp(self):
+        self.root = None
+
+    def tearDown(self):
+        if self.root:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            self.root = None
+
+    def test_settings_persistence(self):
+        cur = get_setting("minimize_to_tray", True)
+        self.assertIn(cur, (True, False))
+        set_setting("minimize_to_tray", False)
+        self.assertFalse(get_setting("minimize_to_tray", True))
+        set_setting("minimize_to_tray", True)
+        self.assertTrue(get_setting("minimize_to_tray", False))
+
+    def test_tray_manager_menu_structure(self):
+        class MockApp:
+            def __init__(self):
+                self._clipboard_sniffer_active = True
+                self.restored = False
+                self.exited = False
+            def restore_window(self):
+                self.restored = True
+            def toggle_clipboard_sniffer(self):
+                self._clipboard_sniffer_active = not self._clipboard_sniffer_active
+            def toggle_startup_setting(self):
+                return True
+            def exit_completely(self):
+                self.exited = True
+            def dispatch_to_main_thread(self, fn, *args, **kwargs):
+                fn(*args, **kwargs)
+
+        app = MockApp()
+        tray = SystemTrayManager(app)
+        menu = tray._build_menu()
+        self.assertIsNotNone(menu)
+        items = list(menu.items)
+        self.assertEqual(len(items), 4)
+
+        # 1. Open Turbo Downloader (default action for single / double click)
+        self.assertEqual(items[0].text, "🖥️ Open Turbo Downloader")
+        self.assertTrue(items[0].default)
+
+        # 2. Clipboard Sniffer
+        self.assertIn("Clipboard Sniffer: Active", items[1].text)
+
+        # 3. Start with Windows
+        self.assertIn("Start with Windows", items[2].text)
+
+        # 4. Exit Completely
+        self.assertEqual(items[3].text, "❌ Exit Completely")
+
+    def test_tray_manager_menu_callbacks(self):
+        class MockApp:
+            def __init__(self):
+                self._clipboard_sniffer_active = True
+                self.restored = False
+                self.exited = False
+                self.sniffer_toggled = False
+                self.startup_toggled = False
+            def restore_window(self):
+                self.restored = True
+            def toggle_clipboard_sniffer(self):
+                self._clipboard_sniffer_active = not self._clipboard_sniffer_active
+                self.sniffer_toggled = True
+            def toggle_startup_setting(self):
+                self.startup_toggled = True
+                return True
+            def exit_completely(self):
+                self.exited = True
+            def dispatch_to_main_thread(self, fn, *args, **kwargs):
+                fn(*args, **kwargs)
+
+        app = MockApp()
+        tray = SystemTrayManager(app)
+        menu = tray._build_menu()
+
+        # Invoke default (single/double click) or item 0
+        menu(None)
+        self.assertTrue(app.restored)
+
+        # Invoke sniffer toggle
+        menu.items[1](None)
+        self.assertTrue(app.sniffer_toggled)
+        self.assertFalse(app._clipboard_sniffer_active)
+        self.assertIn("Clipboard Sniffer: Paused", menu.items[1].text)
+
+        # Invoke startup toggle
+        menu.items[2](None)
+        self.assertTrue(app.startup_toggled)
+
+        # Invoke exit
+        menu.items[3](None)
+        self.assertTrue(app.exited)
+
+    def test_close_button_minimizes_to_tray_when_enabled(self):
+        self.root = tk.Tk()
+        gui = ModernFramelessGUI(self.root)
+        try:
+            gui.set_minimize_to_tray(True)
+            self.assertTrue(gui.minimize_to_tray)
+            self.assertEqual(self.root.state(), "normal")
+
+            # Click close button
+            gui._on_close()
+
+            # Window must be withdrawn (minimized to tray)
+            self.assertEqual(self.root.state(), "withdrawn")
+            # Loopback server and clipboard sniffer must remain active
+            self.assertTrue(gui.bridge_server.is_running)
+            self.assertTrue(gui._clipboard_sniffer_active)
+        finally:
+            gui.exit_completely()
+
+    def test_close_button_exits_when_disabled(self):
+        self.root = tk.Tk()
+        gui = ModernFramelessGUI(self.root)
+        gui.set_minimize_to_tray(False)
+        self.assertFalse(gui.minimize_to_tray)
+
+        # Click close button
+        gui._on_close()
+
+        # Root must be destroyed
+        try:
+            exists = bool(self.root and self.root.winfo_exists())
+        except Exception:
+            exists = False
+        self.assertFalse(exists)
+        self.root = None
+
+    def test_gui_settings_tray_card_and_toggle(self):
+        self.root = tk.Tk()
+        gui = ModernFramelessGUI(self.root)
+        try:
+            gui.set_minimize_to_tray(True)
+            self.assertTrue(gui.minimize_to_tray)
+
+            # Toggle setting
+            res = gui.toggle_minimize_to_tray_setting()
+            self.assertFalse(res)
+            self.assertFalse(gui.minimize_to_tray)
+            self.assertFalse(get_setting("minimize_to_tray", True))
+
+            # Open settings dialog
+            gui._open_browser_integration_dialog()
+            self.assertTrue(hasattr(gui, "_update_dlg_tray_ui"))
+            gui._update_dlg_tray_ui()
+
+            # Toggle back to True
+            res2 = gui.toggle_minimize_to_tray_setting()
+            self.assertTrue(res2)
+            self.assertTrue(gui.minimize_to_tray)
+            self.assertTrue(get_setting("minimize_to_tray", False))
+        finally:
+            gui.exit_completely()
+
+    def test_clipboard_detection_wakes_from_tray_and_shows_modal(self):
+        self.root = tk.Tk()
+        gui = ModernFramelessGUI(self.root)
+        try:
+            gui.set_minimize_to_tray(True)
+            gui._on_close()
+            self.assertEqual(self.root.state(), "withdrawn")
+
+            # Intercept download URL from clipboard
+            target_url = "https://speed.cloudflare.com/__down?bytes=15000000"
+            gui._on_clipboard_url_detected(target_url)
+
+            # Window must wake up / restore
+            self.assertEqual(self.root.state(), "normal")
+            # IDM confirmation modal must be open
+            self.assertIsNotNone(gui._confirm_modal)
+            self.assertTrue(gui._confirm_modal.winfo_exists())
+            self.assertEqual(gui.entry_url.get().strip(), target_url)
+        finally:
+            if gui._confirm_modal:
+                try:
+                    gui._confirm_modal.destroy()
+                except Exception:
+                    pass
+            gui.exit_completely()
+
+    def test_browser_download_wakes_from_tray_and_shows_modal(self):
+        self.root = tk.Tk()
+        gui = ModernFramelessGUI(self.root)
+        try:
+            gui.set_minimize_to_tray(True)
+            gui._on_close()
+            self.assertEqual(self.root.state(), "withdrawn")
+
+            # Browser extension pushes download payload
+            target_url = "https://speed.cloudflare.com/files/release_pkg.zip"
+            gui._apply_browser_download({
+                "url": target_url,
+                "filename": "release_pkg.zip",
+                "start_immediately": False
+            })
+
+            # Window must wake up / restore
+            self.assertEqual(self.root.state(), "normal")
+            # IDM confirmation modal must be open
+            self.assertIsNotNone(gui._confirm_modal)
+            self.assertTrue(gui._confirm_modal.winfo_exists())
+            self.assertEqual(gui.entry_url.get().strip(), target_url)
+        finally:
+            if gui._confirm_modal:
+                try:
+                    gui._confirm_modal.destroy()
+                except Exception:
+                    pass
+            gui.exit_completely()
+
+    def test_clean_exit_completely_teardown(self):
+        self.root = tk.Tk()
+        gui = ModernFramelessGUI(self.root)
+        self.assertTrue(gui.bridge_server.is_running)
+        gui.exit_completely()
+
+        # Bridge server stopped
+        self.assertIsNone(gui.bridge_server)
+        # Root destroyed
+        try:
+            exists = bool(self.root and self.root.winfo_exists())
+        except Exception:
+            exists = False
+        self.assertFalse(exists)
+        self.root = None
 
 
 class TestStandaloneExeBuild(unittest.TestCase):
