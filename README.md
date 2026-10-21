@@ -46,7 +46,7 @@
    - **Chrome / Microsoft Edge / Brave** Chromium browser extension (Manifest V3).
    - Dual-channel communication architecture:
      - **Native Messaging Host** protocol (length-prefixed stdin/stdout) for instant desktop handoff.
-     - **Local Loopback HTTP Bridge** (`127.0.0.1:18942`) with CORS preflight support as an automatic fallback.
+     - **Local Loopback HTTP Bridge** (`127.0.0.1:9242`) with CORS preflight support as an automatic fallback.
    - Automatic one-click Windows Registry configuration script (`register_browser.py`).
 
 4. **📋 Clipboard Auto-Sniffer**
@@ -70,7 +70,7 @@
          │
          ├──► (Primary) Native Messaging Host (native_messaging_host.py) ──┐
          │                                                                  ├──► [ TurboDownloader Core ]
-         └──► (Fallback) HTTP Loopback Bridge (browser_bridge.py:18942) ───┘           │
+         └──► (Fallback) HTTP Loopback Bridge (browser_bridge.py:9242) ────┘           │
                                                                                        ├── Multi-part Engine
                                                                                        ├── YouTube Resolver (yt-dlp)
                                                                                        ├── Lossless Merger (ffmpeg)
@@ -174,7 +174,7 @@ python test_dpi_and_assets.py
    - إضافة متصفح حديثة تدعم معيار Manifest V3.
    - هيكل اتصال ثنائي فائق المرونة:
      - عبر بروتوكول **Native Messaging Host** المباشر والآمن.
-     - عبر جسر محلي **HTTP Loopback Server** على المنفذ `18942` مع دعم كامل لـ CORS.
+     - عبر جسر محلي **HTTP Loopback Server** على المنفذ `9242` مع دعم كامل لـ CORS.
    - سكريبت تسجيل تلقائي في سجلات ويندوز (Registry) بضغطة زر واحدة.
 
 4. **📋 مراقب الحافظة الذكي (Clipboard Auto-Sniffer)**
