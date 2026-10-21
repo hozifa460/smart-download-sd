@@ -1,0 +1,12 @@
+{
+  "name": "com.turbodownloader.host",
+  "description": "Turbo Download Manager Pro Native Messaging Host",
+  "path": "C:\\Users\\hazoz\\OneDrive\\Desktop\\swi copy\\turbo_host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://turbo-downloader-integration/",
+    "chrome-extension://com.turbodownloader.extension/",
+    "chrome-extension://gokbjcmdmbjlngbdpanlccbfpmppjloa/",
+    "chrome-extension://pklgcncmklkpccfdoaehbibmfmmpkilj/"
+  ]
+}

@@ -1,0 +1,45 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller / Build outputs
+build/
+dist/
+*.spec.bak
+
+# Exclude standalone executables from git tracking (use GitHub Releases)
+*.exe
+
+# Exclude REA reverse engineering folder
+rea/
+.rea/
+
+# Download fragments & temp files
+*.tmp
+*.temp
+*.idm_parts
+*.part
+*.crdownload
+*.ytdl
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite3
+
+# Environment & IDE
+.env
+.venv
+env/
+venv/
+ENV/
+.vscode/
+.idea/
+*.swp
+*~
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Turbo Download Manager Pro</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-row">
+        <span class="bolt">⚡</span>
+        <h1 class="title">TURBO DOWNLOAD</h1>
+      </div>
+      <span class="badge-pro">PRO</span>
+    </header>
+
+    <!-- Status Card -->
+    <div id="status-card" class="status-card offline">
+      <div class="status-dot"></div>
+      <div class="status-info">
+        <span id="status-title" class="status-title">Checking connection...</span>
+        <span id="status-desc" class="status-desc">http://127.0.0.1:9242</span>
+      </div>
+      <button id="btn-refresh" class="icon-btn" title="Refresh Connection">🔄</button>
+    </div>
+
+    <!-- Quick Action -->
+    <button id="btn-download-tab" class="btn-primary">
+      <span>📥 Download Current Tab / Video</span>
+    </button>
+
+    <!-- Controls -->
+    <div class="section-card">
+      <div class="setting-row">
+        <div class="setting-label">
+          <strong>Auto-intercept Downloads</strong>
+          <small>Forward browser downloads automatically</small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-enabled">
+          <span class="slider round"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          <strong>Intercept All Files</strong>
+          <small>Off = only common archives/media/binaries</small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-all">
+          <span class="slider round"></span>
+        </label>
+      </div>
+
+      <div class="setting-row port-row">
+        <div class="setting-label">
+          <strong>IPC Loopback Port</strong>
+          <small>Default: 9242</small>
+        </div>
+        <div class="port-input-group">
+          <input type="number" id="input-port" min="1024" max="65535" value="9242">
+          <button id="btn-save-port" class="btn-secondary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer Notice -->
+    <footer class="footer">
+      <div id="toast" class="toast">Settings updated</div>
+      <span class="footer-note">IDM Dynamic Chunking & Bandwidth Limiting</span>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
