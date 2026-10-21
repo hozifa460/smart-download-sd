@@ -785,6 +785,137 @@ def get_permissive_ssl_context() -> ssl.SSLContext:
     return _PERMISSIVE_SSL_CONTEXT
 
 
+def validate_refresh_url(
+    new_url: str,
+    expected_size: int = 0,
+    check_range: bool = True,
+    timeout: float = 12.0,
+    ssl_context: Optional[ssl.SSLContext] = None,
+    headers: Optional[Dict[str, str]] = None
+) -> Tuple[bool, str, int, bool]:
+    """
+    Validates a candidate refresh URL via HTTP HEAD and GET Range requests.
+    Verifies that the new URL is accessible, points to the same file size (if expected_size > 0),
+    and accepts HTTP Range byte requests (if check_range is True).
+    Returns: (is_valid: bool, status_message: str, resolved_total_size: int, supports_ranges: bool)
+    """
+    clean_url = str(new_url or "").strip()
+    if not clean_url:
+        return False, "URL cannot be empty.", 0, False
+
+    try:
+        parsed = urllib.parse.urlsplit(clean_url)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+            return False, "URL must start with http:// or https:// and include a valid domain.", 0, False
+    except Exception as e:
+        return False, f"Malformed URL: {e}", 0, False
+
+    ctx = ssl_context if ssl_context is not None else get_permissive_ssl_context()
+    custom_headers = dict(headers or {})
+    if not any(k.lower() == "user-agent" for k in custom_headers):
+        custom_headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"
+
+    resolved_size = 0
+    supports_ranges = False
+    head_ok = False
+    head_error_code = None
+    head_error_reason = ""
+
+    # 1. Attempt HTTP HEAD probe
+    try:
+        head_req = urllib.request.Request(clean_url, method="HEAD", headers=custom_headers)
+        with urllib.request.urlopen(head_req, timeout=timeout, context=ctx) as resp:
+            head_ok = True
+            cl = resp.headers.get("Content-Length")
+            ar = resp.headers.get("Accept-Ranges", "").lower()
+            if cl and cl.isdigit():
+                resolved_size = int(cl)
+            if ar == "bytes":
+                supports_ranges = True
+    except urllib.error.HTTPError as e:
+        e.close()
+        head_error_code = e.code
+        head_error_reason = str(getattr(e, "reason", e))
+        # Note: Do not abort immediately on HEAD 401/403/405/501!
+        # Many S3 pre-signed URLs, Cloudflare tokens, and media CDNs only sign GET,
+        # rejecting HEAD with 403 or 405. We fall through to verify with GET Range probe.
+    except urllib.error.URLError as e:
+        return False, f"Failed to connect to host: {e.reason}", 0, False
+    except Exception as e:
+        return False, f"Connection error: {e}", 0, False
+
+    # 2. Test Range support with GET Range: bytes=0-0 if check_range requested or HEAD didn't confirm ranges/size
+    if check_range or not head_ok or resolved_size == 0 or not supports_ranges:
+        try:
+            range_req = urllib.request.Request(clean_url, headers=custom_headers)
+            range_req.add_header("Range", "bytes=0-0")
+            with urllib.request.urlopen(range_req, timeout=timeout, context=ctx) as resp:
+                code = resp.getcode()
+                cr = resp.headers.get("Content-Range", "")
+
+                try:
+                    resp.read(min(1024, resolved_size or 1024))
+                except Exception:
+                    pass
+
+                if code == 206:
+                    supports_ranges = True
+                    if "/" in cr:
+                        total_part = cr.split("/")[-1].strip()
+                        if total_part.isdigit():
+                            resolved_size = int(total_part)
+                    # Note: If code == 206, do NOT use Content-Length as total size,
+                    # because in a 206 Partial Content response for bytes=0-0,
+                    # Content-Length is 1 (the slice length), NOT the total file size!
+                elif code == 200:
+                    # Server responded with 200 OK to a Range request, which means
+                    # it IGNORED the Range header and sent the whole file body!
+                    # Therefore, byte-range resuming is NOT supported!
+                    supports_ranges = False
+                    if not resolved_size:
+                        cl = resp.headers.get("Content-Length")
+                        if cl and cl.isdigit():
+                            resolved_size = int(cl)
+                else:
+                    supports_ranges = False
+        except urllib.error.HTTPError as e:
+            e.close()
+            if e.code in (401, 403, 410):
+                return False, f"Server returned HTTP {e.code} ({e.reason}) — the download link is expired or unauthorized.", 0, False
+            if e.code == 404:
+                return False, f"Server returned HTTP 404: Not Found — file does not exist at this address.", 0, False
+            if not head_ok:
+                return False, f"Server returned HTTP {e.code} ({e.reason}).", 0, False
+        except Exception as e:
+            if not head_ok:
+                return False, f"Range connection test failed: {e}", 0, False
+
+    # If HEAD failed with 401/403/410 and GET Range was not verified or supported
+    if not head_ok and head_error_code in (401, 403, 410) and not supports_ranges and resolved_size == 0:
+        return False, f"Server returned HTTP {head_error_code} ({head_error_reason}) — link is expired or unauthorized.", 0, False
+
+    # 3. Size match validation if an expected size was provided
+    if expected_size > 0 and resolved_size > 0:
+        if resolved_size != expected_size:
+            return (
+                False,
+                f"File size mismatch: New link points to {resolved_size:,} bytes, "
+                f"but existing download is {expected_size:,} bytes.",
+                resolved_size,
+                supports_ranges
+            )
+
+    # 4. Range requirement validation if partial chunks exist
+    if check_range and not supports_ranges:
+        return (
+            False,
+            "Server does not support HTTP Range requests (HTTP 206), which is required to resume partial chunks without restarting.",
+            resolved_size,
+            False
+        )
+
+    return True, "URL verified successfully.", resolved_size, supports_ranges
+
 
 # ======================================================================================
 # 3. IDM REVERSE-ENGINEERED CONCURRENT TRANSFER & SCHEDULING ENGINE
@@ -873,8 +1004,12 @@ class TurboDownloadEngine:
         self._lock = threading.RLock()
         self._cancel_event = threading.Event()
         self._pause_event = threading.Event()
+        self._error_abort_event = threading.Event()
         self.is_running = False
         self.is_paused = False
+        self.has_expired_link = False
+        self.last_http_status = 0
+        self._resume_mode = False
 
         # Speed calculation metrics
         self.start_time = 0.0
@@ -994,7 +1129,7 @@ class TurboDownloadEngine:
                     elif resp.getcode() == 206:
                         self.supports_ranges = True
 
-                    if not self.total_size:
+                    if not self.total_size and resp.getcode() == 200:
                         cl = resp.headers.get("Content-Length")
                         self.total_size = int(cl) if cl and cl.isdigit() else 0
 
@@ -1005,6 +1140,9 @@ class TurboDownloadEngine:
             except Exception as e:
                 if isinstance(e, urllib.error.HTTPError):
                     e.close()
+                    if e.code in (401, 403, 410):
+                        self.has_expired_link = True
+                        self.last_http_status = e.code
                 # If GET Range failed and HEAD also failed, attempt a plain GET request
                 # without Range to follow redirects and probe headers
                 if not head_succeeded:
@@ -1031,6 +1169,9 @@ class TurboDownloadEngine:
                     except Exception as e_plain:
                         if isinstance(e_plain, urllib.error.HTTPError):
                             e_plain.close()
+                            if e_plain.code in (401, 403, 410):
+                                self.has_expired_link = True
+                                self.last_http_status = e_plain.code
                         raise RuntimeError(f"Connection failed: {e_plain}")
 
         if self.is_googlevideo and self.total_size > 0:
@@ -1078,6 +1219,7 @@ class TurboDownloadEngine:
             return
         self.is_paused = True
         self._pause_event.set()
+        self.save_state()
         self.log("Download paused by user.")
 
     def resume(self):
@@ -1118,27 +1260,76 @@ class TurboDownloadEngine:
     def _supervisor_loop(self):
         """Master supervisor: manages initial connection, dynamic splitting, and assembly."""
         try:
-            self.probe()
-
-            if os.path.exists(self.temp_dir):
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
-            os.makedirs(self.temp_dir, exist_ok=True)
-
-            # Allocate initial chunk 0
-            # If total_size > 0, initial_end MUST be total_size - 1 even in single-stream mode!
-            initial_end = (self.total_size - 1) if self.total_size > 0 else 0
-            chunk0 = DownloadChunk(
-                chunk_id=0,
-                start_byte=0,
-                end_byte=initial_end,
-                downloaded_bytes=0,
-                status="pending",
-                part_filepath=os.path.join(self.temp_dir, f"{os.path.basename(self.destination_path)}.part_0")
+            is_resuming = bool(
+                getattr(self, "_resume_mode", False)
+                or (self.chunks and any(c.downloaded_bytes > 0 for c in self.chunks))
             )
-            with self._lock:
-                self.chunks.append(chunk0)
 
-            self._spawn_worker(chunk0)
+            # If not in resume mode, check if state file exists in temp_dir to restore
+            if not is_resuming and not self.chunks and os.path.exists(self.temp_dir):
+                if self.load_state() and self.chunks:
+                    is_resuming = True
+
+            if not is_resuming:
+                self.probe()
+
+                if os.path.exists(self.temp_dir):
+                    shutil.rmtree(self.temp_dir, ignore_errors=True)
+                os.makedirs(self.temp_dir, exist_ok=True)
+
+                # Allocate initial chunk 0
+                # If total_size > 0, initial_end MUST be total_size - 1 even in single-stream mode!
+                initial_end = (self.total_size - 1) if self.total_size > 0 else 0
+                chunk0 = DownloadChunk(
+                    chunk_id=0,
+                    start_byte=0,
+                    end_byte=initial_end,
+                    downloaded_bytes=0,
+                    status="pending",
+                    part_filepath=os.path.join(self.temp_dir, f"{os.path.basename(self.destination_path)}.part_0")
+                )
+                with self._lock:
+                    self.chunks.clear()
+                    self.chunks.append(chunk0)
+
+                self.save_state()
+                self._spawn_worker(chunk0)
+            else:
+                self.log(f"Resuming download from existing chunks ({len(self.chunks)} parts)...")
+                os.makedirs(self.temp_dir, exist_ok=True)
+                prior_workers = []
+                with self._lock:
+                    prior_workers = list(self.active_workers)
+                for w in prior_workers:
+                    if w.is_alive() and w != threading.current_thread():
+                        w.join(timeout=0.3)
+                self._error_abort_event.clear()
+                with self._lock:
+                    self.active_workers.clear()
+                    self._active_connections.clear()
+                    for c in self.chunks:
+                        with c.lock:
+                            expected = c.end_byte - c.start_byte + 1
+                            if os.path.exists(c.part_filepath):
+                                try:
+                                    actual_bytes = os.path.getsize(c.part_filepath)
+                                    c.downloaded_bytes = min(actual_bytes, expected)
+                                    if actual_bytes > expected:
+                                        with open(c.part_filepath, "r+b") as tf:
+                                            tf.truncate(expected)
+                                except Exception:
+                                    pass
+                            if self.total_size > 0 and c.downloaded_bytes >= expected:
+                                c.status = "completed"
+                            else:
+                                c.status = "pending"
+                                c.error_msg = ""
+                    # Spawn workers for pending chunks up to max_connections
+                    pending_chunks = [c for c in self.chunks if c.status == "pending"]
+                    for c in pending_chunks[:self.max_connections]:
+                        self._spawn_worker(c)
+                self._resume_mode = False
+                self.save_state()
 
             # Scheduling & Dynamic Splitting Loop
             while self.is_running and not self._cancel_event.is_set():
@@ -1146,6 +1337,14 @@ class TurboDownloadEngine:
 
                 if self.is_paused:
                     continue
+
+                # Schedule pending chunks if worker slots available
+                with self._lock:
+                    active_count = sum(1 for c in self.chunks if c.status == "active")
+                    if active_count < self.max_connections:
+                        pending = [c for c in self.chunks if c.status == "pending"]
+                        for c in pending[:self.max_connections - active_count]:
+                            self._spawn_worker(c)
 
                 # Check if we should dynamically split active chunks
                 if self.supports_ranges and self.total_size > 0:
@@ -1163,7 +1362,8 @@ class TurboDownloadEngine:
                 if any_failed:
                     failed_chunks = [c for c in self.chunks if c.status == "failed"]
                     err = failed_chunks[0].error_msg if failed_chunks else "Chunk transfer failure"
-                    self.cancel()
+                    self._stop_workers_for_error()
+                    self.save_state()
                     raise RuntimeError(f"Download failed in chunk: {err}")
 
                 if all_finished:
@@ -1189,7 +1389,7 @@ class TurboDownloadEngine:
                 self.on_error(str(e))
         finally:
             self.is_running = False
-            if self._cancel_event.is_set() or any(c.status == "failed" for c in self.chunks):
+            if self._cancel_event.is_set():
                 self.cleanup_temp_files()
 
     def _spawn_worker(self, chunk: DownloadChunk):
@@ -1207,12 +1407,12 @@ class TurboDownloadEngine:
         max_retries = 3
         retry_count = 0
 
-        while retry_count < max_retries and not self._cancel_event.is_set():
+        while retry_count < max_retries and not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
             resp = None
             seg_bytes_read = 0
             try:
                 # Streaming loop across byte range until chunk is fully downloaded
-                while not self._cancel_event.is_set():
+                while not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
                     with chunk.lock:
                         chunk.status = "active"
                         cur_offset = chunk.start_byte + chunk.downloaded_bytes
@@ -1240,7 +1440,16 @@ class TurboDownloadEngine:
                     req = self._create_request()
                     if self.supports_ranges and self.total_size > 0 and req_end is not None:
                         req.add_header("Range", f"bytes={cur_offset}-{req_end}")
-                        file_mode = "ab" if (chunk.downloaded_bytes > 0 and os.path.exists(chunk.part_filepath)) else "wb"
+                        if chunk.downloaded_bytes > 0 and os.path.exists(chunk.part_filepath):
+                            try:
+                                with open(chunk.part_filepath, "r+b") as tf:
+                                    tf.seek(chunk.downloaded_bytes)
+                                    tf.truncate()
+                            except Exception:
+                                pass
+                            file_mode = "ab"
+                        else:
+                            file_mode = "wb"
                     else:
                         chunk.downloaded_bytes = 0
                         file_mode = "wb"
@@ -1261,12 +1470,12 @@ class TurboDownloadEngine:
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
 
                     with open(chunk.part_filepath, file_mode) as f:
-                        while not self._cancel_event.is_set():
+                        while not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
                             # Handle pause
-                            while self._pause_event.is_set() and not self._cancel_event.is_set():
+                            while self._pause_event.is_set() and not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
                                 time.sleep(0.1)
 
-                            if self._cancel_event.is_set():
+                            if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
                                 return
 
                             with chunk.lock:
@@ -1341,9 +1550,16 @@ class TurboDownloadEngine:
                         return
 
             except Exception as e:
+                if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
+                    return
                 if isinstance(e, urllib.error.HTTPError):
                     e.close()
-                if self._cancel_event.is_set():
+                    self.last_http_status = e.code
+                    if e.code in (401, 403, 410):
+                        self.has_expired_link = True
+                        chunk.error_msg = f"HTTP {e.code}: {e.reason} (Expired or Forbidden Link)"
+                        break
+                if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
                     return
                 if seg_bytes_read > 0:
                     retry_count = max(0, retry_count - 1)
@@ -1362,15 +1578,17 @@ class TurboDownloadEngine:
                 if self.on_chunk_update:
                     self.on_chunk_update()
 
-        # If retries exhausted and chunk did not complete
-        if self._cancel_event.is_set():
+        # If retries exhausted or cancelled/aborted and chunk did not complete
+        if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
             return
 
         with chunk.lock:
             if chunk.status != "completed":
                 chunk.status = "failed"
-                chunk.error_msg = f"Connection failed after {max_retries} attempts"
+                if not chunk.error_msg:
+                    chunk.error_msg = f"Connection failed after {max_retries} attempts"
                 self.log(f"Chunk #{chunk.chunk_id} failed permanently: {chunk.error_msg}")
+        self.save_state()
         if self.on_chunk_update:
             self.on_chunk_update()
 
@@ -1426,6 +1644,7 @@ class TurboDownloadEngine:
                 part_filepath=part_path
             )
             self.chunks.append(new_chunk)
+            self.save_state()
 
         self.log(f"[SPLIT] Dynamic Split: Chunk #{candidate.chunk_id} split! Spawned Chunk #{new_id} [{split_start:,} - {old_end:,}]")
         self._spawn_worker(new_chunk)
@@ -1540,6 +1759,222 @@ class TurboDownloadEngine:
             self.log("Cleaned up temporary chunk files.")
         except Exception:
             pass
+
+    def _stop_workers_for_error(self):
+        """Closes active socket connections and signals all workers to abort immediately."""
+        self._error_abort_event.set()
+        with self._lock:
+            for conn in list(self._active_connections):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._active_connections.clear()
+
+    def save_state(self) -> bool:
+        """Serializes current download chunk state and progress into state.json within temp_dir."""
+        try:
+            if not getattr(self, "temp_dir", None):
+                return False
+            os.makedirs(self.temp_dir, exist_ok=True)
+            state_file = os.path.join(self.temp_dir, "state.json")
+            with self._lock:
+                chunks_data = []
+                for c in self.chunks:
+                    with c.lock:
+                        disk_bytes = c.downloaded_bytes
+                        if os.path.exists(c.part_filepath):
+                            try:
+                                disk_bytes = os.path.getsize(c.part_filepath)
+                            except Exception:
+                                pass
+                        chunks_data.append({
+                            "chunk_id": c.chunk_id,
+                            "start_byte": c.start_byte,
+                            "end_byte": c.end_byte,
+                            "downloaded_bytes": disk_bytes,
+                            "status": c.status,
+                            "part_filepath": c.part_filepath,
+                            "error_msg": c.error_msg
+                        })
+                data = {
+                    "url": self.url,
+                    "destination_path": self.destination_path,
+                    "total_size": self.total_size,
+                    "supports_ranges": self.supports_ranges,
+                    "has_expired_link": self.has_expired_link,
+                    "filename": self.filename,
+                    "headers": self.headers,
+                    "chunks": chunks_data
+                }
+            tmp_state = state_file + ".tmp"
+            with open(tmp_state, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp_state, state_file)
+            return True
+        except Exception as e:
+            self.log(f"Warning: Failed to save chunk state: {e}")
+            return False
+
+    def load_state(self) -> bool:
+        """Loads and restores download chunks and progress from state.json if present and valid."""
+        try:
+            if not getattr(self, "temp_dir", None):
+                return False
+            state_file = os.path.join(self.temp_dir, "state.json")
+            if not os.path.isfile(state_file):
+                return False
+            with open(state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            total_size = data.get("total_size", 0)
+            chunks_data = data.get("chunks", [])
+            if not chunks_data:
+                return False
+
+            with self._lock:
+                self.chunks.clear()
+                self.total_size = total_size
+                self.supports_ranges = data.get("supports_ranges", True)
+                self.has_expired_link = data.get("has_expired_link", False)
+                for cd in chunks_data:
+                    part_path = cd.get("part_filepath") or os.path.join(
+                        self.temp_dir, f"{os.path.basename(self.destination_path)}.part_{cd['chunk_id']}"
+                    )
+                    disk_bytes = cd.get("downloaded_bytes", 0)
+                    if os.path.exists(part_path):
+                        try:
+                            actual_disk = os.path.getsize(part_path)
+                            disk_bytes = min(actual_disk, cd["end_byte"] - cd["start_byte"] + 1)
+                        except Exception:
+                            pass
+
+                    expected_span = cd["end_byte"] - cd["start_byte"] + 1
+                    status = cd.get("status", "pending")
+                    if total_size > 0 and disk_bytes >= expected_span:
+                        status = "completed"
+                    elif status == "failed":
+                        status = "pending"
+
+                    chunk = DownloadChunk(
+                        chunk_id=cd["chunk_id"],
+                        start_byte=cd["start_byte"],
+                        end_byte=cd["end_byte"],
+                        downloaded_bytes=disk_bytes,
+                        status=status,
+                        part_filepath=part_path,
+                        error_msg=cd.get("error_msg", "")
+                    )
+                    self.chunks.append(chunk)
+            self.log(f"Restored {len(self.chunks)} chunks from saved state ({sum(c.downloaded_bytes for c in self.chunks):,} bytes downloaded).")
+            return True
+        except Exception as e:
+            self.log(f"Warning: Failed to load chunk state: {e}")
+            return False
+
+    def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):
+        """
+        Updates target download URL and session headers on the fly.
+        Propagates to active workers and persists state.
+        """
+        with self._lock:
+            self.url = str(new_url).strip()
+            if headers:
+                self.headers.update(headers)
+
+            self.is_googlevideo = self.is_googlevideo_url(self.url)
+            if self.is_googlevideo:
+                self.allow_dynamic_split = False
+                self.max_connections = min(self.max_connections, 1)
+
+            for conn in list(self._active_connections):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._active_connections.clear()
+            self.save_state()
+            self.log(f"Download URL updated: {self.url}")
+
+    def validate_new_url(self, new_url: str, headers: Optional[Dict[str, str]] = None) -> Tuple[bool, str, int]:
+        """Validates new URL against current total_size and range requirements."""
+        is_valid, msg, size, ranges = validate_refresh_url(
+            new_url=new_url,
+            expected_size=self.total_size,
+            check_range=self.supports_ranges,
+            ssl_context=self.ssl_context,
+            headers=headers or self.headers
+        )
+        return is_valid, msg, size
+
+    def resume_transfer(self):
+        """Resumes download transfer using existing chunks and part files."""
+        if self.is_running:
+            if self.is_paused:
+                self.resume()
+            return
+
+        self._error_abort_event.clear()
+        with self._lock:
+            prior_workers = list(self.active_workers)
+        for w in prior_workers:
+            if w.is_alive() and w != threading.current_thread():
+                w.join(timeout=0.3)
+
+        self._resume_mode = True
+        self.is_running = True
+        self.is_paused = False
+        self._cancel_event.clear()
+        self._pause_event.clear()
+        self.start_time = time.time()
+        self.last_speed_check_time = time.time()
+
+        supervisor_thread = threading.Thread(target=self._supervisor_loop, daemon=True)
+        supervisor_thread.start()
+
+    def refresh_link(self, new_url: str, headers: Optional[Dict[str, str]] = None, auto_resume: bool = True) -> bool:
+        """
+        Validates new URL, updates download address and headers, and resumes downloading
+        seamlessly from existing chunk progress without losing downloaded parts.
+        """
+        is_valid, err_msg, new_size, new_ranges = validate_refresh_url(
+            new_url=new_url,
+            expected_size=self.total_size,
+            check_range=self.supports_ranges,
+            timeout=12.0,
+            ssl_context=self.ssl_context,
+            headers=headers or self.headers
+        )
+        if not is_valid:
+            self.log(f"[REFRESH ERROR] Validation failed: {err_msg}")
+            raise ValueError(err_msg)
+
+        self.update_url(new_url, headers)
+        self.has_expired_link = False
+        self._error_abort_event.clear()
+
+        if auto_resume:
+            if self.is_running:
+                with self._lock:
+                    for c in self.chunks:
+                        with c.lock:
+                            if c.status == "failed":
+                                c.status = "pending"
+                                c.error_msg = ""
+                if self.is_paused:
+                    self.resume()
+                else:
+                    with self._lock:
+                        active_count = sum(1 for c in self.chunks if c.status == "active")
+                        pending = [c for c in self.chunks if c.status == "pending"]
+                        to_spawn = pending[:max(0, self.max_connections - active_count)]
+                    for c in to_spawn:
+                        self._spawn_worker(c)
+            else:
+                self.resume_transfer()
+
+        self.log(f"[REFRESH SUCCESS] Link refreshed successfully: {new_url}")
+        return True
 
 
 # ======================================================================================
@@ -1679,6 +2114,45 @@ class StreamDownloadCoordinator:
             self._cancel_event.set()
             if self.current_engine:
                 self.current_engine.cancel()
+
+    def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):
+        with self._lock:
+            if self.current_engine:
+                self.current_engine.update_url(new_url, headers)
+
+    def refresh_link(self, new_url: str, headers: Optional[Dict[str, str]] = None, auto_resume: bool = True) -> bool:
+        with self._lock:
+            if self.current_engine:
+                return self.current_engine.refresh_link(new_url, headers, auto_resume)
+            return False
+
+    @property
+    def url(self) -> str:
+        with self._lock:
+            if self.current_engine and getattr(self.current_engine, "url", None):
+                return self.current_engine.url
+            return getattr(self.stream_info, "video_url", "")
+
+    @property
+    def supports_ranges(self) -> bool:
+        with self._lock:
+            if self.current_engine:
+                return getattr(self.current_engine, "supports_ranges", True)
+            return True
+
+    @property
+    def has_expired_link(self) -> bool:
+        with self._lock:
+            if self.current_engine:
+                return getattr(self.current_engine, "has_expired_link", False)
+            return False
+
+    @property
+    def last_http_status(self) -> int:
+        with self._lock:
+            if self.current_engine:
+                return getattr(self.current_engine, "last_http_status", 0)
+            return 0
 
     def _run_coordinator(self):
         video_tmp = ""
@@ -2877,6 +3351,451 @@ DownloadConfirmationDialog = DownloadConfirmationModal
 
 
 # ======================================================================================
+# 3F. SLEEK GRAB-FREE REFRESH EXPIRED LINK MODAL DIALOG
+# ======================================================================================
+
+class RefreshLinkModal(tk.Toplevel):
+    """
+    Modern dark-themed IDM-style dialog for updating an expired or forbidden download link:
+    - Displays current URL, file name, existing progress preserved, and input for the new URL.
+    - Grab-free: strictly avoids grab_set() / grab_set_global() to prevent Win32 message pump traps.
+    - High-DPI scaled, centered over parent, and focused.
+    - Auto-detects valid URLs on clipboard for instant one-click or auto-pasting.
+    - Asynchronously validates the candidate URL with HTTP HEAD/GET Range before committing.
+    - Upon success, calls on_success(new_url, headers) to update TurboDownloadEngine and resume downloading.
+    """
+    def __init__(
+        self,
+        parent: Optional[tk.Tk],
+        old_url: str = "",
+        total_size: int = 0,
+        downloaded_bytes: int = 0,
+        filename: str = "",
+        theme: Optional[Dict[str, str]] = None,
+        on_success: Optional[Callable[[str, Optional[Dict[str, str]]], None]] = None,
+        on_cancel: Optional[Callable[[], None]] = None,
+        ssl_context: Optional[ssl.SSLContext] = None,
+        expected_ranges: bool = True,
+        custom_headers: Optional[Dict[str, str]] = None
+    ):
+        super().__init__(parent)
+        self.old_url = str(old_url or "").strip()
+        self.total_size = max(0, int(total_size or 0))
+        self.downloaded_bytes = max(0, int(downloaded_bytes or 0))
+        self.filename = str(filename or "").strip() or derive_download_filename(self.old_url)
+        self.on_success = on_success
+        self.on_cancel = on_cancel
+        self.ssl_context = ssl_context or get_permissive_ssl_context()
+        self.expected_ranges = expected_ranges
+        self.custom_headers = dict(custom_headers or {})
+        self.result_url: Optional[str] = None
+        self._confirmed = False
+
+        th = theme or {}
+        self.c_bg = th.get("c_bg", "#0f172a")
+        self.c_panel = th.get("c_panel", "#1e293b")
+        self.c_panel_light = th.get("c_panel_light", "#334155")
+        self.c_border = th.get("c_border", "#475569")
+        self.c_text_bright = th.get("c_text_bright", "#f8fafc")
+        self.c_text_muted = th.get("c_text_muted", "#94a3b8")
+        self.c_accent = th.get("c_accent", "#38bdf8")
+        self.c_accent_dark = th.get("c_accent_dark", "#0284c7")
+        self.c_danger = th.get("c_danger", "#ef4444")
+        self.c_success = th.get("c_success", "#10b981")
+        self.c_warning = th.get("c_warning", "#f59e0b")
+        self.c_input_bg = th.get("c_input_bg", "#0b1220")
+
+        self.title("🔄 Refresh Download Address — Turbo Downloader")
+        self.configure(bg=self.c_bg)
+
+        if parent:
+            try:
+                self.transient(parent)
+            except Exception:
+                pass
+
+        # Determine DPI scaling
+        try:
+            dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
+        except Exception:
+            dpi = 96.0
+        self.dpi_scale = max(1.0, dpi / 96.0)
+
+        # Center on parent window
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        dlg_w = min(int(640 * self.dpi_scale), max(520, int(sw * 0.88)))
+        dlg_h = min(int(440 * self.dpi_scale), max(360, int(sh * 0.80)))
+        try:
+            if parent and parent.winfo_exists():
+                px = parent.winfo_x()
+                py = parent.winfo_y()
+                pw = parent.winfo_width() or dlg_w
+                ph = parent.winfo_height() or dlg_h
+            else:
+                px, py, pw, ph = 100, 100, dlg_w, dlg_h
+        except Exception:
+            px, py, pw, ph = 100, 100, dlg_w, dlg_h
+
+        x = max(0, px + (pw - dlg_w) // 2)
+        y = max(0, py + (ph - dlg_h) // 2)
+        self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        self.minsize(min(480, dlg_w), min(320, dlg_h))
+
+        # Icons
+        ico_path = get_resource_path("app_icon.ico")
+        png_path = get_resource_path("app_icon.png")
+        if os.path.isfile(ico_path):
+            try:
+                self.iconbitmap(ico_path)
+            except Exception:
+                pass
+        if os.path.isfile(png_path):
+            try:
+                from PIL import ImageTk
+                self._modal_icon_photo = ImageTk.PhotoImage(file=png_path)
+                self.iconphoto(True, self._modal_icon_photo)
+            except Exception:
+                pass
+
+        # Elevate and focus
+        try:
+            self.lift()
+            self.attributes("-topmost", True)
+            self.focus_force()
+            self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
+        except Exception:
+            pass
+
+        self.parent = parent
+        self._pending_ui_action = None
+
+        self._build_ui(dlg_w)
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.bind("<Escape>", lambda e: self._on_close())
+        self._poll_pending_ui()
+
+    def _poll_pending_ui(self):
+        if getattr(self, "_pending_ui_action", None):
+            self.process_pending_events()
+        if not getattr(self, "_closing", False):
+            try:
+                if self.winfo_exists():
+                    self.after(30, self._poll_pending_ui)
+            except Exception:
+                pass
+
+    def process_pending_events(self):
+        """Processes any asynchronous worker callbacks, vital when running outside mainloop() in tests."""
+        action = getattr(self, "_pending_ui_action", None)
+        if action:
+            self._pending_ui_action = None
+            try:
+                action()
+            except Exception:
+                pass
+
+    def grab_set(self):
+        """No-op: Eliminates Win32 input capture and message pump locking."""
+        pass
+
+    def grab_set_global(self):
+        """No-op: Eliminates Win32 input capture and message pump locking."""
+        pass
+
+    def destroy(self):
+        self._closing = True
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        super().destroy()
+
+    def _build_ui(self, dlg_w: int):
+        container = tk.Frame(self, bg=self.c_bg, padx=16, pady=12)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # Header Banner
+        header = tk.Frame(container, bg=self.c_bg)
+        header.pack(fill=tk.X, pady=(0, 10))
+
+        lbl_icon = tk.Label(header, text="🔄", font=("Segoe UI Emoji", 20), bg=self.c_bg, fg=self.c_accent)
+        lbl_icon.pack(side=tk.LEFT, padx=(0, 10))
+
+        title_box = tk.Frame(header, bg=self.c_bg)
+        title_box.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        lbl_title = tk.Label(
+            title_box,
+            text="Refresh Expired Download Address / تجديد رابط التحميل",
+            font=("Segoe UI", 11, "bold"),
+            bg=self.c_bg,
+            fg=self.c_text_bright,
+            anchor="w"
+        )
+        lbl_title.pack(fill=tk.X)
+
+        lbl_sub = tk.Label(
+            title_box,
+            text="Paste the new active link to continue downloading without losing your downloaded parts.",
+            font=("Segoe UI", 8),
+            bg=self.c_bg,
+            fg=self.c_text_muted,
+            anchor="w"
+        )
+        lbl_sub.pack(fill=tk.X)
+
+        # Preserved State Card
+        info_card = tk.Frame(
+            container,
+            bg=self.c_panel,
+            padx=12,
+            pady=8,
+            relief="flat",
+            highlightbackground=self.c_border,
+            highlightthickness=1
+        )
+        info_card.pack(fill=tk.X, pady=(0, 10))
+
+        # File row
+        row_fn = tk.Frame(info_card, bg=self.c_panel)
+        row_fn.pack(fill=tk.X, pady=2)
+        tk.Label(row_fn, text="File Name:", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
+        tk.Label(row_fn, text=self.filename, font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Progress preserved row
+        row_prog = tk.Frame(info_card, bg=self.c_panel)
+        row_prog.pack(fill=tk.X, pady=2)
+        tk.Label(row_prog, text="Preserved Data:", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
+
+        if self.total_size > 0:
+            pct = min(100.0, (self.downloaded_bytes / self.total_size) * 100.0)
+            prog_txt = f"{self.downloaded_bytes / (1024*1024):.2f} MB of {self.total_size / (1024*1024):.2f} MB ({pct:.1f}%) saved on disk"
+        else:
+            prog_txt = f"{self.downloaded_bytes / (1024*1024):.2f} MB downloaded"
+        tk.Label(row_prog, text=f"🛡️ {prog_txt}", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success, anchor="w").pack(side=tk.LEFT)
+
+        # Old URL row
+        row_old = tk.Frame(info_card, bg=self.c_panel)
+        row_old.pack(fill=tk.X, pady=(4, 2))
+        tk.Label(row_old, text="Old Address:", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
+
+        entry_old = tk.Entry(row_old, font=("Consolas", 8), bg=self.c_input_bg, fg=self.c_text_muted, relief="flat")
+        entry_old.insert(0, self.old_url)
+        entry_old.configure(state="readonly")
+        entry_old.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=1)
+
+        # New URL Input Section
+        input_card = tk.Frame(
+            container,
+            bg=self.c_panel,
+            padx=12,
+            pady=10,
+            relief="flat",
+            highlightbackground=self.c_border,
+            highlightthickness=1
+        )
+        input_card.pack(fill=tk.X, pady=(0, 10))
+
+        lbl_new = tk.Label(
+            input_card,
+            text="New Download URL / رابط التحميل الجديد:",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel,
+            fg=self.c_accent,
+            anchor="w"
+        )
+        lbl_new.pack(fill=tk.X, pady=(0, 6))
+
+        new_url_row = tk.Frame(input_card, bg=self.c_panel)
+        new_url_row.pack(fill=tk.X)
+
+        self.entry_new_url = tk.Entry(
+            new_url_row,
+            font=("Segoe UI", 9),
+            bg=self.c_input_bg,
+            fg=self.c_text_bright,
+            insertbackground=self.c_accent,
+            relief="flat"
+        )
+        self.entry_new_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6), ipady=3)
+        self.entry_new_url.bind("<Return>", lambda e: self._start_validation())
+        self.entry_url = self.entry_new_url
+        self._check_clipboard = self._check_clipboard_auto_fill
+
+        btn_paste = tk.Button(
+            new_url_row,
+            text="📋 Paste",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            cursor="hand2",
+            padx=8,
+            pady=2,
+            command=self._paste_clipboard
+        )
+        btn_paste.pack(side=tk.RIGHT)
+
+        # Auto-detect valid candidate from clipboard
+        self._check_clipboard_auto_fill()
+
+        # Status Label Area
+        self.lbl_status = tk.Label(
+            container,
+            text="Paste the new download link and click Validate & Resume.",
+            font=("Segoe UI", 8),
+            bg=self.c_bg,
+            fg=self.c_text_muted,
+            wraplength=max(400, dlg_w - 50),
+            justify="left",
+            anchor="w"
+        )
+        self.lbl_status.pack(fill=tk.X, pady=(2, 10))
+
+        # Action Buttons
+        btn_row = tk.Frame(container, bg=self.c_bg)
+        btn_row.pack(fill=tk.X, side=tk.BOTTOM)
+
+        self.btn_validate = tk.Button(
+            btn_row,
+            text="🔄 Validate & Resume (تحديث واستئناف)",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_success,
+            fg="white",
+            relief="flat",
+            activebackground="#059669",
+            cursor="hand2",
+            padx=14,
+            pady=5,
+            command=self._start_validation
+        )
+        self.btn_validate.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_cancel = tk.Button(
+            btn_row,
+            text="✕ Cancel (إلغاء)",
+            font=("Segoe UI", 9),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_border,
+            cursor="hand2",
+            padx=12,
+            pady=5,
+            command=self._on_close
+        )
+        self.btn_cancel.pack(side=tk.LEFT)
+
+    def _check_clipboard_auto_fill(self):
+        """Auto-populates new URL entry if clipboard contains a valid download URL different from old."""
+        try:
+            clip = get_clipboard_text(self)
+            if clip:
+                clip = clip.strip()
+                if (clip.startswith("http://") or clip.startswith("https://")) and clip != self.old_url:
+                    self.entry_new_url.delete(0, tk.END)
+                    self.entry_new_url.insert(0, clip)
+                    self.entry_new_url.select_range(0, tk.END)
+        except Exception:
+            pass
+
+    def _paste_clipboard(self):
+        try:
+            clip = get_clipboard_text(self)
+            if clip:
+                self.entry_new_url.delete(0, tk.END)
+                self.entry_new_url.insert(0, clip.strip())
+        except Exception:
+            pass
+
+    def _set_status(self, msg: str, is_error: bool = False, is_info: bool = False, is_success: bool = False):
+        if not self.winfo_exists():
+            return
+        if is_error:
+            col = self.c_danger
+        elif is_success:
+            col = self.c_success
+        elif is_info:
+            col = self.c_accent
+        else:
+            col = self.c_text_muted
+        self.lbl_status.configure(text=msg, fg=col)
+
+    def _start_validation(self):
+        new_url = self.entry_new_url.get().strip()
+        if not new_url:
+            self._set_status("Please paste a valid HTTP or HTTPS download link.", is_error=True)
+            return
+        if not (new_url.startswith("http://") or new_url.startswith("https://")):
+            self._set_status("Invalid URL scheme. Link must begin with http:// or https://", is_error=True)
+            return
+
+        self.btn_validate.configure(state="disabled", text="⏳ Validating...")
+        self.btn_cancel.configure(state="disabled")
+        self._set_status("Connecting to remote server and verifying byte ranges...", is_info=True)
+
+        def _worker():
+            is_valid, msg, remote_size, ranges_ok = validate_refresh_url(
+                new_url=new_url,
+                expected_size=self.total_size,
+                check_range=self.expected_ranges,
+                timeout=12.0,
+                ssl_context=self.ssl_context,
+                headers=self.custom_headers
+            )
+            def _ui_done():
+                if not self.winfo_exists():
+                    return
+                if is_valid:
+                    self._on_validation_success(new_url, remote_size)
+                else:
+                    self._on_validation_failure(msg)
+            self._pending_ui_action = _ui_done
+            try:
+                self.after(0, _ui_done)
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_worker, daemon=True)
+        self._validating_thread = t
+        t.start()
+
+    def _on_validation_success(self, new_url: str, remote_size: int):
+        self._set_status(f"✅ Verified successfully! Remote size: {remote_size:,} bytes. Resuming...", is_success=True)
+        self.result_url = new_url
+        self._confirmed = True
+        if self.on_success:
+            try:
+                self.on_success(new_url, self.custom_headers)
+            except Exception as e:
+                self._set_status(f"Error applying update: {e}", is_error=True)
+                self.btn_validate.configure(state="normal", text="🔄 Validate & Resume")
+                self.btn_cancel.configure(state="normal")
+                return
+        self.destroy()
+
+    def _on_validation_failure(self, err_msg: str):
+        self.btn_validate.configure(state="normal", text="🔄 Validate & Resume")
+        self.btn_cancel.configure(state="normal")
+        self._set_status(f"❌ {err_msg}", is_error=True)
+
+    def _on_close(self):
+        self._confirmed = False
+        self.destroy()
+        if self.on_cancel:
+            try:
+                self.on_cancel()
+            except Exception:
+                pass
+
+
+RefreshLinkDialog = RefreshLinkModal
+
+
+# ======================================================================================
 # 4. MODERN FRAMELESS WINDOW GUI (DARK THEME & SEGMENTED CHUNK VISUALIZER)
 # ======================================================================================
 
@@ -3500,6 +4419,13 @@ class ModernFramelessGUI:
             except Exception:
                 pass
             self._confirm_modal = None
+        if hasattr(self, "_refresh_modal") and self._refresh_modal:
+            try:
+                if self._refresh_modal.winfo_exists():
+                    self._refresh_modal.destroy()
+            except Exception:
+                pass
+            self._refresh_modal = None
 
     def _on_close(self):
         """Graceful application exit."""
@@ -3579,6 +4505,9 @@ class ModernFramelessGUI:
 
         btn_paste = tk.Button(url_row, text="📋 Paste", font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._paste_url)
         btn_paste.pack(side=tk.RIGHT)
+
+        btn_refresh_url = tk.Button(url_row, text="🔄 Refresh Link", font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._open_refresh_link_dialog)
+        btn_refresh_url.pack(side=tk.RIGHT, padx=(0, 6))
 
         # Destination Row
         dest_row = tk.Frame(card, bg=self.c_panel)
@@ -3747,6 +4676,22 @@ class ModernFramelessGUI:
             command=self._on_cancel_download
         )
         self.btn_cancel.pack(side=tk.LEFT)
+
+        self.btn_refresh_link = tk.Button(
+            row2,
+            text="🔄 Refresh Link",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            command=self._open_refresh_link_dialog
+        )
+        self.btn_refresh_link.pack(side=tk.LEFT, padx=(8, 0))
 
         self.btn_browser = tk.Button(
             row2,
@@ -4023,6 +4968,10 @@ class ModernFramelessGUI:
         self.tree_chunks.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll_tree.pack(side=tk.RIGHT, fill=tk.Y)
 
+        self._build_tree_context_menu()
+        self.tree_chunks.bind("<Button-3>", self._show_tree_context_menu)
+        self.tree_chunks.bind("<Button-2>", self._show_tree_context_menu)
+
         # Tab 2: Activity Console Log
         tab_logs = tk.Frame(notebook, bg=self.c_panel)
         notebook.add(tab_logs, text="  📜 Activity Log  ")
@@ -4108,6 +5057,8 @@ class ModernFramelessGUI:
         self.btn_start.configure(state="disabled")
         self.btn_pause.configure(state="normal", text="⏸ Pause", bg=self.c_panel_light)
         self.btn_cancel.configure(state="normal")
+        if hasattr(self, "btn_refresh_link"):
+            self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
         self.txt_log.delete("1.0", tk.END)
 
         # Clear existing chunk rows from previous downloads
@@ -4147,6 +5098,8 @@ class ModernFramelessGUI:
         self.btn_start.configure(state="disabled")
         self.btn_pause.configure(state="disabled")
         self.btn_cancel.configure(state="normal")
+        if hasattr(self, "btn_refresh_link"):
+            self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
         self.txt_log.delete("1.0", tk.END)
 
         for item in self.tree_chunks.get_children():
@@ -5037,6 +5990,8 @@ class ModernFramelessGUI:
         else:
             self.engine.pause()
             self.btn_pause.configure(text="▶ Resume", bg=self.c_warning)
+            if hasattr(self, "btn_refresh_link"):
+                self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
 
     def _on_cancel_download(self):
         if hasattr(self, "_yt_cancel_event"):
@@ -5063,11 +6018,20 @@ class ModernFramelessGUI:
             except Exception:
                 pass
             self._active_modal_dialog = None
+        if hasattr(self, "_refresh_modal") and self._refresh_modal:
+            try:
+                if self._refresh_modal.winfo_exists():
+                    self._refresh_modal.destroy()
+            except Exception:
+                pass
+            self._refresh_modal = None
         if self.engine:
             self.engine.cancel()
         self.btn_start.configure(state="normal")
         self.btn_pause.configure(state="disabled", text="⏸ Pause", bg=self.c_panel_light)
         self.btn_cancel.configure(state="disabled")
+        if hasattr(self, "btn_refresh_link"):
+            self.btn_refresh_link.configure(state="disabled", bg=self.c_panel_light, fg=self.c_text_muted)
         self.card_size.configure(text="Ready")
         self.log("[CANCEL] Operation cancelled by user.")
 
@@ -5152,7 +6116,10 @@ class ModernFramelessGUI:
                 span_str = f"{span:,} B"
                 done_str = f"{c.downloaded_bytes:,} B"
                 pct_str = f"{pct_val:.1f}%"
-                status_str = c.status.capitalize()
+                if c.status == "failed" and any(k in str(c.error_msg).lower() for k in ("expired", "401", "403", "410", "forbidden")):
+                    status_str = "Expired ⚠️"
+                else:
+                    status_str = c.status.capitalize()
                 range_str = f"{c.start_byte:,} — {c.end_byte:,}"
 
             vals = (f"#{c.chunk_id}", range_str, span_str, done_str, pct_str, status_str)
@@ -5196,6 +6163,8 @@ class ModernFramelessGUI:
             self.btn_start.configure(state="normal")
             self.btn_pause.configure(state="disabled", text="⏸ Pause", bg=self.c_panel_light)
             self.btn_cancel.configure(state="disabled")
+            if hasattr(self, "btn_refresh_link"):
+                self.btn_refresh_link.configure(state="disabled", bg=self.c_panel_light, fg=self.c_text_muted)
             msg = (
                 f"File verified & assembled without corruption!\n\n"
                 f"Saved to: {path}\n"
@@ -5252,6 +6221,15 @@ class ModernFramelessGUI:
                     self.btn_cancel.configure(state="disabled")
                 except Exception:
                     pass
+            is_expired = any(k in str(error_msg) for k in ("401", "403", "410", "Forbidden", "Expired", "Unauthorized"))
+            if hasattr(self, "btn_refresh_link"):
+                try:
+                    if is_expired:
+                        self.btn_refresh_link.configure(state="normal", bg=getattr(self, "c_warning", "#f59e0b"), fg="#0f172a")
+                    else:
+                        self.btn_refresh_link.configure(state="normal", bg=getattr(self, "c_panel_light", "#334155"), fg=getattr(self, "c_accent", "#38bdf8"))
+                except Exception:
+                    pass
             if hasattr(self, "card_size"):
                 try:
                     self.card_size.configure(text="Ready")
@@ -5262,6 +6240,23 @@ class ModernFramelessGUI:
                     self.log(f"[ERROR] Download Error: {error_msg}")
                 except Exception:
                     pass
+
+            if is_expired:
+                msg = (
+                    f"Download stopped: Server rejected session (HTTP 401/403/410).\n\n"
+                    f"Details: {error_msg}\n\n"
+                    f"💡 All partially downloaded chunk files are safely preserved on disk.\n"
+                    f"Would you like to refresh the download link now to resume?"
+                )
+                if hasattr(self, "ask_safe_yesno"):
+                    def _on_yes_refresh():
+                        self._open_refresh_link_dialog()
+                    self.ask_safe_yesno(
+                        "Download Link Expired ⚠️",
+                        msg,
+                        on_yes=_on_yes_refresh
+                    )
+                    return
 
             msg = f"Encountered error during download:\n\n{error_msg}"
             if hasattr(self, "show_safe_error"):
@@ -5287,6 +6282,169 @@ class ModernFramelessGUI:
                 _err()
         except Exception:
             pass
+
+    def _open_refresh_link_dialog(self):
+        """Displays sleek, dark-themed, grab-free Refresh Link modal dialog."""
+        current_url = ""
+        if self.engine and getattr(self.engine, "url", None):
+            current_url = self.engine.url
+        elif hasattr(self, "entry_url"):
+            current_url = self.entry_url.get().strip()
+
+        total_size = 0
+        downloaded_bytes = 0
+        if self.engine:
+            total_size = getattr(self.engine, "total_size", 0)
+            chunks = getattr(self.engine, "chunks", [])
+            downloaded_bytes = sum(c.downloaded_bytes for c in chunks) if chunks else 0
+
+        dest_path = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
+        filename = os.path.basename(dest_path) if dest_path else "download.bin"
+        expected_ranges = getattr(self.engine, "supports_ranges", True) if self.engine else True
+
+        if hasattr(self, "_refresh_modal") and self._refresh_modal:
+            try:
+                if self._refresh_modal.winfo_exists():
+                    self._refresh_modal.destroy()
+            except Exception:
+                pass
+            self._refresh_modal = None
+
+        self._refresh_modal = RefreshLinkModal(
+            parent=self.root,
+            old_url=current_url,
+            total_size=total_size,
+            downloaded_bytes=downloaded_bytes,
+            filename=filename,
+            theme=self._theme_dict(),
+            on_success=self._on_link_refreshed_success,
+            expected_ranges=expected_ranges
+        )
+
+    def _on_link_refreshed_success(self, new_url: str, headers: Optional[Dict[str, str]] = None):
+        """Callback invoked when user confirms a validated new download URL."""
+        try:
+            if hasattr(self, "entry_url"):
+                self.entry_url.delete(0, tk.END)
+                self.entry_url.insert(0, new_url)
+
+            if self.engine:
+                self.engine.refresh_link(new_url, headers=headers, auto_resume=True)
+                if hasattr(self, "btn_start"):
+                    self.btn_start.configure(state="disabled")
+                if hasattr(self, "btn_pause"):
+                    self.btn_pause.configure(state="normal", text="⏸ Pause", bg=self.c_panel_light)
+                if hasattr(self, "btn_cancel"):
+                    self.btn_cancel.configure(state="normal")
+                if hasattr(self, "btn_refresh_link"):
+                    self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
+                self.log(f"[REFRESH] Link refreshed successfully: {new_url}")
+                self.show_safe_info(
+                    "Link Refreshed Successfully 🔄",
+                    f"Download address updated to:\n{new_url}\n\nResuming download seamlessly from existing progress without losing data!"
+                )
+            else:
+                self.log(f"[REFRESH] URL updated: {new_url}")
+                self.show_safe_info("URL Updated", f"Download URL updated to:\n{new_url}\n\nClick '▶ Start Download' to begin.")
+        except Exception as e:
+            self.show_safe_error("Refresh Link Failed", f"Could not refresh download link:\n{e}")
+
+    def _build_tree_context_menu(self):
+        """Constructs right-click context menu for download task & chunk view."""
+        self.tree_context_menu = tk.Menu(
+            self.tree_chunks,
+            tearoff=0,
+            bg=self.c_panel,
+            fg=self.c_text_bright,
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            relief="flat",
+            bd=1
+        )
+        self.tree_context_menu.add_command(
+            label="🔄 Refresh Download Address (تحديث الرابط)...",
+            command=self._open_refresh_link_dialog
+        )
+        self.tree_context_menu.add_separator()
+        self.tree_context_menu.add_command(
+            label="▶ Resume Download (استئناف)",
+            command=self._menu_resume
+        )
+        self.tree_context_menu.add_command(
+            label="⏸ Pause Download (إيقاف مؤقت)",
+            command=self._menu_pause
+        )
+        self.tree_context_menu.add_command(
+            label="⏹ Cancel Download (إلغاء)",
+            command=self._on_cancel_download
+        )
+        self.tree_context_menu.add_separator()
+        self.tree_context_menu.add_command(
+            label="📋 Copy Download URL (نسخ الرابط)",
+            command=self._copy_current_url
+        )
+        self.tree_context_menu.add_command(
+            label="📁 Open Download Folder (فتح المجلد)",
+            command=self._open_download_folder
+        )
+
+    def _show_tree_context_menu(self, event):
+        """Displays right-click context menu on treeview."""
+        if not hasattr(self, "tree_context_menu"):
+            self._build_tree_context_menu()
+        try:
+            iid = self.tree_chunks.identify_row(event.y)
+            if iid:
+                self.tree_chunks.selection_set(iid)
+                self.tree_chunks.focus(iid)
+        except Exception:
+            pass
+        try:
+            self.tree_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                self.tree_context_menu.grab_release()
+            except Exception:
+                pass
+
+    def _menu_resume(self):
+        if self.engine and self.engine.is_paused:
+            self._on_pause_resume()
+        elif self.engine and not self.engine.is_running:
+            self.engine.resume_transfer()
+            self.btn_start.configure(state="disabled")
+            self.btn_pause.configure(state="normal", text="⏸ Pause", bg=self.c_panel_light)
+            self.btn_cancel.configure(state="normal")
+            if hasattr(self, "btn_refresh_link"):
+                self.btn_refresh_link.configure(state="normal")
+
+    def _menu_pause(self):
+        if self.engine and self.engine.is_running and not self.engine.is_paused:
+            self._on_pause_resume()
+
+    def _copy_current_url(self):
+        url = (self.engine.url if self.engine else self.entry_url.get()).strip()
+        if url:
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(url)
+                self.log(f"Copied download URL to clipboard: {url}")
+            except Exception:
+                pass
+
+    def _open_download_folder(self):
+        dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
+        folder = os.path.dirname(dest) if dest else os.path.expanduser("~")
+        if os.path.isdir(folder):
+            try:
+                if sys.platform.startswith("win"):
+                    os.startfile(folder)
+                elif sys.platform.startswith("darwin"):
+                    subprocess.Popen(["open", folder])
+                else:
+                    subprocess.Popen(["xdg-open", folder])
+            except Exception as e:
+                self.log(f"Failed to open folder: {e}")
 
 
 # ======================================================================================
