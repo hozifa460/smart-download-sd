@@ -1,13 +1,13 @@
 """
 ========================================================================================
-🚀 TURBO DOWNLOAD MANAGER PRO — Custom TDM Dynamic Chunking & Bandwidth Limiting Engine
+🚀 SMART DOWNLOAD (SD) — Custom Dynamic Chunking & Bandwidth Limiting Engine
 ========================================================================================
 A high-performance, standalone Python download manager implementing:
 1. Dynamic on-the-fly chunk splitting (Adaptive largest-remainder candidate selection & midpoint split).
 2. Strict non-corrupt sequential assembly (64KB streaming buffers & byte boundary assertions).
 3. Per-download manual speed limiter (Token Bucket rate limiter adjustable live during download).
 4. Modern sleek Frameless Window GUI with dark aesthetic, draggable title bar, taskbar integration,
-   speed limiter slider + presets, and visual segmented chunk progress bar (TDM style).
+   speed limiter slider + presets, and visual segmented chunk progress bar (SD style).
 
 100% Standard Library: No external pip packages required. Runs directly on Python 3.8+ on Windows/Linux/macOS.
 ========================================================================================
@@ -5139,7 +5139,7 @@ class SystemTrayManager:
     1. Modern application icon (app_icon.ico / app_icon.png) rendered cleanly.
     2. Single-click and double-click restore and elevate main application window.
     3. Right-click context menu:
-       - 🖥️ Open Turbo Downloader
+       - 🖥️ Open Smart Download (SD)
        - 📋 Clipboard Sniffer: Active / Paused
        - 🚀 Start with Windows: ON / OFF
        - ❌ Exit Completely

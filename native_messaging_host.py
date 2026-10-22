@@ -1,10 +1,10 @@
 """
 ========================================================================================
-🌐 NATIVE MESSAGING HOST — Turbo Download Manager Pro
+🌐 NATIVE MESSAGING HOST — Smart Download (SD)
 ========================================================================================
 Implements Chromium & Microsoft Edge Native Messaging Host protocol (stdio):
 1. Reads 32-bit length-prefixed JSON from standard input.
-2. Dispatches commands ("ping", "download", "status") to Turbo Download Manager.
+2. Dispatches commands ("ping", "download", "status") to Smart Download (SD).
 3. Forwards download tasks to the desktop application's loopback bridge (127.0.0.1:9242).
 4. Writes 32-bit length-prefixed JSON response to standard output.
 5. Zero external dependencies — pure Python standard library.

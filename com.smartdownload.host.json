@@ -4,6 +4,8 @@
   "path": "C:\\Users\\hazoz\\OneDrive\\Desktop\\swi copy\\sd_host.bat",
   "type": "stdio",
   "allowed_origins": [
+    "chrome-extension://smart-download-integration/",
+    "chrome-extension://com.smartdownload.extension/",
     "chrome-extension://turbo-downloader-integration/",
     "chrome-extension://com.turbodownloader.extension/",
     "chrome-extension://gokbjcmdmbjlngbdpanlccbfpmppjloa/",

@@ -1,6 +1,6 @@
 """
 ========================================================================================
-🌐 BROWSER INTEGRATION BRIDGE (IPC LOOPBACK SERVER) — Turbo Download Manager Pro
+🌐 BROWSER INTEGRATION BRIDGE (IPC LOOPBACK SERVER) — Smart Download (SD)
 ========================================================================================
 High-performance, lightweight loopback IPC HTTP server for browser extension integration:
 1. Listens strictly on 127.0.0.1 (default port 9242).

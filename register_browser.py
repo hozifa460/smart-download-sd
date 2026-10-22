@@ -60,7 +60,7 @@ def compute_unpacked_extension_id(extension_dir: str) -> str:
         ext_id = "".join(chr(ord('a') + int(c, 16)) for c in digest)
         return ext_id
     except Exception:
-        return "turbodownloaderextensionid"
+        return "smartdownloadextensionid"
 
 
 # Deterministic static extension ID corresponding to the extension's RSA public key in manifest.json
@@ -76,6 +76,8 @@ def get_default_extension_origins(
     Compiles list of allowed extension origins for Chrome and Edge.
     """
     origins = [
+        "chrome-extension://smart-download-integration/",
+        "chrome-extension://com.smartdownload.extension/",
         "chrome-extension://turbo-downloader-integration/",
         "chrome-extension://com.turbodownloader.extension/",
         f"chrome-extension://{STATIC_EXTENSION_ID}/"
@@ -629,7 +631,7 @@ def check_and_register_browser(
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Turbo Download Manager Browser Registration Utility")
+    parser = argparse.ArgumentParser(description="Smart Download (SD) Browser Registration Utility")
     parser.add_argument("--register", action="store_true", help="Register Native Messaging Host in Windows Registry")
     parser.add_argument("--unregister", action="store_true", help="Unregister Native Messaging Host and Extensions")
     parser.add_argument("--status", action="store_true", help="Check current registration status")

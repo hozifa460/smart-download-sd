@@ -85,9 +85,19 @@ def extract_badge(src_path: str) -> Image.Image:
     dist_out = distance_transform_edt(~bin_m)
     signed_dist = dist_in - dist_out
     new_a = np.clip((signed_dist - 2.5) + 0.5, 0.0, 1.0) * 255.0
-    badge.putalpha(Image.fromarray(new_a.astype(np.uint8)))
+
+    # Ensure zero RGB fringe where fully transparent
+    badge_np = np.array(badge)
+    badge_np[:, :, 3] = new_a.astype(np.uint8)
+    badge_np[badge_np[:, :, 3] == 0, :3] = 0
+    badge = Image.fromarray(badge_np)
 
     return badge.resize((512, 512), Image.Resampling.LANCZOS)
+
+def clean_transparent_rgb(im: Image.Image) -> Image.Image:
+    arr = np.array(im)
+    arr[arr[:, :, 3] == 0, :3] = 0
+    return Image.fromarray(arr)
 
 def main():
     src_path = r'C:/Users/hazoz/.gemini/antigravity/brain/1fb424b8-7352-420a-9e4e-5a26862632b1/.user_uploaded/media_1792680613694_4ba98c90.jpg'
@@ -101,7 +111,8 @@ def main():
     else:
         print("Extracting master 512x512 icon from artwork...")
         master = extract_badge(src_path)
-        icon256 = master.resize((256, 256), Image.Resampling.LANCZOS)
+        master = clean_transparent_rgb(master)
+        icon256 = clean_transparent_rgb(master.resize((256, 256), Image.Resampling.LANCZOS))
         icon256.save("app_icon.png", format="PNG")
         print("Saved app_icon.png (256x256)")
 
@@ -117,9 +128,9 @@ def main():
     # Update extension icons
     for d in ["extension/icons", "dist/extension/icons"]:
         os.makedirs(d, exist_ok=True)
-        master.resize((16, 16), Image.Resampling.LANCZOS).save(os.path.join(d, "icon16.png"), format="PNG")
-        master.resize((48, 48), Image.Resampling.LANCZOS).save(os.path.join(d, "icon48.png"), format="PNG")
-        master.resize((128, 128), Image.Resampling.LANCZOS).save(os.path.join(d, "icon128.png"), format="PNG")
+        clean_transparent_rgb(master.resize((16, 16), Image.Resampling.LANCZOS)).save(os.path.join(d, "icon16.png"), format="PNG")
+        clean_transparent_rgb(master.resize((48, 48), Image.Resampling.LANCZOS)).save(os.path.join(d, "icon48.png"), format="PNG")
+        clean_transparent_rgb(master.resize((128, 128), Image.Resampling.LANCZOS)).save(os.path.join(d, "icon128.png"), format="PNG")
         print(f"Updated icons in {d}")
 
 if __name__ == "__main__":

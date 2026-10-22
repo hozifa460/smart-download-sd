@@ -1,6 +1,6 @@
 /**
  * ======================================================================================
- * ⚡ TURBO DOWNLOAD MANAGER PRO — Popup UI Script
+ * ⚡ SMART DOWNLOAD (SD) — Popup UI Script
  * ======================================================================================
  */
 
@@ -130,9 +130,9 @@ btnDownloadTab.addEventListener("click", async () => {
       });
 
       if (res.ok) {
-        showToast("Sent to Turbo Download Manager! 🚀");
+        showToast("Sent to Smart Download (SD)! 🚀");
       } else {
-        showToast("Failed to dispatch to Turbo App", true);
+        showToast("Failed to dispatch to Smart Download", true);
       }
     } catch (err) {
       showToast("Desktop app is not reachable", true);

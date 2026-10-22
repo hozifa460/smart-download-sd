@@ -1,12 +1,12 @@
 """
 ========================================================================================
-🚀 TURBO DOWNLOAD MANAGER PRO — Windows Standalone Installer & Uninstaller
+🚀 SMART DOWNLOAD (SD) — Windows Standalone Installer & Uninstaller
 ========================================================================================
 Zero-admin / UAC-free User-Level Windows Installer:
-1. Installs to %LocalAppData%\\Programs\\TurboDownloader (like VS Code / Discord / Chrome).
-2. Copies TurboDownloader.exe, app icons, browser extension files, and host manifests.
+1. Installs to %LocalAppData%\\Programs\\SmartDownload (like VS Code / Discord / Chrome).
+2. Copies SmartDownload.exe, app icons, browser extension files, and host manifests.
 3. Creates Desktop Shortcut and Start Menu Shortcut with app_icon.ico.
-4. Registers Windows Uninstall entry in HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TurboDownloader.
+4. Registers Windows Uninstall entry in HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SmartDownload.
 5. Registers Chrome & Edge browser extension and native messaging host during setup.
 6. Clean uninstallation support via GUI or command-line (--uninstall / /S).
 7. Modern, sleek High-DPI aware, grab-free Tkinter dark aesthetic with smooth progress.

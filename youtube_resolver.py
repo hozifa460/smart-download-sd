@@ -1,6 +1,6 @@
 """
 ========================================================================================
-🎥 YOUTUBE & STREAMING RESOLVER MODULE — Turbo Download Manager Pro
+🎥 YOUTUBE & STREAMING RESOLVER MODULE — Smart Download (SD)
 ========================================================================================
 Modular resolver layer for YouTube and streaming media:
 1. Regex-based pattern matching for YouTube URLs (watch, shorts, embed, live, youtu.be).

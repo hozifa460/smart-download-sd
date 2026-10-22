@@ -542,43 +542,41 @@ class TestStreamCoordinatorIntegration(unittest.TestCase):
 
     def test_coordinator_progressive_download(self):
         """Verifies progressive stream download through coordinator with bit-perfect validation."""
-        payload = os.urandom(512 * 1024)
-        expected_hash = hashlib.sha256(payload).hexdigest()
-        self.data_store["prog_video.mp4"] = payload
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = os.urandom(512 * 1024)
+            expected_hash = hashlib.sha256(payload).hexdigest()
+            self.data_store["prog_video.mp4"] = payload
 
-        stream_info = YouTubeStreamInfo(
-            video_id="test1234567",
-            title="Progressive Test",
-            clean_filename="Progressive_Test.mp4",
-            is_progressive=True,
-            video_url=f"http://127.0.0.1:{self.port}/prog_video.mp4",
-            video_size=len(payload)
-        )
+            stream_info = YouTubeStreamInfo(
+                video_id="test1234567",
+                title="Progressive Test",
+                clean_filename="Progressive_Test.mp4",
+                is_progressive=True,
+                video_url=f"http://127.0.0.1:{self.port}/prog_video.mp4",
+                video_size=len(payload)
+            )
 
-        out_path = "test_coord_prog_out.mp4"
-        if os.path.exists(out_path):
-            os.remove(out_path)
+            out_path = os.path.join(tmp_dir, "test_coord_prog_out.mp4")
 
-        completed = threading.Event()
-        errors = []
+            completed = threading.Event()
+            errors = []
 
-        coord = StreamDownloadCoordinator(
-            stream_info=stream_info,
-            destination_path=out_path,
-            max_connections=4,
-            on_complete=lambda path, size, elapsed: completed.set(),
-            on_error=lambda err: (errors.append(err), completed.set())
-        )
-        coord.start()
-        self.assertTrue(completed.wait(timeout=10), "Coordinator timed out")
-        self.assertEqual(len(errors), 0, f"Coordinator failed: {errors}")
-        self.assertTrue(os.path.exists(out_path))
+            coord = StreamDownloadCoordinator(
+                stream_info=stream_info,
+                destination_path=out_path,
+                max_connections=4,
+                on_complete=lambda path, size, elapsed: completed.set(),
+                on_error=lambda err: (errors.append(err), completed.set())
+            )
+            coord.start()
+            self.assertTrue(completed.wait(timeout=10), "Coordinator timed out")
+            self.assertEqual(len(errors), 0, f"Coordinator failed: {errors}")
+            self.assertTrue(os.path.exists(out_path))
 
-        with open(out_path, "rb") as f:
-            actual_hash = hashlib.sha256(f.read()).hexdigest()
-        self.assertEqual(actual_hash, expected_hash)
-        if os.path.exists(out_path):
-            os.remove(out_path)
+            with open(out_path, "rb") as f:
+                actual_hash = hashlib.sha256(f.read()).hexdigest()
+            self.assertEqual(actual_hash, expected_hash)
 
     def test_coordinator_dual_stream_with_merge(self):
         """Verifies dual-stream coordinator downloading video and audio separately and merging via FFmpeg."""
@@ -586,13 +584,11 @@ class TestStreamCoordinatorIntegration(unittest.TestCase):
         if not ffmpeg_bin:
             self.skipTest("FFmpeg not installed")
 
-        # Generate small valid MP4 and AAC files
-        temp_dir = "test_dual_stream_tmp"
-        os.makedirs(temp_dir, exist_ok=True)
-        raw_v_path = os.path.join(temp_dir, "raw_v.mp4")
-        raw_a_path = os.path.join(temp_dir, "raw_a.m4a")
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            raw_v_path = os.path.join(temp_dir, "raw_v.mp4")
+            raw_a_path = os.path.join(temp_dir, "raw_a.m4a")
 
-        try:
             subprocess.run([
                 ffmpeg_bin, "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=1",
                 "-c:v", "libx264", raw_v_path
@@ -625,9 +621,7 @@ class TestStreamCoordinatorIntegration(unittest.TestCase):
                 audio_ext="m4a"
             )
 
-            out_merged = "test_coord_merged_out.mp4"
-            if os.path.exists(out_merged):
-                os.remove(out_merged)
+            out_merged = os.path.join(temp_dir, "test_coord_merged_out.mp4")
 
             completed = threading.Event()
             errors = []
@@ -664,42 +658,39 @@ class TestStreamCoordinatorIntegration(unittest.TestCase):
                     f"Progress jumped backwards at index {i}: {progress_history[i-1]}% -> {progress_history[i]}%"
                 )
 
-            if os.path.exists(out_merged):
-                os.remove(out_merged)
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
     def test_coordinator_cancel_cleanup(self):
         """Verifies that cancelling StreamDownloadCoordinator cleans up part files cleanly."""
-        payload = os.urandom(1024 * 1024)
-        self.data_store["cancel_v.mp4"] = payload
-        self.data_store["cancel_a.m4a"] = payload
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = os.urandom(1024 * 1024)
+            self.data_store["cancel_v.mp4"] = payload
+            self.data_store["cancel_a.m4a"] = payload
 
-        stream_info = YouTubeStreamInfo(
-            video_id="cancel_test",
-            title="Cancel Test",
-            clean_filename="Cancel_Test.mp4",
-            is_progressive=False,
-            video_url=f"http://127.0.0.1:{self.port}/cancel_v.mp4",
-            video_size=len(payload),
-            audio_url=f"http://127.0.0.1:{self.port}/cancel_a.m4a",
-            audio_size=len(payload)
-        )
+            stream_info = YouTubeStreamInfo(
+                video_id="cancel_test",
+                title="Cancel Test",
+                clean_filename="Cancel_Test.mp4",
+                is_progressive=False,
+                video_url=f"http://127.0.0.1:{self.port}/cancel_v.mp4",
+                video_size=len(payload),
+                audio_url=f"http://127.0.0.1:{self.port}/cancel_a.m4a",
+                audio_size=len(payload)
+            )
 
-        out_path = "test_coord_cancel_out.mp4"
-        coord = StreamDownloadCoordinator(
-            stream_info=stream_info,
-            destination_path=out_path,
-            max_connections=2
-        )
-        coord.start()
-        time.sleep(0.05)
-        coord.cancel()
-        time.sleep(0.3)
+            out_path = os.path.join(tmp_dir, "test_coord_cancel_out.mp4")
+            coord = StreamDownloadCoordinator(
+                stream_info=stream_info,
+                destination_path=out_path,
+                max_connections=2
+            )
+            coord.start()
+            time.sleep(0.05)
+            coord.cancel()
+            time.sleep(0.3)
 
-        self.assertFalse(coord.is_running)
-        self.assertFalse(os.path.exists(out_path + ".video.tmp"))
-        self.assertFalse(os.path.exists(out_path + ".audio.tmp"))
+            self.assertFalse(coord.is_running)
+            self.assertFalse(os.path.exists(out_path + ".video.tmp"))
+            self.assertFalse(os.path.exists(out_path + ".audio.tmp"))
 
 
 class TestBrowserBridgeConcurrency(unittest.TestCase):
@@ -4403,7 +4394,7 @@ class TestStandaloneExeBuild(unittest.TestCase):
         proc = subprocess.Popen([exe_path, "--minimized"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             connected = False
-            for _ in range(25):
+            for _ in range(40):
                 time.sleep(0.4)
                 try:
                     req = urllib.request.Request("http://127.0.0.1:9242/ping")
@@ -4422,6 +4413,11 @@ class TestStandaloneExeBuild(unittest.TestCase):
                     proc.kill()
                 except Exception:
                     pass
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            time.sleep(0.5)
 
 
 class TestInstantFetchingLinkToast(unittest.TestCase):
@@ -4765,6 +4761,39 @@ class TestBackgroundStartupNotificationAndTray(unittest.TestCase):
             self.assertIsNone(gui._bg_toast)
         finally:
             gui._cleanup_resources()
+
+
+class TestSmartDownloadPartsDirectory(unittest.TestCase):
+    """Verifies that temporary download chunks use .sd_parts and seamlessly migrate legacy .tdm_parts."""
+
+    def test_parts_directory_default_suffix(self):
+        import tempfile
+        from turbo_downloader import TurboDownloadEngine
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest = os.path.join(tmp_dir, "test_download.iso")
+            engine = TurboDownloadEngine("https://example.com/test_download.iso", dest)
+            self.assertEqual(engine.temp_dir, dest + ".sd_parts")
+            self.assertTrue(engine.temp_dir.endswith(".sd_parts"))
+
+    def test_parts_directory_migration_from_tdm_parts(self):
+        import tempfile
+        from turbo_downloader import TurboDownloadEngine
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest = os.path.join(tmp_dir, "legacy_download.mp4")
+            legacy_parts = dest + ".tdm_parts"
+            os.makedirs(legacy_parts, exist_ok=True)
+            chunk_file = os.path.join(legacy_parts, "legacy_download.mp4.part_0")
+            with open(chunk_file, "wb") as f:
+                f.write(b"partially_downloaded_data_content")
+
+            engine = TurboDownloadEngine("https://example.com/legacy_download.mp4", dest)
+            self.assertEqual(engine.temp_dir, dest + ".sd_parts")
+            self.assertTrue(os.path.isdir(dest + ".sd_parts"), ".sd_parts directory must exist after migration")
+            self.assertFalse(os.path.exists(legacy_parts), ".tdm_parts directory must have been moved")
+            migrated_chunk = os.path.join(dest + ".sd_parts", "legacy_download.mp4.part_0")
+            self.assertTrue(os.path.isfile(migrated_chunk), "Part file must be preserved in .sd_parts")
+            with open(migrated_chunk, "rb") as f:
+                self.assertEqual(f.read(), b"partially_downloaded_data_content")
 
 
 if __name__ == "__main__":

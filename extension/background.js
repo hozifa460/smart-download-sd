@@ -1,9 +1,9 @@
 /**
  * ======================================================================================
- * ⚡ TURBO DOWNLOAD MANAGER PRO — WebExtension Service Worker / Background Script
+ * ⚡ SMART DOWNLOAD (SD) — WebExtension Service Worker / Background Script
  * ======================================================================================
  * Features:
- * 1. Intercepts browser downloads and forwards them to Turbo Download Manager Pro.
+ * 1. Intercepts browser downloads and forwards them to Smart Download (SD).
  * 2. Adds context menus to right-click links, media, and pages.
  * 3. Graceful fallback: If local app is not running, browser download proceeds uninterrupted.
  * 4. Periodic health check of local IPC loopback server (127.0.0.1:9242).
@@ -274,7 +274,7 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
       chrome.notifications.create({
         type: "basic",
         iconUrl: "icons/icon128.png",
-        title: "⚡ Turbo Download Manager Pro",
+        title: "⚡ Smart Download (SD)",
         message: `Intercepted: ${item.filename || "New Download"}`
       });
     } else {

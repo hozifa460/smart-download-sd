@@ -1,6 +1,6 @@
 """
 ========================================================================================
-Automated Test Suite for Turbo Download Manager Pro
+Automated Test Suite for Smart Download (SD)
 ========================================================================================
 Thorough verification of:
 1. Multi-chunk dynamic on-the-fly splitting and assembly with bit-perfect SHA-256 validation.
@@ -11,6 +11,7 @@ Thorough verification of:
 6. Pause and resume during active multi-threaded transfer.
 7. Clean cancellation without worker thread hangs.
 8. Content-Disposition filename parsing with trailing parameters.
+9. Temporary .sd_parts suffix and legacy .tdm_parts migration.
 ========================================================================================
 """
 
@@ -33,6 +34,7 @@ import tkinter as tk
 # Directly import from turbo_downloader module
 from turbo_downloader import (
     TurboDownloadEngine,
+    SmartDownloadEngine,
     TokenBucketRateLimiter,
     DownloadChunk,
     get_permissive_ssl_context,
@@ -769,6 +771,45 @@ class TestClipboardNonBlockingInterception(unittest.TestCase):
                 root.destroy()
             except Exception:
                 pass
+
+
+class TestSmartDownloadBrandingAndParts(unittest.TestCase):
+    """Verifies rebranding aliases and .sd_parts / legacy .tdm_parts migration."""
+
+    def test_smart_download_engine_alias(self):
+        self.assertIs(SmartDownloadEngine, TurboDownloadEngine)
+
+    def test_sd_parts_default_temporary_directory(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest = os.path.join(tmp_dir, "archive.zip")
+            engine = SmartDownloadEngine(
+                url="https://example.com/archive.zip",
+                destination_path=dest
+            )
+            self.assertEqual(engine.temp_dir, dest + ".sd_parts")
+            self.assertTrue(engine.temp_dir.endswith(".sd_parts"))
+
+    def test_legacy_tdm_parts_automatic_migration(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest = os.path.join(tmp_dir, "legacy_file.bin")
+            legacy_dir = dest + ".tdm_parts"
+            os.makedirs(legacy_dir, exist_ok=True)
+            marker_file = os.path.join(legacy_dir, "part_0.data")
+            with open(marker_file, "w") as f:
+                f.write("in_progress_data")
+
+            # Creating engine must automatically migrate .tdm_parts -> .sd_parts
+            engine = SmartDownloadEngine(
+                url="https://example.com/legacy_file.bin",
+                destination_path=dest
+            )
+            self.assertEqual(engine.temp_dir, dest + ".sd_parts")
+            self.assertTrue(os.path.isdir(dest + ".sd_parts"), "Migrated .sd_parts directory must exist")
+            self.assertFalse(os.path.exists(legacy_dir), "Old .tdm_parts directory must be removed after migration")
+            migrated_marker = os.path.join(dest + ".sd_parts", "part_0.data")
+            self.assertTrue(os.path.isfile(migrated_marker), "In-progress partial download data must be preserved")
 
 
 if __name__ == "__main__":
