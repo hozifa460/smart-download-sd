@@ -32,10 +32,10 @@
 
 ### 🚀 Key Features
 
-1. **⚡ Dynamic Multi-Segment Acceleration (IDM-Style)**
+1. **⚡ Dynamic Multi-Segment Acceleration (TDM Adaptive Engine)**
    - Splits files into up to **32 concurrent byte-range connections**.
    - Dynamic chunk stealing: faster threads dynamically take over chunks from lagging threads to maximize total throughput.
-   - Resumable downloads: saves state in `.idm_parts` manifest files allowing pause/resume even across system reboots.
+   - Resumable downloads: saves state in `.tdm_parts` manifest files allowing pause/resume even across system reboots.
 
 2. **🎥 Adaptive YouTube & Media Downloader**
    - Direct video stream resolution with quality selector (4K, 2K, 1080p, 720p, 480p, 360p, or Audio-only MP3/M4A).
@@ -160,10 +160,10 @@ python test_dpi_and_assets.py
 
 ### 🚀 الميزات الرئيسية
 
-1. **⚡ تسريع التحميل متعدد المسارات بتجزئة ديناميكية (مثل IDM)**
+1. **⚡ تسريع التحميل متعدد المسارات بتجزئة ديناميكية (تقنية التجزئة التكيفية المتقدمة)**
    - تقسيم الملف الواحد إلى ما يصل إلى **32 اتصال متوازي ومتزامن**.
    - خوارزمية سرقة المقاطع الذكية (Dynamic Chunk Stealing): استغلال الاتصالات الأسرع لإنهاء المقاطع المتبقية من الاتصالات البطيئة.
-   - استئناف التحميل الموثوق: حفظ دوري لبيانات المقاطع في ملفات `.idm_parts` للتمكن من استئناف التحميل حتى بعد إعادة تشغيل الجهاز أو انقطاع الإنترنت.
+   - استئناف التحميل الموثوق: حفظ دوري لبيانات المقاطع في ملفات `.tdm_parts` للتمكن من استئناف التحميل حتى بعد إعادة تشغيل الجهاز أو انقطاع الإنترنت.
 
 2. **🎥 محمل وسائط ويوتيوب متقدم ومتكيف**
    - استخراج وتحديد جودات الفيديو والصوت بدقة (4K، 2K، 1080p، 720p، 480p، 360p، أو ملف صوتي MP3/M4A منفصل).

@@ -1,13 +1,13 @@
 """
 ========================================================================================
-🚀 TURBO DOWNLOAD MANAGER PRO — Custom IDM Dynamic Chunking & Bandwidth Limiting Engine
+🚀 TURBO DOWNLOAD MANAGER PRO — Custom TDM Dynamic Chunking & Bandwidth Limiting Engine
 ========================================================================================
 A high-performance, standalone Python download manager implementing:
-1. Dynamic on-the-fly chunk splitting (IDMan reverse-engineered candidate selection & midpoint split).
+1. Dynamic on-the-fly chunk splitting (Adaptive largest-remainder candidate selection & midpoint split).
 2. Strict non-corrupt sequential assembly (64KB streaming buffers & byte boundary assertions).
 3. Per-download manual speed limiter (Token Bucket rate limiter adjustable live during download).
 4. Modern sleek Frameless Window GUI with dark aesthetic, draggable title bar, taskbar integration,
-   speed limiter slider + presets, and visual segmented chunk progress bar (IDM style).
+   speed limiter slider + presets, and visual segmented chunk progress bar (TDM style).
 
 100% Standard Library: No external pip packages required. Runs directly on Python 3.8+ on Windows/Linux/macOS.
 ========================================================================================
@@ -1005,7 +1005,7 @@ def validate_refresh_url(
 
 
 # ======================================================================================
-# 3. IDM REVERSE-ENGINEERED CONCURRENT TRANSFER & SCHEDULING ENGINE
+# 3. TDM ADAPTIVE CONCURRENT TRANSFER & SCHEDULING ENGINE
 # ======================================================================================
 
 class TurboDownloadEngine:
@@ -1082,7 +1082,13 @@ class TurboDownloadEngine:
         self.total_size = 0
         self.supports_ranges = False
         self.filename = os.path.basename(destination_path)
-        self.temp_dir = destination_path + ".idm_parts"
+        self.temp_dir = destination_path + ".tdm_parts"
+        legacy_dir = destination_path + ".idm_parts"
+        if os.path.isdir(legacy_dir) and not os.path.exists(self.temp_dir):
+            try:
+                os.replace(legacy_dir, self.temp_dir)
+            except Exception:
+                pass
 
         self.chunks: List[DownloadChunk] = []
         self.active_workers: List[threading.Thread] = []
@@ -1277,7 +1283,7 @@ class TurboDownloadEngine:
         # Update destination path if filename discovered
         if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
             self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
-            self.temp_dir = self.destination_path + ".idm_parts"
+            self.temp_dir = self.destination_path + ".tdm_parts"
 
         if self.supports_ranges and self.total_size > 0:
             size_mb = self.total_size / (1024 * 1024)
@@ -1681,7 +1687,7 @@ class TurboDownloadEngine:
 
     def _dynamic_split_check(self):
         """
-        Reverse-Engineered IDMan Dynamic Splitting Mechanism:
+        TDM Adaptive Dynamic Midpoint Splitting Mechanism:
         1. Evaluates active worker count against max_connections.
         2. Candidate selection: selects active chunk with largest remaining un-downloaded space.
         3. Threshold condition: remaining must be >= min_split_threshold and remaining // 2 >= 32KB.
@@ -2474,7 +2480,7 @@ class StreamDownloadCoordinator:
                                 os.remove(p)
                             except Exception:
                                 pass
-                        parts_dir = p + ".idm_parts"
+                        parts_dir = p + ".tdm_parts"
                         if os.path.isdir(parts_dir):
                             try:
                                 shutil.rmtree(parts_dir, ignore_errors=True)
@@ -2483,7 +2489,7 @@ class StreamDownloadCoordinator:
 
 
 # ======================================================================================
-# 3B. INSTANT FETCHING LINK TOAST / POPUP INDICATOR (IDM-STYLE INTERCEPTION)
+# 3B. INSTANT FETCHING LINK TOAST / POPUP INDICATOR (TDM-STYLE INTERCEPTION)
 # ======================================================================================
 
 class FetchingLinkToast(tk.Toplevel):
@@ -3460,7 +3466,7 @@ class SafeModalDialog(tk.Toplevel):
 
 
 # ======================================================================================
-# 3E. IDM-STYLE DOWNLOAD CONFIRMATION MODAL (SAFE, GRAB-FREE, BORDERLESS COMPATIBLE)
+# 3E. TDM-STYLE DOWNLOAD CONFIRMATION MODAL (SAFE, GRAB-FREE, BORDERLESS COMPATIBLE)
 # ======================================================================================
 
 def get_file_category_and_icon(filename_or_url: str) -> Tuple[str, str]:
@@ -3588,7 +3594,7 @@ def parse_speed_limit(val_str: Any) -> float:
 
 class DownloadConfirmationModal(tk.Toplevel):
     """
-    Modern dark-themed IDM-style Download Confirmation & Standalone Progress Dialog:
+    Modern dark-themed TDM-style Download Confirmation & Standalone Progress Dialog:
     - Displays intercepted URL, extracted filename, file category badge & icon, and target save path.
     - Connection count selector (1, 2, 4, 8, 16, 32 threads).
     - Speed limiter control (presets: Unlimited, 256 KB/s, 512 KB/s, 1 MB/s, 2 MB/s, 5 MB/s, 10 MB/s, 20 MB/s or custom).
@@ -3771,7 +3777,7 @@ class DownloadConfirmationModal(tk.Toplevel):
 
         lbl_sub = tk.Label(
             hdr_frame,
-            text="IDM-Style Interception",
+            text="TDM Smart Interception",
             font=("Segoe UI", 8),
             bg=self.c_bg,
             fg=self.c_text_muted,
@@ -4658,7 +4664,7 @@ DownloadConfirmationDialog = DownloadConfirmationModal
 
 class RefreshLinkModal(tk.Toplevel):
     """
-    Modern dark-themed IDM-style dialog for updating an expired or forbidden download link:
+    Modern dark-themed TDM-style dialog for updating an expired or forbidden download link:
     - Displays current URL, file name, existing progress preserved, and input for the new URL.
     - Grab-free: strictly avoids grab_set() / grab_set_global() to prevent Win32 message pump traps.
     - High-DPI scaled, centered over parent, and focused.
@@ -5284,7 +5290,7 @@ class ModernFramelessGUI:
     - Custom draggable dark title bar with minimize and close controls.
     - Windows OS taskbar integration via ctypes.
     - Per-download manual rate limiter controls (presets, custom KB/s, dynamic slider).
-    - IDM-style visual segmented chunk progress bar.
+    - TDM-style visual segmented chunk progress bar.
     - Real-time performance metrics (speed, progress, ETA, active threads).
     - Detailed chunk status table and event logging console.
     """
@@ -5358,7 +5364,7 @@ class ModernFramelessGUI:
         )
         self.bridge_server.start()
 
-        # Initialize Clipboard URL Sniffer (IDM-style auto detection)
+        # Initialize Clipboard URL Sniffer (TDM-style auto detection)
         self._init_clipboard_sniffer()
 
         # Initialize Windows System Tray Notification Area Manager
@@ -5913,7 +5919,7 @@ class ModernFramelessGUI:
         # 4. Progress Bar & Metric Dashboard Cards
         self._build_metrics_card(content)
 
-        # 5. Segmented Chunk Visualizer Bar (IDM Style)
+        # 5. Segmented Chunk Visualizer Bar (TDM Style)
         self._build_chunk_visualizer_card(content)
 
         # 6. Tabbed View (Chunk Table & Activity Log)
@@ -5959,7 +5965,7 @@ class ModernFramelessGUI:
 
         subtitle_lbl = tk.Label(
             title_bar,
-            text="[IDM Dynamic Chunking & Bandwidth Throttle Engine]",
+            text="[TDM Dynamic Chunking & Bandwidth Throttle Engine]",
             font=("Segoe UI", 8),
             bg=self.c_panel,
             fg=self.c_text_muted
@@ -6578,14 +6584,14 @@ class ModernFramelessGUI:
         self.canvas_prog.create_text(w // 2, h // 2, text=f"{pct:.1f}%", font=("Segoe UI", 9, "bold"), fill=text_color)
 
     def _build_chunk_visualizer_card(self, parent):
-        """Visual IDM-style horizontal segmented chunk block visualizer."""
+        """Visual TDM-style horizontal segmented chunk block visualizer."""
         card = tk.Frame(parent, bg=self.c_panel, padx=14, pady=8, relief="flat", highlightbackground=self.c_border, highlightthickness=1)
         card.pack(fill=tk.X, pady=(0, 10))
 
         header_row = tk.Frame(card, bg=self.c_panel)
         header_row.pack(fill=tk.X, pady=(0, 4))
 
-        lbl = tk.Label(header_row, text="IDM DYNAMIC CHUNK VISUALIZER (Segmented Byte Map)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl = tk.Label(header_row, text="TDM DYNAMIC CHUNK VISUALIZER (Segmented Byte Map)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl.pack(side=tk.LEFT)
 
         lbl_legend = tk.Label(header_row, text="■ Active (Cyan)   ■ Done (Green)   ■ Remaining (Dark)", font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
@@ -7115,7 +7121,7 @@ class ModernFramelessGUI:
         resolve_thread.start()
 
     # ----------------------------------------------------------------------------------
-    # IDM-Style Automatic Clipboard Sniffer / URL Monitor
+    # TDM-Style Automatic Clipboard Sniffer / URL Monitor
     # ----------------------------------------------------------------------------------
 
     def _init_clipboard_sniffer(self):
@@ -7241,7 +7247,7 @@ class ModernFramelessGUI:
             except Exception:
                 pass
 
-        # Non-blocking IDM-style download handling (no blocking modal dialogs / grab_set traps)
+        # Non-blocking TDM-style download handling (no blocking modal dialogs / grab_set traps)
         if is_youtube_url(url):
             if self.engine and self.engine.is_running:
                 self.log(f"[CLIPBOARD] Note: Active task is running. YouTube stream queued in URL field.")
@@ -7263,13 +7269,13 @@ class ModernFramelessGUI:
             if self.engine and self.engine.is_running:
                 self.log(f"[CLIPBOARD] Note: Active transfer in progress. URL '{url_fn}' populated in inputs.")
             elif getattr(self, "_auto_start_clipboard", True):
-                self.log(f"[CLIPBOARD] Intercepted link ready: '{url_fn}'. Showing IDM confirmation dialog...")
+                self.log(f"[CLIPBOARD] Intercepted link ready: '{url_fn}'. Showing TDM confirmation dialog...")
                 self._show_download_confirmation_dialog(url, new_dest)
             else:
                 self.log(f"[CLIPBOARD] Intercepted link populated: '{url_fn}'. Ready for one-click start.")
 
     def _show_download_confirmation_dialog(self, url: str, default_dest: str):
-        """Displays the IDM-style download confirmation dialog for intercepted URLs."""
+        """Displays the TDM-style download confirmation dialog for intercepted URLs."""
         if threading.current_thread() != threading.main_thread():
             if hasattr(self, "root") and self.root:
                 try:
@@ -7632,11 +7638,11 @@ class ModernFramelessGUI:
         body = tk.Frame(dlg, bg=self.c_bg, padx=16, pady=12)
         body.pack(fill=tk.BOTH, expand=True)
 
-        # 0. Zero-Install Universal Clipboard Sniffer Card (IDM Style)
+        # 0. Zero-Install Universal Clipboard Sniffer Card (TDM Style)
         card_sniff = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_sniff.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_sniff_t = tk.Label(card_sniff, text="📋 ZERO-INSTALL CLIPBOARD MONITOR (IDM STYLE — ALL BROWSERS)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
+        lbl_sniff_t = tk.Label(card_sniff, text="📋 ZERO-INSTALL CLIPBOARD MONITOR (TDM SMART CAPTURE — ALL BROWSERS)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
         lbl_sniff_t.pack(anchor="w")
 
         sniff_row = tk.Frame(card_sniff, bg=self.c_panel)

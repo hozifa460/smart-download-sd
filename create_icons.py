@@ -114,7 +114,7 @@ def generate_master_icon(size=1024) -> Image.Image:
     ]
     draw.polygon(inner_bolt_pts, fill=(240, 249, 255, 255))
 
-    # 5. Base speed indicator segments (IDM dynamic chunking aesthetic)
+    # 5. Base speed indicator segments (TDM dynamic chunking aesthetic)
     seg_y = 835
     seg_h = 24
     seg_w = 64

@@ -8,7 +8,7 @@ High-performance browser download interceptor for **Google Chrome, Microsoft Edg
 When you click a download link or start a file download in your browser, this WebExtension intercepts the request, cancels the standard browser download, and transfers the link directly to **Turbo Download Manager Pro** via a local IPC loopback server (`http://127.0.0.1:9242`).
 
 Your downloads then benefit immediately from:
-- **Dynamic Multi-Chunk Acceleration** (IDM reverse-engineered candidate splitting).
+- **Dynamic Multi-Chunk Acceleration** (TDM adaptive midpoint candidate splitting).
 - **Smooth Live Speed Limiter** (Token Bucket rate limiter slider).
 - **Segmented visual byte map and instant pause/resume**.
 

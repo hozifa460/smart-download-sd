@@ -631,7 +631,7 @@ class TestTurboDownloader(unittest.TestCase):
 
 class TestClipboardNonBlockingInterception(unittest.TestCase):
     """
-    Verification of IDM-style non-blocking clipboard interception:
+    Verification of TDM-style non-blocking clipboard interception:
     - Auto-populates URL and destination without locking the main window
     - Auto-starts or queues download without any modal popups or grab_set
     - SafeModalDialog and QualitySelectionModal never lock Tkinter event loop

@@ -12,14 +12,14 @@ installer_payload/
 # Exclude standalone executables from git tracking (use GitHub Releases)
 *.exe
 
-# Exclude REA reverse engineering folder
+# Exclude REA analysis folder
 rea/
 .rea/
 
 # Download fragments & temp files
 *.tmp
 *.temp
-*.idm_parts
+*.tdm_parts
 *.part
 *.crdownload
 *.ytdl
