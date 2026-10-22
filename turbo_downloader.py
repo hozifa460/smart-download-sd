@@ -293,21 +293,33 @@ def get_startup_command(minimized: bool = True) -> str:
     Constructs the command line string to launch TurboDownloader on system startup.
     Accurately resolves executable path for both standalone frozen binary (.exe)
     and Python development script runs.
+    Always prioritizes resolving the compiled standalone executable (dist\\TurboDownloader.exe
+    or sys.executable when frozen) over pythonw.exe on script paths, ensuring that Windows
+    boot does not fail due to unmounted OneDrive paths or missing Python environment.
     """
     flag = " --minimized" if minimized else ""
     if getattr(sys, "frozen", False):
         exe_path = os.path.abspath(str(sys.executable).strip('"'))
         return f'"{exe_path}"{flag}'
-    else:
-        # Script mode: prefer pythonw.exe if available so no console window flashes
-        py_exe = str(sys.executable).strip('"')
-        py_dir = os.path.dirname(py_exe)
-        pyw_exe = os.path.join(py_dir, "pythonw.exe")
-        if os.path.isfile(pyw_exe):
-            py_exe = pyw_exe
-        raw_file = __file__ if "__file__" in globals() and isinstance(__file__, str) else "turbo_downloader.py"
-        script_path = os.path.abspath(raw_file.strip('"'))
-        return f'"{py_exe}" "{script_path}"{flag}'
+
+    # Prioritize compiled standalone binary in dist/ directory or adjacent to script
+    base_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() and isinstance(__file__, str) else os.getcwd()
+    dist_exe = os.path.join(base_dir, "dist", "TurboDownloader.exe")
+    alt_exe = os.path.join(base_dir, "TurboDownloader.exe")
+    if os.path.isfile(dist_exe):
+        return f'"{os.path.abspath(dist_exe)}"{flag}'
+    elif os.path.isfile(alt_exe):
+        return f'"{os.path.abspath(alt_exe)}"{flag}'
+
+    # Script mode fallback: prefer pythonw.exe if available so no console window flashes
+    py_exe = str(sys.executable).strip('"')
+    py_dir = os.path.dirname(py_exe)
+    pyw_exe = os.path.join(py_dir, "pythonw.exe")
+    if os.path.isfile(pyw_exe):
+        py_exe = pyw_exe
+    raw_file = __file__ if "__file__" in globals() and isinstance(__file__, str) else "turbo_downloader.py"
+    script_path = os.path.abspath(raw_file.strip('"'))
+    return f'"{py_exe}" "{script_path}"{flag}'
 
 def is_startup_enabled() -> bool:
     """
@@ -2468,6 +2480,316 @@ class StreamDownloadCoordinator:
 
 
 # ======================================================================================
+# 3B. INSTANT FETCHING LINK TOAST / POPUP INDICATOR (IDM-STYLE INTERCEPTION)
+# ======================================================================================
+
+class FetchingLinkToast(tk.Toplevel):
+    """
+    Sleek, dark-themed, frameless toast/popup window displayed instantaneously (< 50ms)
+    when a downloadable URL (especially YouTube or remote stream requiring format analysis)
+    is intercepted from clipboard or browser extension while the main window is hidden or minimized.
+
+    Features:
+    - Displayed in < 50ms with frameless dark styling and High-DPI scaling.
+    - Arabic header: 🔍 جاري جلب وتحليل الرابط...
+    - English subheader: Fetching link information...
+    - Extracted domain tag (e.g. [youtube.com]) and truncated URL preview.
+    - Animated marquee pulsing progress bar and dynamic status indicator.
+    - Non-blocking, grab-free architecture (strictly avoids grab_set() traps).
+    - Cancel button allowing user to safely abort link analysis at any time.
+    """
+    def __init__(
+        self,
+        parent: Optional[tk.Tk],
+        url: str,
+        theme: Optional[Dict[str, str]] = None,
+        on_cancel: Optional[Callable[[], None]] = None,
+        parent_app: Optional[Any] = None
+    ):
+        super().__init__(parent)
+        self.url = str(url or "").strip()
+        self.on_cancel = on_cancel
+        self.parent_app = parent_app
+        self._closing = False
+        self._pulse_pos = 0
+        self._pulse_dir = 1
+        self._pulse_job = None
+        self._dot_count = 0
+        self._dot_job = None
+
+        th = theme or {}
+        self.c_bg = th.get("c_bg", "#0f172a")
+        self.c_panel = th.get("c_panel", "#1e293b")
+        self.c_panel_light = th.get("c_panel_light", "#334155")
+        self.c_border = th.get("c_border", "#475569")
+        self.c_text_bright = th.get("c_text_bright", "#f8fafc")
+        self.c_text_muted = th.get("c_text_muted", "#94a3b8")
+        self.c_accent = th.get("c_accent", "#38bdf8")
+        self.c_accent_dark = th.get("c_accent_dark", "#0284c7")
+        self.c_danger = th.get("c_danger", "#ef4444")
+        self.c_success = th.get("c_success", "#10b981")
+        self.c_input_bg = th.get("c_input_bg", "#0b1220")
+
+        self.title("Fetching Link Information — Turbo Downloader")
+        self.overrideredirect(True)
+        self.configure(bg=self.c_border)
+
+        # High-DPI scaling
+        try:
+            dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
+        except Exception:
+            dpi = 96.0
+        self.dpi_scale = max(1.0, dpi / 96.0)
+
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        dlg_w = min(int(460 * self.dpi_scale), max(380, int(sw * 0.90)))
+        dlg_h = min(int(148 * self.dpi_scale), max(128, int(sh * 0.70)))
+
+        # Center on screen
+        x = max(0, (sw - dlg_w) // 2)
+        y = max(0, (sh - dlg_h) // 2)
+        self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
+
+        # Parse domain snippet
+        domain = ""
+        try:
+            parsed = urllib.parse.urlparse(self.url)
+            domain = (parsed.netloc or parsed.path.split("/")[0]).strip() or "remote"
+        except Exception:
+            domain = "remote"
+
+        # Truncate URL preview if long
+        url_preview = self.url
+        if len(url_preview) > 52:
+            url_preview = url_preview[:28] + "..." + url_preview[-20:]
+
+        # Outer border & inner body
+        self.inner = tk.Frame(self, bg=self.c_panel, padx=14, pady=12)
+        self.inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        # Header Row: Arabic + English Title & Cancel '✕ إلغاء'
+        hdr_frame = tk.Frame(self.inner, bg=self.c_panel)
+        hdr_frame.pack(fill=tk.X, pady=(0, 6))
+
+        lbl_icon = tk.Label(hdr_frame, text="🔍", font=("Segoe UI", 12), bg=self.c_panel, fg=self.c_accent)
+        lbl_icon.pack(side=tk.LEFT, padx=(0, 6))
+
+        title_box = tk.Frame(hdr_frame, bg=self.c_panel)
+        title_box.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.lbl_ar = tk.Label(
+            title_box,
+            text="🔍 جاري جلب وتحليل الرابط...",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.c_panel,
+            fg=self.c_accent,
+            anchor="w"
+        )
+        self.lbl_ar.pack(anchor="w")
+
+        self.lbl_en = tk.Label(
+            title_box,
+            text="Fetching link information...",
+            font=("Segoe UI", 8),
+            bg=self.c_panel,
+            fg=self.c_text_muted,
+            anchor="w"
+        )
+        self.lbl_en.pack(anchor="w")
+
+        self.btn_cancel = tk.Button(
+            hdr_frame,
+            text="✕ إلغاء",
+            font=("Segoe UI", 8),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            activebackground=self.c_danger,
+            activeforeground="#ffffff",
+            relief="flat",
+            cursor="hand2",
+            padx=8,
+            pady=2,
+            command=self._on_cancel_click
+        )
+        self.btn_cancel.pack(side=tk.RIGHT, padx=(6, 0))
+
+        # URL Snippet Box
+        snippet_frame = tk.Frame(self.inner, bg=self.c_input_bg, padx=8, pady=4, highlightbackground=self.c_border, highlightthickness=1)
+        snippet_frame.pack(fill=tk.X, pady=(2, 8))
+
+        self.lbl_domain = tk.Label(
+            snippet_frame,
+            text=f"[{domain}]",
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_input_bg,
+            fg=self.c_accent
+        )
+        self.lbl_domain.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.lbl_url = tk.Label(
+            snippet_frame,
+            text=url_preview,
+            font=("Segoe UI", 8),
+            bg=self.c_input_bg,
+            fg=self.c_text_bright,
+            anchor="w"
+        )
+        self.lbl_url.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Animated Marquee / Pulsing Canvas Bar
+        canvas_h = int(5 * self.dpi_scale)
+        self.canvas_pulse = tk.Canvas(
+            self.inner,
+            height=canvas_h,
+            bg=self.c_panel_light,
+            highlightthickness=0,
+            relief="flat"
+        )
+        self.canvas_pulse.pack(fill=tk.X, pady=(2, 6))
+        self.pulse_rect = self.canvas_pulse.create_rectangle(0, 0, 0, canvas_h, fill=self.c_accent, outline="")
+
+        # Status text row
+        self.lbl_status = tk.Label(
+            self.inner,
+            text="جاري الاتصال بالسيرفر وفحص الصيغ المتاحة...",
+            font=("Segoe UI", 8),
+            bg=self.c_panel,
+            fg=self.c_text_muted,
+            anchor="w"
+        )
+        self.lbl_status.pack(anchor="w")
+
+        self.bind("<Escape>", lambda e: self._on_cancel_click())
+
+        # Start animations
+        self._start_animations()
+
+    def _start_animations(self):
+        """Initiates pulsing progress marquee and animated status dots."""
+        self._animate_pulse()
+        self._animate_dots()
+
+    def _animate_pulse(self):
+        if getattr(self, "_closing", False) or not self.winfo_exists():
+            return
+        try:
+            w = self.canvas_pulse.winfo_width()
+            if w <= 1:
+                w = int(420 * self.dpi_scale)
+            bar_w = int(w * 0.35)
+            self._pulse_pos += (8 * self._pulse_dir)
+            if self._pulse_pos + bar_w >= w:
+                self._pulse_dir = -1
+                self._pulse_pos = w - bar_w
+            elif self._pulse_pos <= 0:
+                self._pulse_dir = 1
+                self._pulse_pos = 0
+
+            h = self.canvas_pulse.winfo_height() or 5
+            self.canvas_pulse.coords(self.pulse_rect, self._pulse_pos, 0, self._pulse_pos + bar_w, h)
+            if not getattr(self, "_closing", False) and self.winfo_exists():
+                self._pulse_job = self.after(30, self._animate_pulse)
+        except Exception:
+            pass
+
+    def _animate_dots(self):
+        if getattr(self, "_closing", False) or not self.winfo_exists():
+            return
+        try:
+            self._dot_count = (self._dot_count + 1) % 4
+            dots = "." * self._dot_count
+            self.lbl_en.configure(text=f"Fetching link information{dots}")
+            if not getattr(self, "_closing", False) and self.winfo_exists():
+                self._dot_job = self.after(400, self._animate_dots)
+        except Exception:
+            pass
+
+    def _on_cancel_click(self):
+        """User clicked Cancel on the fetching toast."""
+        self._closing = True
+        if self._pulse_job:
+            try:
+                self.after_cancel(self._pulse_job)
+            except Exception:
+                pass
+            self._pulse_job = None
+        if self._dot_job:
+            try:
+                self.after_cancel(self._dot_job)
+            except Exception:
+                pass
+            self._dot_job = None
+        if callable(self.on_cancel):
+            try:
+                self.on_cancel()
+            except Exception:
+                pass
+        if self.parent_app and hasattr(self.parent_app, "clear_last_clipboard_url"):
+            try:
+                self.parent_app.clear_last_clipboard_url()
+            except Exception:
+                pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
+    def close(self):
+        """Smoothly closes and destroys the toast window without invoking cancel callback."""
+        self._closing = True
+        if self._pulse_job:
+            try:
+                self.after_cancel(self._pulse_job)
+            except Exception:
+                pass
+            self._pulse_job = None
+        if self._dot_job:
+            try:
+                self.after_cancel(self._dot_job)
+            except Exception:
+                pass
+            self._dot_job = None
+        try:
+            if self.winfo_exists():
+                self.destroy()
+        except Exception:
+            pass
+
+    def grab_set(self):
+        """No-op: Strictly avoids grab_set() lock."""
+        pass
+
+    def grab_set_global(self):
+        """No-op: Strictly avoids grab_set_global() lock."""
+        pass
+
+    def destroy(self):
+        """Cancels background animation timers and destroys widget cleanly."""
+        self._closing = True
+        if hasattr(self, "_pulse_job") and self._pulse_job:
+            try:
+                self.after_cancel(self._pulse_job)
+            except Exception:
+                pass
+            self._pulse_job = None
+        if hasattr(self, "_dot_job") and self._dot_job:
+            try:
+                self.after_cancel(self._dot_job)
+            except Exception:
+                pass
+            self._dot_job = None
+        if self.parent_app and getattr(self.parent_app, "_fetching_toast", None) is self:
+            self.parent_app._fetching_toast = None
+        super().destroy()
+
+
+# ======================================================================================
 # 3C. YOUTUBE VIDEO QUALITY SELECTION MODAL DIALOG
 # ======================================================================================
 
@@ -2490,7 +2812,8 @@ class QualitySelectionModal(tk.Toplevel):
         theme: Dict[str, str],
         on_confirm: Callable[[VideoFormatOption, str], None],
         on_cancel: Optional[Callable[[], None]] = None,
-        on_open_in_main: Optional[Callable[[VideoFormatOption, str], None]] = None
+        on_open_in_main: Optional[Callable[[VideoFormatOption, str], None]] = None,
+        parent_app: Optional[Any] = None
     ):
         super().__init__(parent)
         self.video_title = str(video_title or "YouTube Video")
@@ -2501,6 +2824,7 @@ class QualitySelectionModal(tk.Toplevel):
         self.on_confirm = on_confirm
         self.on_cancel = on_cancel
         self.on_open_in_main = on_open_in_main
+        self.parent_app = parent_app
 
         self.selected_option: Optional[VideoFormatOption] = self.options[0] if self.options else None
         self._confirmed = False
@@ -2857,10 +3181,22 @@ class QualitySelectionModal(tk.Toplevel):
             self.grab_release()
         except Exception:
             pass
+        if self.parent_app and getattr(self.parent_app, "_quality_modal", None) is self:
+            self.parent_app._quality_modal = None
         super().destroy()
 
     def _on_close(self):
         self.destroy()
+        if self.parent_app and hasattr(self.parent_app, "clear_last_clipboard_url"):
+            try:
+                self.parent_app.clear_last_clipboard_url()
+            except Exception:
+                pass
+        elif self.master and hasattr(self.master, "clear_last_clipboard_url"):
+            try:
+                self.master.clear_last_clipboard_url()
+            except Exception:
+                pass
         if self.on_cancel:
             try:
                 self.on_cancel()
@@ -4281,6 +4617,8 @@ class DownloadConfirmationModal(tk.Toplevel):
 
         if self.parent_app:
             try:
+                if hasattr(self.parent_app, "clear_last_clipboard_url"):
+                    self.parent_app.clear_last_clipboard_url()
                 if getattr(self.parent_app, "_confirm_modal", None) is self:
                     self.parent_app._confirm_modal = None
                 if was_running:
@@ -4921,6 +5259,16 @@ class SystemTrayManager:
                     self.icon.notify(message, title)
                 except Exception:
                     pass
+            elif self.icon is not None:
+                def _delayed_notify():
+                    time.sleep(0.5)
+                    with self._lock:
+                        if self.icon is not None and getattr(self.icon, "visible", False):
+                            try:
+                                self.icon.notify(message, title)
+                            except Exception:
+                                pass
+                threading.Thread(target=_delayed_notify, daemon=True, name="DelayedTrayNotify").start()
 
 
 # ======================================================================================
@@ -4951,6 +5299,8 @@ class ModernFramelessGUI:
         self._yt_cancel_event = threading.Event()
         self._quality_modal: Optional[tk.Toplevel] = None
         self._confirm_modal: Optional[tk.Toplevel] = None
+        self._fetching_toast: Optional[Any] = None
+        self._bg_toast: Optional[tk.Toplevel] = None
         self._refresh_job = None
         self._closing = False
         self._log_jobs: List[Any] = []
@@ -5024,6 +5374,146 @@ class ModernFramelessGUI:
 
         # Start periodic GUI refresh timer
         self._refresh_job = self.root.after(100, self._gui_refresh_tick)
+
+        self._bg_notify_job = None
+        if self._start_hidden:
+            try:
+                self._bg_notify_job = self.root.after(400, self._show_background_startup_notification)
+            except Exception:
+                pass
+
+    def _show_background_startup_notification(self):
+        """Displays Windows system tray notification balloon and sleek brief toast when running in background."""
+        if getattr(self, "_closing", False):
+            return
+        if not getattr(self, "_start_hidden", False) and not getattr(self, "_was_started_hidden", False):
+            return
+        msg = "Turbo Download Manager Pro is active in the background"
+        title = "Turbo Download Manager Pro"
+        # 1. Windows System Tray notification balloon if tray icon is active
+        if hasattr(self, "tray_manager") and self.tray_manager:
+            try:
+                self.tray_manager.notify(msg, title)
+            except Exception:
+                pass
+
+        # 2. Sleek non-blocking dark-themed notification toast
+        try:
+            self._show_background_toast(msg)
+        except Exception:
+            pass
+
+    def _show_background_toast(self, message: str):
+        """Displays a brief, non-intrusive dark-themed toast notification at the bottom-right corner."""
+        try:
+            self._dismiss_bg_toast()
+
+            toast = tk.Toplevel(self.root)
+            self._bg_toast = toast
+            toast.overrideredirect(True)
+            toast.configure(bg=self.c_border)
+            try:
+                toast.attributes("-topmost", True)
+            except Exception:
+                pass
+
+            try:
+                dpi = float(self.root.winfo_fpixels('1i')) if self.root.winfo_exists() else 96.0
+            except Exception:
+                dpi = 96.0
+            scale = max(1.0, dpi / 96.0)
+
+            w = int(370 * scale)
+            h = int(76 * scale)
+            sw = toast.winfo_screenwidth()
+            sh = toast.winfo_screenheight()
+            x = max(0, sw - w - int(24 * scale))
+            y = max(0, sh - h - int(48 * scale))
+            toast.geometry(f"{w}x{h}+{x}+{y}")
+
+            inner = tk.Frame(toast, bg=self.c_panel, padx=12, pady=10)
+            inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+            lbl_ico = tk.Label(inner, text="🚀", font=("Segoe UI", 16), bg=self.c_panel, fg=self.c_accent)
+            lbl_ico.pack(side=tk.LEFT, padx=(0, 10))
+
+            text_frame = tk.Frame(inner, bg=self.c_panel)
+            text_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            lbl_t = tk.Label(text_frame, text="Turbo Download Manager Pro", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent, anchor="w")
+            lbl_t.pack(anchor="w")
+
+            lbl_m = tk.Label(text_frame, text=message, font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_bright, anchor="w")
+            lbl_m.pack(anchor="w")
+
+            btn_close = tk.Label(inner, text="✕", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_muted, cursor="hand2")
+            btn_close.pack(side=tk.RIGHT, padx=(4, 0))
+            btn_close.bind("<Button-1>", lambda e: self._dismiss_bg_toast())
+
+            # Auto-dismiss after 3200ms
+            toast._dismiss_job = toast.after(3200, self._dismiss_bg_toast)
+        except Exception:
+            pass
+
+    def _dismiss_bg_toast(self):
+        """Safely dismisses the background notification toast."""
+        if hasattr(self, "_bg_toast") and self._bg_toast:
+            try:
+                if hasattr(self._bg_toast, "_dismiss_job") and self._bg_toast._dismiss_job:
+                    try:
+                        self._bg_toast.after_cancel(self._bg_toast._dismiss_job)
+                    except Exception:
+                        pass
+                    self._bg_toast._dismiss_job = None
+                if self._bg_toast.winfo_exists():
+                    self._bg_toast.destroy()
+            except Exception:
+                pass
+            self._bg_toast = None
+
+    def _show_fetching_toast(self, url: str, on_cancel: Optional[Callable[[], None]] = None) -> Optional[FetchingLinkToast]:
+        """Displays instantaneous (< 50ms) sleek dark-themed fetching indicator toast."""
+        self._close_fetching_toast()
+        try:
+            def _handle_cancel():
+                self.log(f"[FETCHING] Link analysis cancelled by user for: {url}")
+                if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
+                    self._yt_cancel_event.set()
+                if callable(on_cancel):
+                    try:
+                        on_cancel()
+                    except Exception:
+                        pass
+                self._fetching_toast = None
+                self.clear_last_clipboard_url()
+                try:
+                    self.btn_start.configure(state="normal")
+                    self.btn_pause.configure(state="disabled")
+                    self.btn_cancel.configure(state="disabled")
+                    self.card_size.configure(text="Ready")
+                except Exception:
+                    pass
+
+            self._fetching_toast = FetchingLinkToast(
+                parent=self.root,
+                url=url,
+                theme=self._theme_dict(),
+                on_cancel=_handle_cancel,
+                parent_app=self
+            )
+            return self._fetching_toast
+        except Exception as e:
+            self.log(f"[FETCHING] Failed to display fetching toast: {e}")
+            return None
+
+    def _close_fetching_toast(self):
+        """Safely closes active fetching indicator toast."""
+        if hasattr(self, "_fetching_toast") and self._fetching_toast:
+            try:
+                self._fetching_toast.close()
+            except Exception:
+                pass
+            self._fetching_toast = None
 
     def _theme_dict(self) -> Dict[str, str]:
         """Returns active theme dictionary for modals and child widgets."""
@@ -5540,6 +6030,12 @@ class ModernFramelessGUI:
             except Exception:
                 pass
             self._refresh_job = None
+        if hasattr(self, "_bg_notify_job") and self._bg_notify_job:
+            try:
+                self.root.after_cancel(self._bg_notify_job)
+            except Exception:
+                pass
+            self._bg_notify_job = None
         if hasattr(self, "_log_jobs") and self._log_jobs:
             for j in list(self._log_jobs):
                 try:
@@ -5560,6 +6056,13 @@ class ModernFramelessGUI:
             except Exception:
                 pass
             self._confirm_modal = None
+        if hasattr(self, "_quality_modal") and self._quality_modal:
+            try:
+                if self._quality_modal.winfo_exists():
+                    self._quality_modal.destroy()
+            except Exception:
+                pass
+            self._quality_modal = None
         if hasattr(self, "_refresh_modal") and self._refresh_modal:
             try:
                 if self._refresh_modal.winfo_exists():
@@ -5567,6 +6070,8 @@ class ModernFramelessGUI:
             except Exception:
                 pass
             self._refresh_modal = None
+        self._close_fetching_toast()
+        self._dismiss_bg_toast()
 
     def _on_close(self, force_exit: bool = False):
         """
@@ -6391,6 +6896,13 @@ class ModernFramelessGUI:
         self.log(f"[YOUTUBE] Detected YouTube stream URL: {url}")
         self.log("[YOUTUBE] Querying available video resolutions and formats via yt-dlp...")
 
+        # In < 50ms, display sleek frameless fetching toast indicator if main window is hidden or minimized
+        if self.is_window_hidden_or_minimized():
+            try:
+                self._show_fetching_toast(url)
+            except Exception:
+                pass
+
         def _resolve_and_prompt():
             try:
                 resolver = YouTubeResolver(on_log=self.log)
@@ -6418,6 +6930,7 @@ class ModernFramelessGUI:
 
                 def _show_modal():
                     try:
+                        self._close_fetching_toast()
                         if self._yt_cancel_event.is_set():
                             return
 
@@ -6481,6 +6994,7 @@ class ModernFramelessGUI:
 
                         def _on_confirm(selected_opt: VideoFormatOption, final_dest: str):
                             self._quality_modal = None
+                            self.clear_last_clipboard_url()
                             try:
                                 is_hidden = self.is_window_hidden_or_minimized()
                                 yt_prog_modal = None
@@ -6501,6 +7015,7 @@ class ModernFramelessGUI:
 
                         def _on_open_in_main(selected_opt: VideoFormatOption, final_dest: str):
                             self._quality_modal = None
+                            self.clear_last_clipboard_url()
                             self.restore_window()
                             try:
                                 _start_coordinator(selected_opt, final_dest, yt_modal=None)
@@ -6511,6 +7026,7 @@ class ModernFramelessGUI:
 
                         def _on_cancel():
                             self._quality_modal = None
+                            self.clear_last_clipboard_url()
                             try:
                                 self.btn_start.configure(state="normal")
                                 self.btn_pause.configure(state="disabled")
@@ -6552,25 +7068,30 @@ class ModernFramelessGUI:
                             theme=theme_dict,
                             on_confirm=_on_confirm,
                             on_cancel=_on_cancel,
-                            on_open_in_main=_on_open_in_main
+                            on_open_in_main=_on_open_in_main,
+                            parent_app=self
                         )
                     except Exception as e:
                         self._quality_modal = None
+                        self.clear_last_clipboard_url()
                         self.log(f"[YOUTUBE MODAL ERROR] {e}")
                         self._engine_error_cb(str(e))
 
                 try:
-                    if self.root.winfo_exists():
-                        self.root.after(0, _show_modal)
+                    self.dispatch_to_main_thread(_show_modal)
                 except Exception:
                     pass
 
             except Exception as e:
+                self.clear_last_clipboard_url()
+                try:
+                    self.dispatch_to_main_thread(self._close_fetching_toast)
+                except Exception:
+                    pass
                 if not self._yt_cancel_event.is_set():
                     self.log(f"[YOUTUBE ERROR] {e}")
                     try:
-                        if self.root.winfo_exists():
-                            self.root.after(0, lambda: self._engine_error_cb(str(e)))
+                        self.dispatch_to_main_thread(lambda: self._engine_error_cb(str(e)))
                     except Exception:
                         pass
 
@@ -6640,6 +7161,8 @@ class ModernFramelessGUI:
 
         text = get_clipboard_text(self.root)
 
+        seq_changed = (seq is not None and self._last_clipboard_seq is not None and seq != self._last_clipboard_seq)
+
         if seq is not None:
             self._last_clipboard_seq = seq
 
@@ -6650,14 +7173,19 @@ class ModernFramelessGUI:
         if not url:
             return
 
-        # Prevent duplicate prompt if URL matches last processed clipboard string
-        if url == self._last_clipboard_url:
+        # Prevent duplicate prompt if URL matches last processed clipboard string and sequence unchanged.
+        # But if sequence number changed (user explicitly copied the link again) or last URL was cleared, allow processing.
+        if not seq_changed and (url == self._last_clipboard_url):
             return
 
         self._last_clipboard_url = url
 
         if is_downloadable_url(url):
             self._on_clipboard_url_detected(url)
+
+    def clear_last_clipboard_url(self):
+        """Clears cached last clipboard URL string so re-copying or re-checking triggers immediately."""
+        self._last_clipboard_url = None
 
     def _on_clipboard_url_detected(self, url: str):
         """Dispatches an intercepted downloadable URL from the clipboard."""
@@ -6734,6 +7262,8 @@ class ModernFramelessGUI:
                     pass
             return
 
+        self._close_fetching_toast()
+
         if hasattr(self, "_confirm_modal") and self._confirm_modal:
             try:
                 if self._confirm_modal.winfo_exists():
@@ -6772,6 +7302,7 @@ class ModernFramelessGUI:
 
         def _on_confirm(final_dest: str, *args):
             self._confirm_modal = None
+            self.clear_last_clipboard_url()
             try:
                 self.entry_dest.delete(0, tk.END)
                 self.entry_dest.insert(0, final_dest)
@@ -6782,6 +7313,7 @@ class ModernFramelessGUI:
 
         def _on_cancel():
             self._confirm_modal = None
+            self.clear_last_clipboard_url()
             self.log(f"[CLIPBOARD] Download cancelled by user for: {derive_download_filename(url)}")
 
         try:

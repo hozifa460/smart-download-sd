@@ -63,6 +63,7 @@ from turbo_downloader import (
     ModernFramelessGUI,
     QualitySelectionModal,
     DownloadConfirmationModal,
+    FetchingLinkToast,
     validate_refresh_url,
     RefreshLinkModal,
     RefreshLinkDialog,
@@ -2502,14 +2503,23 @@ class TestWindowsStartupRegistryIntegration(unittest.TestCase):
             disable_startup()
 
     def test_startup_command_script_mode(self):
-        cmd_min = get_startup_command(minimized=True)
-        self.assertIn("--minimized", cmd_min)
-        self.assertTrue(cmd_min.endswith(" --minimized"))
-        self.assertIn("turbo_downloader.py", cmd_min)
+        # Fallback script mode when standalone exe is absent
+        with patch("os.path.isfile", side_effect=lambda p: False if "TurboDownloader.exe" in p else os.path.exists(p)):
+            cmd_min = get_startup_command(minimized=True)
+            self.assertIn("--minimized", cmd_min)
+            self.assertTrue(cmd_min.endswith(" --minimized"))
+            self.assertIn("turbo_downloader.py", cmd_min)
 
-        cmd_full = get_startup_command(minimized=False)
-        self.assertNotIn("--minimized", cmd_full)
-        self.assertIn("turbo_downloader.py", cmd_full)
+            cmd_full = get_startup_command(minimized=False)
+            self.assertNotIn("--minimized", cmd_full)
+            self.assertIn("turbo_downloader.py", cmd_full)
+
+    def test_startup_command_prioritizes_standalone_exe(self):
+        # Standalone binary dist/TurboDownloader.exe is prioritized when present
+        cmd_min = get_startup_command(minimized=True)
+        self.assertIn("TurboDownloader.exe", cmd_min)
+        self.assertNotIn("pythonw.exe", cmd_min)
+        self.assertTrue(cmd_min.endswith(" --minimized"))
 
     def test_startup_command_frozen_mode(self):
         with patch.object(sys, "frozen", True, create=True):
@@ -4118,6 +4128,349 @@ class TestStandaloneExeBuild(unittest.TestCase):
                     proc.kill()
                 except Exception:
                     pass
+
+
+class TestInstantFetchingLinkToast(unittest.TestCase):
+    """Verifies instant (< 50ms) fetching link toast indicator, dark styling, grab-free architecture, and smooth modal transition."""
+
+    def setUp(self):
+        import tkinter as tk
+        self.root = tk.Tk()
+        self.root.withdraw()
+        # Warm up Windows font cache and Tkinter window subsystem
+        try:
+            _w = FetchingLinkToast(self.root, url="https://example.com/warmup", theme={
+                "c_bg": "#0f172a", "c_panel": "#1e293b", "c_panel_light": "#334155",
+                "c_border": "#475569", "c_accent": "#38bdf8", "c_accent_dark": "#0284c7",
+                "c_success": "#10b981", "c_danger": "#ef4444", "c_text_bright": "#f8fafc",
+                "c_text_muted": "#94a3b8", "c_input_bg": "#0b1220"
+            })
+            _w.close()
+        except Exception:
+            pass
+        self.theme = {
+            "c_bg": "#0f172a",
+            "c_panel": "#1e293b",
+            "c_panel_light": "#334155",
+            "c_border": "#475569",
+            "c_accent": "#38bdf8",
+            "c_accent_dark": "#0284c7",
+            "c_success": "#10b981",
+            "c_danger": "#ef4444",
+            "c_text_bright": "#f8fafc",
+            "c_text_muted": "#94a3b8",
+            "c_input_bg": "#0b1220"
+        }
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def test_toast_creation_under_50ms_and_properties(self):
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        t0 = time.perf_counter()
+        toast = FetchingLinkToast(self.root, url=url, theme=self.theme)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        try:
+            self.assertLess(elapsed_ms, 50.0, f"Fetching toast took {elapsed_ms:.1f}ms, must be < 50ms")
+            self.assertTrue(toast.winfo_exists())
+            self.assertIn("جاري جلب وتحليل الرابط", toast.lbl_ar.cget("text"))
+            self.assertIn("Fetching link information", toast.lbl_en.cget("text"))
+            self.assertIn("youtube.com", toast.lbl_domain.cget("text"))
+            # Grab-free verification
+            toast.grab_set()
+            toast.grab_set_global()
+        finally:
+            toast.close()
+
+    def test_toast_animations_and_clean_close(self):
+        toast = FetchingLinkToast(self.root, url="https://example.com/test_video.mp4", theme=self.theme)
+        try:
+            toast._animate_pulse()
+            toast._animate_dots()
+            self.assertTrue(toast.winfo_exists())
+        finally:
+            toast.close()
+            self.assertFalse(toast.winfo_exists())
+
+    def test_toast_cancel_callback_invoked(self):
+        cancelled = []
+        toast = FetchingLinkToast(
+            self.root,
+            url="https://www.youtube.com/watch?v=test",
+            theme=self.theme,
+            on_cancel=lambda: cancelled.append(True)
+        )
+        toast._on_cancel_click()
+        self.assertEqual(cancelled, [True])
+        self.assertFalse(toast.winfo_exists())
+
+    def test_integration_fetching_toast_in_hidden_youtube_download(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            self.assertTrue(gui.is_window_hidden_or_minimized())
+            sample_opt = VideoFormatOption(
+                format_id="137",
+                resolution_label="1080p",
+                height=1080,
+                ext="mp4",
+                filesize_approx=50000000,
+                fps=30,
+                vcodec="avc1",
+                acodec="none"
+            )
+            fake_info = {"title": "Test Video Title", "duration": 120}
+
+            with patch("turbo_downloader.YouTubeResolver.extract_format_options", return_value=(fake_info, [sample_opt])):
+                with patch("youtube_resolver.YouTubeResolver.extract_format_options", return_value=(fake_info, [sample_opt])):
+                    gui._start_youtube_download("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "output.mp4")
+                    # Immediately, fetching toast must be created (< 50ms)
+                    self.assertIsNotNone(gui._fetching_toast)
+                    self.assertTrue(gui._fetching_toast.winfo_exists())
+
+                    # Wait for resolver thread to complete and post _show_modal
+                    for _ in range(35):
+                        time.sleep(0.04)
+                        gui._drain_dispatch_queue()
+                        gui.root.update()
+                        if gui._quality_modal:
+                            break
+
+                    # Fetching toast must now be smoothly closed and quality modal presented
+                    self.assertIsNone(gui._fetching_toast)
+                    self.assertIsNotNone(gui._quality_modal)
+                    self.assertTrue(gui._quality_modal.winfo_exists())
+        finally:
+            if getattr(gui, "_quality_modal", None):
+                try:
+                    gui._quality_modal.destroy()
+                except Exception:
+                    pass
+            gui._cleanup_resources()
+
+    def test_integration_fetching_toast_cancelled_by_user(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            with patch("turbo_downloader.YouTubeResolver.extract_format_options", side_effect=lambda url: time.sleep(0.5)):
+                with patch("youtube_resolver.YouTubeResolver.extract_format_options", side_effect=lambda url: time.sleep(0.5)):
+                    gui._start_youtube_download("https://www.youtube.com/watch?v=slow_fetch", "output.mp4")
+                    self.assertIsNotNone(gui._fetching_toast)
+
+                    # Cancel fetching toast
+                    gui._fetching_toast._on_cancel_click()
+                    self.assertTrue(gui._yt_cancel_event.is_set())
+                    self.assertIsNone(gui._fetching_toast)
+                    self.assertIsNone(gui._last_clipboard_url, "Cancelling fetching toast must clear last clipboard URL")
+                    self.assertEqual(gui.btn_start.cget("state"), "normal", "btn_start must be restored to normal")
+                    self.assertEqual(gui.card_size.cget("text"), "Ready", "card_size must be restored to Ready")
+                    time.sleep(0.1)
+                    gui.root.update()
+                    self.assertIsNone(gui._quality_modal)
+        finally:
+            gui._cleanup_resources()
+
+    def test_toast_direct_destroy_cancels_jobs_cleanly(self):
+        toast = FetchingLinkToast(self.root, url="https://example.com/test_destroy.mp4", theme=self.theme)
+        self.assertTrue(toast.winfo_exists())
+        self.assertIsNotNone(toast._pulse_job)
+        self.assertIsNotNone(toast._dot_job)
+        toast.destroy()
+        self.assertFalse(toast.winfo_exists())
+        self.assertIsNone(toast._pulse_job)
+        self.assertIsNone(toast._dot_job)
+
+    def test_toast_empty_url_graceful_fallback(self):
+        toast = FetchingLinkToast(self.root, url="", theme=self.theme)
+        try:
+            self.assertTrue(toast.winfo_exists())
+            self.assertIn("remote", toast.lbl_domain.cget("text"))
+        finally:
+            toast.destroy()
+
+
+class TestClipboardSequenceRecopying(unittest.TestCase):
+    """Verifies that re-copying the same link (clipboard sequence increment) re-triggers URL processing."""
+
+    def setUp(self):
+        import tkinter as tk
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def test_recopy_same_url_detected_when_sequence_changes(self):
+        gui = ModernFramelessGUI(self.root)
+        try:
+            url = "https://example.com/recopy_test.zip"
+            detected_urls = []
+            gui._on_clipboard_url_detected = lambda u: detected_urls.append(u)
+
+            with patch("turbo_downloader.IS_WINDOWS", True):
+                with patch("turbo_downloader.get_clipboard_text", return_value=url):
+                    # 1. First copy event at seq=100
+                    with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=100):
+                        gui._check_clipboard_now()
+                        self.assertEqual(len(detected_urls), 1)
+
+                    # 2. Subsequent tick without copying (seq still 100) -> ignored
+                    with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=100):
+                        gui._check_clipboard_now()
+                        self.assertEqual(len(detected_urls), 1)
+
+                    # 3. User explicitly re-copies the exact same link (seq increments to 101)
+                    with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=101):
+                        gui._check_clipboard_now()
+                        self.assertEqual(len(detected_urls), 2, "Re-copying identical link with sequence change must trigger")
+
+                    # 4. Another tick with seq=101 -> ignored
+                    with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=101):
+                        gui._check_clipboard_now()
+                        self.assertEqual(len(detected_urls), 2)
+        finally:
+            gui._cleanup_resources()
+
+    def test_startup_clipboard_not_permanently_blocked(self):
+        url = "https://example.com/startup_existing.zip"
+        # Sniffer starts up with URL already in clipboard
+        with patch("turbo_downloader.IS_WINDOWS", True):
+            with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=50):
+                with patch("turbo_downloader.get_clipboard_text", return_value=url):
+                    gui = ModernFramelessGUI(self.root)
+                    try:
+                        detected_urls = []
+                        gui._on_clipboard_url_detected = lambda u: detected_urls.append(u)
+
+                        # Tick 1: sequence unchanged -> no trigger
+                        gui._check_clipboard_now()
+                        self.assertEqual(len(detected_urls), 0)
+
+                        # User copies the same URL after launch -> seq=51 -> triggers!
+                        with patch("ctypes.windll.user32.GetClipboardSequenceNumber", return_value=51):
+                            gui._check_clipboard_now()
+                            self.assertEqual(len(detected_urls), 1, "User copying startup clipboard URL after launch must trigger")
+                    finally:
+                        gui._cleanup_resources()
+
+    def test_modal_cancellation_clears_last_clipboard_url(self):
+        gui = ModernFramelessGUI(self.root)
+        try:
+            url = "https://example.com/cancel_and_recopy.zip"
+            gui._last_clipboard_url = url
+            gui.clear_last_clipboard_url()
+            self.assertIsNone(gui._last_clipboard_url)
+        finally:
+            gui._cleanup_resources()
+
+    def test_clear_last_clipboard_url_allows_reprocessing(self):
+        gui = ModernFramelessGUI(self.root)
+        try:
+            url = "https://example.com/clear_recopy_test.zip"
+            detected_urls = []
+            gui._on_clipboard_url_detected = lambda u: detected_urls.append(u)
+            gui._last_clipboard_url = url
+
+            with patch("turbo_downloader.get_clipboard_text", return_value=url):
+                # Duplicate is initially suppressed
+                gui._check_clipboard_now(force=True)
+                self.assertEqual(len(detected_urls), 0)
+
+                # Clear last clipboard url (as done when closing/cancelling a modal)
+                gui.clear_last_clipboard_url()
+
+                # Now checking clipboard processes the URL
+                gui._check_clipboard_now(force=True)
+                self.assertEqual(len(detected_urls), 1, "Clearing last clipboard URL must allow re-processing")
+        finally:
+            gui._cleanup_resources()
+
+    def test_quality_modal_close_clears_last_clipboard_url(self):
+        gui = ModernFramelessGUI(self.root)
+        try:
+            url = "https://www.youtube.com/watch?v=cancel_modal_test"
+            gui._last_clipboard_url = url
+            modal = QualitySelectionModal(
+                parent=self.root,
+                video_title="Cancel Test Video",
+                duration=120,
+                options=[],
+                default_dest_path="test.mp4",
+                theme=gui._theme_dict(),
+                on_confirm=lambda opt, dest: None,
+                on_cancel=None,
+                parent_app=gui
+            )
+            modal._on_close()
+            self.assertIsNone(gui._last_clipboard_url, "Closing QualitySelectionModal must clear _last_clipboard_url")
+        finally:
+            gui._cleanup_resources()
+
+    def test_download_confirmation_modal_close_clears_last_clipboard_url(self):
+        gui = ModernFramelessGUI(self.root)
+        try:
+            url = "https://example.com/confirm_cancel.zip"
+            gui._last_clipboard_url = url
+            modal = DownloadConfirmationModal(
+                parent=self.root,
+                url=url,
+                default_dest_path="confirm_cancel.zip",
+                theme=gui._theme_dict(),
+                parent_app=gui
+            )
+            modal._on_close()
+            self.assertIsNone(gui._last_clipboard_url, "Closing DownloadConfirmationModal must clear _last_clipboard_url")
+        finally:
+            gui._cleanup_resources()
+
+
+class TestBackgroundStartupNotificationAndTray(unittest.TestCase):
+    """Verifies that launching with --minimized or --background displays notification and sleek toast."""
+
+    def setUp(self):
+        import tkinter as tk
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def test_background_notification_toast_creation_and_auto_dismiss(self):
+        gui = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            self.assertTrue(gui._start_hidden)
+            gui._show_background_startup_notification()
+
+            # Root window must remain hidden/withdrawn
+            self.assertFalse(self.root.winfo_viewable())
+
+            # Background toast must be displayed
+            self.assertIsNotNone(gui._bg_toast)
+            self.assertTrue(gui._bg_toast.winfo_exists())
+
+            # Text content validation
+            found_text = False
+            for w in gui._bg_toast.winfo_children():
+                for sub in w.winfo_children():
+                    if isinstance(sub, tk.Frame):
+                        for lbl in sub.winfo_children():
+                            if "active in the background" in str(lbl.cget("text")):
+                                found_text = True
+            self.assertTrue(found_text, "Background notification must display 'active in the background'")
+
+            # Dismissal
+            gui._dismiss_bg_toast()
+            self.assertIsNone(gui._bg_toast)
+        finally:
+            gui._cleanup_resources()
 
 
 if __name__ == "__main__":
