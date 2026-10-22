@@ -48,9 +48,12 @@ def build_app(rebuild: bool = False):
 def prepare_payload():
     """Assembles all files needed in the installer payload directory."""
     print("[*] Preparing installer payload directory...")
+    # Clean payload directory completely to prevent bundling stale or duplicate binaries
+    if os.path.isdir(PAYLOAD_DIR):
+        shutil.rmtree(PAYLOAD_DIR, ignore_errors=True)
     os.makedirs(PAYLOAD_DIR, exist_ok=True)
 
-    # 1. Main executable
+    # 1. Main executable: Bundle ONLY SmartDownload.exe (installer.py links TurboDownloader.exe at install time)
     src_exe = os.path.join(DIST_DIR, "SmartDownload.exe")
     if not os.path.isfile(src_exe):
         legacy_src = os.path.join(DIST_DIR, "TurboDownloader.exe")
@@ -59,8 +62,6 @@ def prepare_payload():
         else:
             raise FileNotFoundError(f"Missing {src_exe}. Build it first.")
     shutil.copy2(src_exe, os.path.join(PAYLOAD_DIR, "SmartDownload.exe"))
-    # Also include TurboDownloader.exe for legacy upgrade compatibility
-    shutil.copy2(src_exe, os.path.join(PAYLOAD_DIR, "TurboDownloader.exe"))
 
     # 2. Icons
     for icon_name in ("app_icon.ico", "app_icon.png"):

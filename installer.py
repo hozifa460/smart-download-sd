@@ -38,7 +38,7 @@ except ImportError:
 # Application Constants
 APP_NAME = "Smart Download (SD)"
 APP_ID = "SmartDownload"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 APP_PUBLISHER = "Smart Download Team"
 APP_URL = "https://github.com/hozifa460/smart-download-sd"
 
@@ -349,6 +349,22 @@ def install_application(
         if not os.path.exists(exe_dest):
             with open(exe_dest, "wb") as f:
                 f.write(b"")
+
+    # Backward compatibility: Provide TurboDownloader.exe link or copy at install time
+    legacy_dest = os.path.join(target_dir, "TurboDownloader.exe")
+    if os.path.exists(exe_dest):
+        if os.path.exists(legacy_dest):
+            try:
+                os.remove(legacy_dest)
+            except Exception:
+                pass
+        try:
+            os.link(exe_dest, legacy_dest)
+        except Exception:
+            try:
+                shutil.copy2(exe_dest, legacy_dest)
+            except Exception:
+                pass
 
     # 2. Copy icons
     ico_dest = os.path.join(target_dir, "app_icon.ico")
