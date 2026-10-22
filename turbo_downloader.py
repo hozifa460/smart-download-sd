@@ -336,16 +336,121 @@ def get_startup_folder() -> str:
     ))
 
 
-def _extract_exe_from_cmd(cmd_str: str) -> str:
-    """Extracts target executable file path from command string."""
+get_startup_dir = get_startup_folder
+
+
+def _parse_startup_cmd(cmd_str: str) -> Tuple[str, str, str, str]:
+    """
+    Parses a startup command string into:
+    (exe_path, args, script_path, working_dir)
+    Handles:
+    - Standalone executables with/without quotes and arguments
+    - Python script launches (e.g. "pythonw.exe" "script.py" --minimized)
+    """
     if not cmd_str:
-        return ""
-    s = cmd_str.strip()
+        return "", "", "", ""
+    s = str(cmd_str).strip()
     if s.startswith('"'):
         end_idx = s.find('"', 1)
         if end_idx != -1:
-            return s[1:end_idx].strip()
-    return s.split()[0] if s else ""
+            exe_path = s[1:end_idx].strip()
+            rest = s[end_idx + 1:].strip()
+        else:
+            exe_path = s.strip('"')
+            rest = ""
+    else:
+        parts = s.split(None, 1)
+        exe_path = parts[0].strip()
+        rest = parts[1].strip() if len(parts) > 1 else ""
+
+    script_path = ""
+    if os.path.basename(exe_path).lower() in ("python.exe", "pythonw.exe"):
+        if rest.startswith('"'):
+            s_end = rest.find('"', 1)
+            if s_end != -1:
+                script_path = rest[1:s_end].strip()
+        elif rest:
+            script_path = rest.split()[0].strip()
+
+    working_dir = ""
+    if script_path and os.path.isfile(script_path):
+        working_dir = os.path.dirname(os.path.abspath(script_path))
+    elif exe_path and os.path.isfile(exe_path):
+        working_dir = os.path.dirname(os.path.abspath(exe_path))
+
+    return exe_path, rest, script_path, working_dir
+
+
+def _extract_exe_from_cmd(cmd_str: str) -> str:
+    """Extracts target executable file path from command string."""
+    exe_path, _, _, _ = _parse_startup_cmd(cmd_str)
+    return exe_path
+
+
+def _create_startup_shortcut(
+    target_exe: str,
+    shortcut_path: str,
+    arguments: str = "",
+    working_dir: str = "",
+    icon_path: str = "",
+    description: str = "Smart Download (SD) AutoStart"
+) -> bool:
+    """Creates a Windows shortcut (.lnk) with win32com and PowerShell fallback."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(shortcut_path)), exist_ok=True)
+    except Exception:
+        pass
+
+    clean_target = str(target_exe).strip('"\'')
+    clean_shortcut = str(shortcut_path).strip('"\'')
+    clean_working = str(working_dir).strip('"\'') if working_dir else os.path.dirname(os.path.abspath(clean_target))
+
+    # 1. Try win32com WScript.Shell
+    try:
+        import win32com.client
+        shell = win32com.client.Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortCut(os.path.abspath(clean_shortcut))
+        shortcut.TargetPath = os.path.abspath(clean_target)
+        shortcut.WorkingDirectory = os.path.abspath(clean_working)
+        if arguments:
+            shortcut.Arguments = arguments
+        if icon_path and os.path.exists(icon_path):
+            shortcut.IconLocation = f"{os.path.abspath(icon_path)},0"
+        if description:
+            shortcut.Description = description
+        shortcut.Save()
+        if os.path.exists(shortcut_path):
+            return True
+    except Exception:
+        pass
+
+    # 2. PowerShell fallback with single quote escaping
+    try:
+        def _ps_quote(s: str) -> str:
+            return str(s).replace("'", "''")
+
+        ps_icon = f"$s.IconLocation = '{_ps_quote(os.path.abspath(icon_path))},0'; " if (icon_path and os.path.exists(icon_path)) else ""
+        ps_args = f"$s.Arguments = '{_ps_quote(arguments)}'; " if arguments else ""
+        ps_script = (
+            f"$ws = New-Object -ComObject WScript.Shell; "
+            f"$s = $ws.CreateShortcut('{_ps_quote(os.path.abspath(clean_shortcut))}'); "
+            f"$s.TargetPath = '{_ps_quote(os.path.abspath(clean_target))}'; "
+            f"$s.WorkingDirectory = '{_ps_quote(os.path.abspath(clean_working))}'; "
+            f"{ps_args}"
+            f"{ps_icon}"
+            f"$s.Description = '{_ps_quote(description)}'; "
+            f"$s.Save();"
+        )
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            capture_output=True,
+            timeout=10
+        )
+        return res.returncode == 0 and os.path.exists(shortcut_path)
+    except Exception:
+        return False
 
 
 def get_startup_command(minimized: bool = True) -> str:
@@ -401,11 +506,18 @@ def is_startup_enabled() -> bool:
                 try:
                     val, _ = winreg.QueryValueEx(key, k_name)
                     if val and str(val).strip():
-                        target_exe = _extract_exe_from_cmd(str(val))
-                        if target_exe:
-                            if os.path.isfile(target_exe):
-                                return True
-                            # Stale or broken key pointing to a missing binary: clean it up
+                        exe_path, args, script_path, _ = _parse_startup_cmd(str(val))
+                        is_valid = False
+                        if exe_path:
+                            if script_path:
+                                is_valid = os.path.isfile(exe_path) and os.path.isfile(script_path)
+                            else:
+                                is_valid = os.path.isfile(exe_path)
+
+                        if is_valid:
+                            return True
+                        elif exe_path:
+                            # Stale or broken key pointing to a missing binary or script: clean it up
                             try:
                                 with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_SET_VALUE) as wkey:
                                     winreg.DeleteValue(wkey, k_name)
@@ -443,13 +555,13 @@ def enable_startup(minimized: bool = True) -> bool:
     except (OSError, PermissionError):
         return False
 
+    exe_path, args, script_path, working_dir = _parse_startup_cmd(cmd)
+
     # Harmonize with Scheduled Task
     try:
-        target_exe = _extract_exe_from_cmd(cmd)
-        if target_exe and os.path.isfile(target_exe):
-            tr_arg = f'"{target_exe}" --minimized' if minimized else f'"{target_exe}"'
+        if exe_path and os.path.isfile(exe_path):
             subprocess.run(
-                ["schtasks.exe", "/Create", "/F", "/SC", "ONLOGON", "/TN", TASK_NAME, "/TR", tr_arg],
+                ["schtasks.exe", "/Create", "/F", "/SC", "ONLOGON", "/TN", TASK_NAME, "/TR", cmd],
                 capture_output=True,
                 timeout=5
             )
@@ -458,11 +570,10 @@ def enable_startup(minimized: bool = True) -> bool:
 
     # Harmonize with Startup folder shortcut
     try:
-        target_exe = _extract_exe_from_cmd(cmd)
-        if target_exe and os.path.isfile(target_exe):
+        if exe_path and os.path.isfile(exe_path):
             startup_dir = get_startup_folder()
             if os.path.isdir(startup_dir):
-                for old in ("Turbo Download Manager Pro.lnk", "TurboDownloader.lnk"):
+                for old in ("Turbo Download Manager Pro.lnk", "TurboDownloader.lnk", "SmartDownload.lnk"):
                     old_p = os.path.join(startup_dir, old)
                     if os.path.isfile(old_p):
                         try:
@@ -470,21 +581,23 @@ def enable_startup(minimized: bool = True) -> bool:
                         except Exception:
                             pass
                 lnk_path = os.path.join(startup_dir, "Smart Download (SD).lnk")
-                args = "--minimized" if minimized else ""
-                ps_args = f"$s.Arguments = '{args}'; " if args else ""
-                ps_script = (
-                    f"$ws = New-Object -ComObject WScript.Shell; "
-                    f"$s = $ws.CreateShortcut('{lnk_path}'); "
-                    f"$s.TargetPath = '{target_exe}'; "
-                    f"$s.WorkingDirectory = '{os.path.dirname(target_exe)}'; "
-                    f"{ps_args}"
-                    f"$s.Description = 'Smart Download (SD) AutoStart'; "
-                    f"$s.Save();"
-                )
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                    capture_output=True,
-                    timeout=5
+                icon_path = ""
+                for ico_cand in (
+                    os.path.join(os.path.dirname(os.path.abspath(exe_path)), "app_icon.ico"),
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.ico") if "__file__" in globals() else "",
+                    os.path.join(os.getcwd(), "app_icon.ico")
+                ):
+                    if ico_cand and os.path.isfile(ico_cand):
+                        icon_path = os.path.abspath(ico_cand)
+                        break
+
+                _create_startup_shortcut(
+                    target_exe=exe_path,
+                    shortcut_path=lnk_path,
+                    arguments=args,
+                    working_dir=working_dir,
+                    icon_path=icon_path,
+                    description="Smart Download (SD) AutoStart"
                 )
     except Exception:
         pass
@@ -500,6 +613,9 @@ def disable_startup() -> bool:
     """
     if not IS_WINDOWS or winreg is None:
         return False
+
+    reg_ok = True
+    # 1. Clean up Run registry keys
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
             for k_name in (STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME):
@@ -510,9 +626,11 @@ def disable_startup() -> bool:
     except FileNotFoundError:
         pass
     except (OSError, PermissionError):
-        return False
+        reg_ok = False
+    except Exception:
+        reg_ok = False
 
-    # Clean up Scheduled Tasks
+    # 2. Clean up Scheduled Tasks
     try:
         for tname in (TASK_NAME, LEGACY_TASK_NAME):
             try:
@@ -526,7 +644,7 @@ def disable_startup() -> bool:
     except Exception:
         pass
 
-    # Clean up Startup folder shortcuts
+    # 3. Clean up Startup folder shortcuts
     try:
         startup_dir = get_startup_folder()
         for name in ("Smart Download (SD).lnk", "SmartDownload.lnk", "TurboDownloader.lnk", "Turbo Download Manager Pro.lnk"):
@@ -539,7 +657,7 @@ def disable_startup() -> bool:
     except Exception:
         pass
 
-    return True
+    return reg_ok
 
 
 def get_startup_entry() -> Optional[str]:
@@ -2884,6 +3002,12 @@ class FetchingLinkToast(tk.Toplevel):
     def _animate_pulse(self):
         if getattr(self, "_closing", False) or not self.winfo_exists():
             return
+        if hasattr(self, "_pulse_job") and self._pulse_job:
+            try:
+                self.after_cancel(self._pulse_job)
+            except Exception:
+                pass
+            self._pulse_job = None
         try:
             w = self.canvas_pulse.winfo_width()
             if w <= 1:
@@ -2907,6 +3031,12 @@ class FetchingLinkToast(tk.Toplevel):
     def _animate_dots(self):
         if getattr(self, "_closing", False) or not self.winfo_exists():
             return
+        if hasattr(self, "_dot_job") and self._dot_job:
+            try:
+                self.after_cancel(self._dot_job)
+            except Exception:
+                pass
+            self._dot_job = None
         try:
             self._dot_count = (self._dot_count + 1) % 4
             dots = "." * self._dot_count

@@ -23,8 +23,9 @@ Smart Download (SD) v2.0.0 introduces a major rebrand and architectural upgrade 
 - **Optimized Ultra-Compact Installer**: Optimized payload bundling reduces setup installer file size by over 43% (~56 MB down from ~105 MB).
 - **High-Performance Multi-Segment Engine**: Lightning-fast parallel chunk downloads with dynamic midpoint splitting, rate limiting, and auto-reassembly.
 - **Chrome & Edge Browser Integration**: Seamless native messaging extension integration with automatic one-click media capture.
+- **Instant Zero-Elevation Background Startup**: Multi-tiered instant startup on Windows boot (Run key, Scheduled Task, and Startup shortcut) with zero elevation, starting silently in the tray.
 - **Dual Distribution Options**:
-  - `SmartDownload-Setup.exe`: Full Windows installer with zero-elevation installation, Desktop & Start Menu shortcuts, and uninstaller.
+  - `SmartDownload-Setup.exe`: Full Windows installer with zero-elevation installation, Desktop & Start Menu shortcuts, auto-startup, and clean uninstaller.
   - `SmartDownload.exe`: Ultra-portable standalone executable requiring no installation.
 
 ---
@@ -35,10 +36,11 @@ Smart Download (SD) v2.0.0 introduces a major rebrand and architectural upgrade 
 - **تحميل الفيديوهات من كافة منصات التواصل الاجتماعي**: دعم التحميل بأعلى جودة وصيغ متعددة من **تيك توك (TikTok)، إنستغرام (Instagram)، فيسبوك (Facebook)، إكس / تويتر (X/Twitter)، ريديت (Reddit)، ويوتيوب (YouTube)**.
 - **أيقونة شفافة فائقة الدقة (High-DPI)**: تصميم احترافي حديث بخلفية شفافة يدعم كافة شاشات العرض بدقة كاملة من 16×16 وحتى 256×256 بكسل.
 - **مُثبّت فائق الرشاقة وصغير الحجم**: تقليل حجم ملف التثبيت بنسبة تفوق 43% (من ~105 ميجابايت إلى ~56 ميجابايت) عبر إزالة التكرار وربط التوافق ديناميكياً.
+- **تشغيل تلقائي فوري في الخلفية بدون صلاحيات مسؤول**: بدء تلقائي صامت في شريط المهام عند إقلاع ويندوز عبر منظومة ثلاثية موثوقة (Run Key و Scheduled Task واختصار Startup) دون الحاجة لأي صلاحيات إدارية (UAC-free).
 - **محرك تحميل خارق متعدد المسارات**: تجزئة ذكية ديناميكية للملفات أثناء التحميل لزيادة السرعة إلى أقصى حد ممكن مع إمكانية تحديد السرعة والإيقاف والاستئناف.
 - **تكامل متكامل مع متصفحات Chrome و Edge**: التقاط الروابط تلقائياً عبر إضافة المتصفح الرسمية.
 - **خيارات تشغيل مرنة**:
-  - `SmartDownload-Setup.exe`: برنامج تثبيت سريع وسلس لا يتطلب صلاحيات مسؤول ويندوز مع دعم الاختصارات وإلغاء التثبيت النظيف.
+  - `SmartDownload-Setup.exe`: برنامج تثبيت سريع وسلس لا يتطلب صلاحيات مسؤول ويندوز مع دعم الاختصارات وبدء التشغيل التلقائي وإلغاء التثبيت النظيف.
   - `SmartDownload.exe`: نسخة محمولة (Portable) فورية تعمل مباشرة بدون تثبيت.
 """
 

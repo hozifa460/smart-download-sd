@@ -172,16 +172,23 @@ def create_windows_shortcut(
 
     # 2. Fallback to PowerShell
     try:
-        ps_icon = f"$s.IconLocation = '{os.path.abspath(icon_path)},0'; " if (icon_path and os.path.exists(icon_path)) else ""
-        ps_args = f"$s.Arguments = '{arguments}'; " if arguments else ""
+        def _ps_quote(s: str) -> str:
+            return str(s).replace("'", "''")
+
+        clean_target = str(target_exe).strip('"\'')
+        clean_shortcut = str(shortcut_path).strip('"\'')
+        clean_working = str(working_dir).strip('"\'')
+
+        ps_icon = f"$s.IconLocation = '{_ps_quote(os.path.abspath(icon_path))},0'; " if (icon_path and os.path.exists(icon_path)) else ""
+        ps_args = f"$s.Arguments = '{_ps_quote(arguments)}'; " if arguments else ""
         ps_script = (
             f"$ws = New-Object -ComObject WScript.Shell; "
-            f"$s = $ws.CreateShortcut('{os.path.abspath(shortcut_path)}'); "
-            f"$s.TargetPath = '{os.path.abspath(target_exe)}'; "
-            f"$s.WorkingDirectory = '{os.path.abspath(working_dir)}'; "
+            f"$s = $ws.CreateShortcut('{_ps_quote(os.path.abspath(clean_shortcut))}'); "
+            f"$s.TargetPath = '{_ps_quote(os.path.abspath(clean_target))}'; "
+            f"$s.WorkingDirectory = '{_ps_quote(os.path.abspath(clean_working))}'; "
             f"{ps_args}"
             f"{ps_icon}"
-            f"$s.Description = '{description}'; "
+            f"$s.Description = '{_ps_quote(description)}'; "
             f"$s.Save();"
         )
         res = subprocess.run(
@@ -205,7 +212,8 @@ def register_startup_entries(exe_path: str, icon_path: str = "") -> Dict[str, bo
     if not sys.platform.startswith("win"):
         return results
 
-    abs_exe = os.path.abspath(exe_path)
+    clean_exe = str(exe_path).strip('"\'')
+    abs_exe = os.path.abspath(clean_exe)
     cmd = f'"{abs_exe}" --minimized'
 
     # 1. Register in HKCU Run Key
@@ -611,6 +619,8 @@ def install_application(
     startup_res = {}
     if register_startup:
         startup_res = register_startup_entries(exe_dest, ico_dest)
+    else:
+        startup_res = unregister_startup_entries()
 
     _notify(0.95, "Registering Windows Uninstall entry...")
     reg_ok = register_uninstall_entry(target_dir, exe_dest, uninstaller_dest, ico_dest)
@@ -664,7 +674,7 @@ def uninstall_application(
     _notify(0.50, "Removing application shortcuts...")
     # Desktop shortcut (check both shell resolved and userprofile)
     for dt_dir in {get_desktop_dir(), os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")}:
-        for name in (APP_NAME, "Turbo Download Manager Pro"):
+        for name in (APP_NAME, "SmartDownload", "TurboDownloader", "Turbo Download Manager Pro"):
             dt_lnk = os.path.join(dt_dir, f"{name}.lnk")
             if os.path.isfile(dt_lnk):
                 try:
@@ -675,7 +685,7 @@ def uninstall_application(
     # Start menu shortcut
     for sm_dir in {get_start_menu_programs_dir(), os.path.join(os.environ.get("APPDATA", os.path.expanduser(r"~\AppData\Roaming")),
                                                                "Microsoft", "Windows", "Start Menu", "Programs")}:
-        for name in (APP_NAME, "Turbo Download Manager Pro"):
+        for name in (APP_NAME, "SmartDownload", "TurboDownloader", "Turbo Download Manager Pro"):
             sm_lnk = os.path.join(sm_dir, f"{name}.lnk")
             if os.path.isfile(sm_lnk):
                 try:
