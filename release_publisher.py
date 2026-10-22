@@ -119,8 +119,11 @@ def upload_asset_with_curl(upload_url, token, file_path):
         raise RuntimeError(f"curl.exe failed with code {res.returncode}: {res.stderr}")
     try:
         data = json.loads(res.stdout)
+        if isinstance(data, dict):
+            if "errors" in data or ("message" in data and "id" not in data):
+                raise RuntimeError(f"GitHub API error during upload of '{os.path.basename(file_path)}': {data}")
         return data
-    except Exception:
+    except json.JSONDecodeError:
         return {"raw_output": res.stdout}
 
 
@@ -217,8 +220,14 @@ def main():
         log(f"[+] Verification succeeded! Total assets uploaded: {len(final_assets)}")
         for a in final_assets:
             log(f" - {a['name']} ({a['size']:,} bytes, state={a.get('state')}) -> {a['browser_download_url']}")
+
+        required_asset_names = {"SmartDownload.exe", "SmartDownload-Setup.exe"}
+        uploaded_names = {a["name"]: a for a in final_assets if a.get("state") == "uploaded"}
+        missing = required_asset_names - set(uploaded_names.keys())
+        if missing:
+            raise RuntimeError(f"Release verification failed: missing assets {missing}")
     else:
-        log(f"[!] Warning: Could not verify release: HTTP {v_status}")
+        raise RuntimeError(f"Could not verify release: HTTP {v_status}")
 
     log("\n[+] RELEASE v2.0.0 COMPLETE & PUBLISHED!")
 

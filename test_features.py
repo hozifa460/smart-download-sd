@@ -1550,6 +1550,11 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             with open(uninst_path, "w") as f:
                 f.write("mock")
 
+            # Pre-create legacy uninstall key to simulate upgrading from old version
+            legacy_key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, installer.LEGACY_UNINSTALL_REG_KEY)
+            winreg.SetValueEx(legacy_key, "DisplayName", 0, winreg.REG_SZ, "Legacy TurboDownloader")
+            winreg.CloseKey(legacy_key)
+
             reg_ok = installer.register_uninstall_entry(tmp_dir, exe_path, uninst_path)
             self.assertTrue(reg_ok)
 
@@ -1562,6 +1567,9 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             winreg.CloseKey(key)
 
             self.assertEqual(disp_name, "Smart Download (SD)")
+            # Verify legacy key was cleanly migrated/deleted
+            with self.assertRaises(FileNotFoundError):
+                winreg.OpenKey(winreg.HKEY_CURRENT_USER, installer.LEGACY_UNINSTALL_REG_KEY)
             self.assertIn("Uninstall.exe", uninst_cmd)
             self.assertIn("--uninstall", uninst_cmd)
             self.assertIn("--silent", quiet_uninst_cmd)
@@ -1590,6 +1598,39 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             self.assertTrue(ok)
             self.assertTrue(os.path.isfile(shortcut))
 
+    def test_legacy_shortcuts_cleanup_on_upgrade(self):
+        """Verifies that legacy Turbo Download Manager Pro.lnk shortcuts are cleaned up upon installation."""
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows shortcut test only runs on Windows OS.")
+
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp_desktop, \
+             tempfile.TemporaryDirectory() as tmp_start, \
+             tempfile.TemporaryDirectory() as tmp_target:
+
+            legacy_dt_lnk = os.path.join(tmp_desktop, "Turbo Download Manager Pro.lnk")
+            with open(legacy_dt_lnk, "w") as f:
+                f.write("legacy shortcut")
+
+            legacy_sm_lnk = os.path.join(tmp_start, "Turbo Download Manager Pro.lnk")
+            with open(legacy_sm_lnk, "w") as f:
+                f.write("legacy shortcut")
+
+            with patch.object(installer, "get_desktop_dir", return_value=tmp_desktop), \
+                 patch.object(installer, "get_start_menu_programs_dir", return_value=tmp_start):
+                res = installer.install_application(
+                    target_dir=tmp_target,
+                    create_desktop=True,
+                    create_start_menu=True,
+                    register_browser=False
+                )
+                self.assertTrue(res.get("success"))
+                self.assertFalse(os.path.exists(legacy_dt_lnk), "Legacy desktop shortcut must be removed")
+                self.assertFalse(os.path.exists(legacy_sm_lnk), "Legacy start menu shortcut must be removed")
+                self.assertTrue(os.path.exists(os.path.join(tmp_desktop, f"{installer.APP_NAME}.lnk")), "New desktop shortcut must exist")
+
     def test_install_and_uninstall_lifecycle(self):
         if not sys.platform.startswith("win"):
             self.skipTest("Installer tests only run on Windows OS.")
@@ -1614,6 +1655,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             self.assertTrue(res.get("success"))
             self.assertTrue(os.path.isdir(install_target))
             self.assertTrue(os.path.isfile(os.path.join(install_target, "SmartDownload.exe")))
+            self.assertTrue(os.path.isfile(os.path.join(install_target, "TurboDownloader.exe")), "TurboDownloader.exe must be present for backward compatibility")
             self.assertTrue(os.path.isfile(os.path.join(install_target, "app_icon.ico")))
             self.assertTrue(len(progress_events) >= 5)
             self.assertEqual(progress_events[-1][0], 1.0)
@@ -1628,6 +1670,25 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             self.assertTrue(len(un_progress) >= 4)
             self.assertEqual(un_progress[-1][0], 1.0)
             self.assertFalse(os.path.exists(install_target))
+
+    def test_build_installer_payload_deduplication(self):
+        """Verifies build_installer.prepare_payload() bundles ONLY SmartDownload.exe and excludes TurboDownloader.exe."""
+        import build_installer
+        import tempfile
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp_dist, tempfile.TemporaryDirectory() as tmp_payload:
+            mock_exe = os.path.join(tmp_dist, "SmartDownload.exe")
+            with open(mock_exe, "wb") as f:
+                f.write(b"MOCK_BINARY_DATA")
+
+            with patch.object(build_installer, "DIST_DIR", tmp_dist), \
+                 patch.object(build_installer, "PAYLOAD_DIR", tmp_payload):
+                build_installer.prepare_payload()
+
+                bundled_files = os.listdir(tmp_payload)
+                self.assertIn("SmartDownload.exe", bundled_files, "SmartDownload.exe must be bundled")
+                self.assertNotIn("TurboDownloader.exe", bundled_files, "TurboDownloader.exe must NOT be duplicated in payload")
 
     def test_installer_gui_initialization_grab_free(self):
         """Verifies Tkinter InstallerGUI creates without grab lock and has responsive layout."""

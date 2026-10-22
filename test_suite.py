@@ -513,8 +513,8 @@ class TestTurboDownloader(unittest.TestCase):
             with urllib.request.urlopen(default_req, context=default_ctx, timeout=15):
                 pass
         except urllib.error.HTTPError as e:
-            if e.code == 404:
-                self.skipTest(f"archive.org remote asset returned 404: {e}")
+            if e.code in (404, 500, 502, 503, 504):
+                self.skipTest(f"archive.org remote asset returned HTTP {e.code}: {e}")
             failed_with_ssl = True
         except urllib.error.URLError as e:
             failed_with_ssl = (
@@ -531,8 +531,9 @@ class TestTurboDownloader(unittest.TestCase):
         try:
             engine.probe()
         except RuntimeError as e:
-            if "404" in str(e) or "timed out" in str(e).lower():
-                self.skipTest(f"archive.org remote asset returned error: {e}")
+            err_lower = str(e).lower()
+            if any(k in err_lower for k in ("404", "500", "502", "503", "504", "bad gateway", "internal server error", "service unavailable", "timed out", "connection reset")):
+                self.skipTest(f"archive.org remote server temporarily unavailable: {e}")
             raise
         except Exception as e:
             self.skipTest(f"archive.org remote asset unreachable: {e}")
@@ -569,7 +570,8 @@ class TestTurboDownloader(unittest.TestCase):
             self.skipTest("archive.org download timed out due to slow external CDN network latency")
 
         if errors:
-            if any("404" in str(err) or "timed out" in str(err).lower() for err in errors):
+            err_lower = " ".join(str(err).lower() for err in errors)
+            if any(k in err_lower for k in ("404", "500", "502", "503", "504", "bad gateway", "internal server error", "service unavailable", "timed out", "connection reset")):
                 self.skipTest(f"archive.org remote asset returned error: {errors}")
         self.assertEqual(len(errors), 0, f"Encountered errors: {errors}")
         self.assertTrue(os.path.exists(test_dest))

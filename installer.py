@@ -204,6 +204,12 @@ def register_uninstall_entry(
         winreg.SetValueEx(key, "EstimatedSize", 0, winreg.REG_DWORD, size_kb)
         winreg.SetValueEx(key, "URLInfoAbout", 0, winreg.REG_SZ, APP_URL)
         winreg.CloseKey(key)
+
+        # Clean up legacy TurboDownloader uninstall registry entry if migrating
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, LEGACY_UNINSTALL_REG_KEY)
+        except Exception:
+            pass
         return True
     except Exception:
         return False
@@ -355,6 +361,7 @@ def install_application(
     if os.path.exists(exe_dest):
         if os.path.exists(legacy_dest):
             try:
+                os.chmod(legacy_dest, 0o777)
                 os.remove(legacy_dest)
             except Exception:
                 pass
@@ -411,6 +418,27 @@ def install_application(
 
     _notify(0.75, "Creating desktop and start menu shortcuts...")
     shortcuts_created = []
+
+    # Clean up legacy shortcuts upon upgrade
+    for dt_candidate in {get_desktop_dir(), os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")}:
+        old_lnk = os.path.join(dt_candidate, "Turbo Download Manager Pro.lnk")
+        if os.path.isfile(old_lnk):
+            try:
+                os.chmod(old_lnk, 0o777)
+                os.remove(old_lnk)
+            except Exception:
+                pass
+
+    for sm_candidate in {get_start_menu_programs_dir(), os.path.join(os.environ.get("APPDATA", os.path.expanduser(r"~\AppData\Roaming")),
+                                                                    "Microsoft", "Windows", "Start Menu", "Programs")}:
+        old_lnk = os.path.join(sm_candidate, "Turbo Download Manager Pro.lnk")
+        if os.path.isfile(old_lnk):
+            try:
+                os.chmod(old_lnk, 0o777)
+                os.remove(old_lnk)
+            except Exception:
+                pass
+
     if create_desktop:
         desktop_dir = get_desktop_dir()
         dt_lnk = os.path.join(desktop_dir, f"{APP_NAME}.lnk")
