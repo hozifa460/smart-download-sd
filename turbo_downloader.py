@@ -303,20 +303,69 @@ else:
 WINDOWS_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 STARTUP_REG_KEY_NAME = "SmartDownload"
 LEGACY_STARTUP_REG_KEY_NAME = "TurboDownloader"
+TASK_NAME = "SmartDownloadAutoStart"
+LEGACY_TASK_NAME = "TurboDownloaderAutoStart"
+
+
+def get_installed_exe_path() -> Optional[str]:
+    """Returns the canonical installed executable path if present on disk."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        local_app_data = os.path.expanduser(r"~\AppData\Local")
+    installed_exe = os.path.normpath(os.path.join(local_app_data, "Programs", "SmartDownload", "SmartDownload.exe"))
+    if os.path.isfile(installed_exe):
+        return installed_exe
+    return None
+
+
+def get_startup_folder() -> str:
+    """Returns the user Startup folder path (shell:startup)."""
+    if IS_WINDOWS and winreg is not None:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+                raw_path, _ = winreg.QueryValueEx(k, "Startup")
+                if raw_path and str(raw_path).strip():
+                    expanded = os.path.normpath(os.path.expandvars(str(raw_path).strip()))
+                    if os.path.isabs(expanded) and os.path.isdir(expanded):
+                        return expanded
+        except Exception:
+            pass
+    return os.path.normpath(os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser(r"~\AppData\Roaming")),
+        "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
+    ))
+
+
+def _extract_exe_from_cmd(cmd_str: str) -> str:
+    """Extracts target executable file path from command string."""
+    if not cmd_str:
+        return ""
+    s = cmd_str.strip()
+    if s.startswith('"'):
+        end_idx = s.find('"', 1)
+        if end_idx != -1:
+            return s[1:end_idx].strip()
+    return s.split()[0] if s else ""
+
 
 def get_startup_command(minimized: bool = True) -> str:
     """
-    Constructs the command line string to launch TurboDownloader on system startup.
-    Accurately resolves executable path for both standalone frozen binary (.exe)
-    and Python development script runs.
-    Always prioritizes resolving the compiled standalone executable (dist\\TurboDownloader.exe
-    or sys.executable when frozen) over pythonw.exe on script paths, ensuring that Windows
-    boot does not fail due to unmounted OneDrive paths or missing Python environment.
+    Constructs the command line string to launch SmartDownload on system startup.
+    Accurately resolves executable path prioritizing:
+    1. Active standalone frozen binary (.exe) if already running as frozen executable
+    2. Canonical installed executable (%LocalAppData%\\Programs\\SmartDownload\\SmartDownload.exe)
+    3. Standalone binary in dist/ directory or adjacent to script
+    4. Python script fallback with pythonw.exe
     """
     flag = " --minimized" if minimized else ""
     if getattr(sys, "frozen", False):
         exe_path = os.path.abspath(str(sys.executable).strip('"'))
         return f'"{exe_path}"{flag}'
+
+    # Check installed location first
+    installed_exe = get_installed_exe_path()
+    if installed_exe:
+        return f'"{installed_exe}"{flag}'
 
     # Prioritize compiled standalone binary in dist/ directory or adjacent to script
     base_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() and isinstance(__file__, str) else os.getcwd()
@@ -340,8 +389,9 @@ def get_startup_command(minimized: bool = True) -> str:
 
 def is_startup_enabled() -> bool:
     """
-    Checks if TurboDownloader is currently registered in Windows HKCU Run registry key.
-    Returns True if present with a non-empty command value, False otherwise.
+    Checks if SmartDownload is currently registered to auto-run on Windows startup.
+    Checks HKCU Run registry key and cleans up stale or broken keys pointing to missing binaries.
+    Returns True if an active, valid auto-start mechanism exists, False otherwise.
     """
     if not IS_WINDOWS or winreg is None:
         return False
@@ -351,7 +401,18 @@ def is_startup_enabled() -> bool:
                 try:
                     val, _ = winreg.QueryValueEx(key, k_name)
                     if val and str(val).strip():
-                        return True
+                        target_exe = _extract_exe_from_cmd(str(val))
+                        if target_exe:
+                            if os.path.isfile(target_exe):
+                                return True
+                            # Stale or broken key pointing to a missing binary: clean it up
+                            try:
+                                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_SET_VALUE) as wkey:
+                                    winreg.DeleteValue(wkey, k_name)
+                            except Exception:
+                                pass
+                        else:
+                            return True
                 except FileNotFoundError:
                     pass
             return False
@@ -360,23 +421,81 @@ def is_startup_enabled() -> bool:
 
 def enable_startup(minimized: bool = True) -> bool:
     """
-    Registers TurboDownloader in HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run.
+    Registers SmartDownload in HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run.
     When minimized=True, adds the --minimized flag so it starts silently in background.
+    Cleans up any legacy (TurboDownloader) or stale keys, and coordinates with Scheduled
+    Tasks and Startup folder shortcuts.
     Returns True on success, False otherwise.
     """
     if not IS_WINDOWS or winreg is None:
         return False
+    cmd = get_startup_command(minimized=minimized)
+    reg_ok = False
     try:
-        cmd = get_startup_command(minimized=minimized)
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY) as key:
             winreg.SetValueEx(key, STARTUP_REG_KEY_NAME, 0, winreg.REG_SZ, cmd)
-        return True
+            # Clean up legacy key
+            try:
+                winreg.DeleteValue(key, LEGACY_STARTUP_REG_KEY_NAME)
+            except (FileNotFoundError, OSError):
+                pass
+        reg_ok = True
     except (OSError, PermissionError):
         return False
 
+    # Harmonize with Scheduled Task
+    try:
+        target_exe = _extract_exe_from_cmd(cmd)
+        if target_exe and os.path.isfile(target_exe):
+            tr_arg = f'"{target_exe}" --minimized' if minimized else f'"{target_exe}"'
+            subprocess.run(
+                ["schtasks.exe", "/Create", "/F", "/SC", "ONLOGON", "/TN", TASK_NAME, "/TR", tr_arg],
+                capture_output=True,
+                timeout=5
+            )
+    except Exception:
+        pass
+
+    # Harmonize with Startup folder shortcut
+    try:
+        target_exe = _extract_exe_from_cmd(cmd)
+        if target_exe and os.path.isfile(target_exe):
+            startup_dir = get_startup_folder()
+            if os.path.isdir(startup_dir):
+                for old in ("Turbo Download Manager Pro.lnk", "TurboDownloader.lnk"):
+                    old_p = os.path.join(startup_dir, old)
+                    if os.path.isfile(old_p):
+                        try:
+                            os.remove(old_p)
+                        except Exception:
+                            pass
+                lnk_path = os.path.join(startup_dir, "Smart Download (SD).lnk")
+                args = "--minimized" if minimized else ""
+                ps_args = f"$s.Arguments = '{args}'; " if args else ""
+                ps_script = (
+                    f"$ws = New-Object -ComObject WScript.Shell; "
+                    f"$s = $ws.CreateShortcut('{lnk_path}'); "
+                    f"$s.TargetPath = '{target_exe}'; "
+                    f"$s.WorkingDirectory = '{os.path.dirname(target_exe)}'; "
+                    f"{ps_args}"
+                    f"$s.Description = 'Smart Download (SD) AutoStart'; "
+                    f"$s.Save();"
+                )
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                    capture_output=True,
+                    timeout=5
+                )
+    except Exception:
+        pass
+
+    return reg_ok
+
+
 def disable_startup() -> bool:
     """
-    Removes TurboDownloader from HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run.
+    Removes SmartDownload from HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run.
+    Also cleans up Scheduled Tasks and Startup folder shortcuts.
     Returns True on success or if already absent, False on unexpected error.
     """
     if not IS_WINDOWS or winreg is None:
@@ -388,11 +507,40 @@ def disable_startup() -> bool:
                     winreg.DeleteValue(key, k_name)
                 except FileNotFoundError:
                     pass
-        return True
     except FileNotFoundError:
-        return True
+        pass
     except (OSError, PermissionError):
         return False
+
+    # Clean up Scheduled Tasks
+    try:
+        for tname in (TASK_NAME, LEGACY_TASK_NAME):
+            try:
+                subprocess.run(
+                    ["schtasks.exe", "/Delete", "/TN", tname, "/F"],
+                    capture_output=True,
+                    timeout=5
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Clean up Startup folder shortcuts
+    try:
+        startup_dir = get_startup_folder()
+        for name in ("Smart Download (SD).lnk", "SmartDownload.lnk", "TurboDownloader.lnk", "Turbo Download Manager Pro.lnk"):
+            p = os.path.join(startup_dir, name)
+            if os.path.isfile(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return True
+
 
 def get_startup_entry() -> Optional[str]:
     """Returns the registered command string from Windows Run registry, or None."""
@@ -400,8 +548,14 @@ def get_startup_entry() -> Optional[str]:
         return None
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_READ) as key:
-            val, _ = winreg.QueryValueEx(key, STARTUP_REG_KEY_NAME)
-            return str(val) if val else None
+            for k_name in (STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME):
+                try:
+                    val, _ = winreg.QueryValueEx(key, k_name)
+                    if val and str(val).strip():
+                        return str(val)
+                except FileNotFoundError:
+                    pass
+            return None
     except (FileNotFoundError, OSError):
         return None
 

@@ -54,6 +54,12 @@ def get_default_install_dir() -> str:
 DEFAULT_INSTALL_DIR = get_default_install_dir()
 UNINSTALL_REG_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_ID}"
 
+STARTUP_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+STARTUP_REG_KEY_NAME = "SmartDownload"
+LEGACY_STARTUP_REG_KEY_NAME = "TurboDownloader"
+TASK_NAME = "SmartDownloadAutoStart"
+LEGACY_TASK_NAME = "TurboDownloaderAutoStart"
+
 
 def get_desktop_dir() -> str:
     """Gets the actual Desktop directory path, resolving OneDrive and Windows Shell redirection."""
@@ -92,6 +98,24 @@ def get_start_menu_programs_dir() -> str:
                                         "Microsoft", "Windows", "Start Menu", "Programs"))
 
 
+def get_startup_dir() -> str:
+    """Gets the user Startup directory path (shell:startup)."""
+    if HAS_WINREG and sys.platform.startswith("win"):
+        try:
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
+            raw_path, _ = winreg.QueryValueEx(k, "Startup")
+            winreg.CloseKey(k)
+            if raw_path and str(raw_path).strip():
+                expanded = os.path.normpath(os.path.expandvars(str(raw_path).strip()))
+                if os.path.isabs(expanded) and os.path.isdir(expanded):
+                    return expanded
+        except Exception:
+            pass
+    # Fallback
+    return os.path.normpath(os.path.join(os.environ.get("APPDATA", os.path.expanduser(r"~\AppData\Roaming")),
+                                        "Microsoft", "Windows", "Start Menu", "Programs", "Startup"))
+
+
 def enable_high_dpi_awareness():
     """Configures Per-Monitor V2 High-DPI awareness on Windows."""
     if not sys.platform.startswith("win"):
@@ -112,9 +136,10 @@ def create_windows_shortcut(
     shortcut_path: str,
     icon_path: str = "",
     description: str = APP_NAME,
-    working_dir: str = ""
+    working_dir: str = "",
+    arguments: str = ""
 ) -> bool:
-    """Creates a Windows .lnk shortcut file with target, icon, and working directory."""
+    """Creates a Windows .lnk shortcut file with target, arguments, icon, and working directory."""
     if not sys.platform.startswith("win"):
         return False
 
@@ -133,6 +158,8 @@ def create_windows_shortcut(
         shortcut = shell.CreateShortCut(os.path.abspath(shortcut_path))
         shortcut.TargetPath = os.path.abspath(target_exe)
         shortcut.WorkingDirectory = os.path.abspath(working_dir)
+        if arguments:
+            shortcut.Arguments = arguments
         if icon_path and os.path.exists(icon_path):
             shortcut.IconLocation = f"{os.path.abspath(icon_path)},0"
         if description:
@@ -146,11 +173,13 @@ def create_windows_shortcut(
     # 2. Fallback to PowerShell
     try:
         ps_icon = f"$s.IconLocation = '{os.path.abspath(icon_path)},0'; " if (icon_path and os.path.exists(icon_path)) else ""
+        ps_args = f"$s.Arguments = '{arguments}'; " if arguments else ""
         ps_script = (
             f"$ws = New-Object -ComObject WScript.Shell; "
             f"$s = $ws.CreateShortcut('{os.path.abspath(shortcut_path)}'); "
             f"$s.TargetPath = '{os.path.abspath(target_exe)}'; "
             f"$s.WorkingDirectory = '{os.path.abspath(working_dir)}'; "
+            f"{ps_args}"
             f"{ps_icon}"
             f"$s.Description = '{description}'; "
             f"$s.Save();"
@@ -163,6 +192,132 @@ def create_windows_shortcut(
         return res.returncode == 0 and os.path.exists(shortcut_path)
     except Exception:
         return False
+
+
+def register_startup_entries(exe_path: str, icon_path: str = "") -> Dict[str, bool]:
+    """
+    Registers automatic, zero-elevation background startup on Windows boot:
+    1. Register binary in HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run with --minimized.
+    2. Register standard user Scheduled Task (SmartDownloadAutoStart) via schtasks.exe with /SC ONLOGON.
+    3. Create silent background startup shortcut in shell:startup (%APPDATA%\\...\\Startup).
+    """
+    results = {"run_key": False, "scheduled_task": False, "startup_shortcut": False}
+    if not sys.platform.startswith("win"):
+        return results
+
+    abs_exe = os.path.abspath(exe_path)
+    cmd = f'"{abs_exe}" --minimized'
+
+    # 1. Register in HKCU Run Key
+    if HAS_WINREG:
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_REG_KEY) as key:
+                winreg.SetValueEx(key, STARTUP_REG_KEY_NAME, 0, winreg.REG_SZ, cmd)
+                # Clean up legacy key if present
+                try:
+                    winreg.DeleteValue(key, LEGACY_STARTUP_REG_KEY_NAME)
+                except (FileNotFoundError, OSError):
+                    pass
+            results["run_key"] = True
+        except Exception:
+            pass
+
+    # 2. Register Windows Scheduled Task (SmartDownloadAutoStart)
+    try:
+        tr_arg = f'"{abs_exe}" --minimized'
+        task_cmd = [
+            "schtasks.exe", "/Create", "/F",
+            "/SC", "ONLOGON",
+            "/TN", TASK_NAME,
+            "/TR", tr_arg
+        ]
+        res = subprocess.run(task_cmd, capture_output=True, text=True, timeout=10)
+        results["scheduled_task"] = (res.returncode == 0)
+    except Exception:
+        pass
+
+    # 3. Create silent startup shortcut in shell:startup
+    try:
+        startup_dir = get_startup_dir()
+        os.makedirs(startup_dir, exist_ok=True)
+        for old_name in ("Turbo Download Manager Pro.lnk", "TurboDownloader.lnk", "SmartDownload.lnk"):
+            old_p = os.path.join(startup_dir, old_name)
+            if os.path.isfile(old_p):
+                try:
+                    os.remove(old_p)
+                except Exception:
+                    pass
+        startup_lnk = os.path.join(startup_dir, f"{APP_NAME}.lnk")
+        ok_lnk = create_windows_shortcut(
+            target_exe=abs_exe,
+            shortcut_path=startup_lnk,
+            icon_path=icon_path,
+            description=f"{APP_NAME} AutoStart",
+            arguments="--minimized"
+        )
+        results["startup_shortcut"] = ok_lnk
+    except Exception:
+        pass
+
+    return results
+
+
+def unregister_startup_entries() -> Dict[str, bool]:
+    """
+    Cleanly removes all auto-start entries on uninstallation:
+    1. HKCU Run registry keys (SmartDownload and legacy TurboDownloader).
+    2. Scheduled Task (SmartDownloadAutoStart and legacy TurboDownloaderAutoStart).
+    3. Startup folder shortcuts.
+    """
+    results = {"run_key": False, "scheduled_task": False, "startup_shortcut": False}
+    if not sys.platform.startswith("win"):
+        return results
+
+    # 1. HKCU Run registry
+    if HAS_WINREG:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_REG_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                for k_name in (STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME):
+                    try:
+                        winreg.DeleteValue(key, k_name)
+                    except (FileNotFoundError, OSError):
+                        pass
+            results["run_key"] = True
+        except FileNotFoundError:
+            results["run_key"] = True
+        except Exception:
+            pass
+
+    # 2. Windows Scheduled Task
+    try:
+        for tname in (TASK_NAME, LEGACY_TASK_NAME):
+            try:
+                subprocess.run(
+                    ["schtasks.exe", "/Delete", "/TN", tname, "/F"],
+                    capture_output=True,
+                    timeout=10
+                )
+            except Exception:
+                pass
+        results["scheduled_task"] = True
+    except Exception:
+        pass
+
+    # 3. Startup folder shortcuts
+    try:
+        startup_dir = get_startup_dir()
+        for name in (APP_NAME, "SmartDownload", "TurboDownloader", "Turbo Download Manager Pro"):
+            lnk_path = os.path.join(startup_dir, f"{name}.lnk")
+            if os.path.isfile(lnk_path):
+                try:
+                    os.remove(lnk_path)
+                except Exception:
+                    pass
+        results["startup_shortcut"] = True
+    except Exception:
+        pass
+
+    return results
 
 
 def register_uninstall_entry(
@@ -315,6 +470,7 @@ def install_application(
     create_desktop: bool = True,
     create_start_menu: bool = True,
     register_browser: bool = True,
+    register_startup: bool = True,
     progress_cb: Optional[Callable[[float, str], None]] = None
 ) -> Dict[str, Any]:
     """
@@ -451,7 +607,12 @@ def install_application(
         if create_windows_shortcut(exe_dest, sm_lnk, ico_dest):
             shortcuts_created.append(sm_lnk)
 
-    _notify(0.90, "Registering Windows Uninstall entry...")
+    _notify(0.85, "Registering automatic background startup on Windows boot...")
+    startup_res = {}
+    if register_startup:
+        startup_res = register_startup_entries(exe_dest, ico_dest)
+
+    _notify(0.95, "Registering Windows Uninstall entry...")
     reg_ok = register_uninstall_entry(target_dir, exe_dest, uninstaller_dest, ico_dest)
 
     _notify(1.0, "Installation complete!")
@@ -461,7 +622,8 @@ def install_application(
         "exe_path": exe_dest,
         "uninstaller_path": uninstaller_dest,
         "shortcuts": shortcuts_created,
-        "registry_registered": reg_ok
+        "registry_registered": reg_ok,
+        "startup_registered": startup_res
     }
 
 
@@ -521,7 +683,10 @@ def uninstall_application(
                 except Exception:
                     pass
 
-    _notify(0.70, "Unregistering Windows Uninstall entry...")
+    _notify(0.65, "Removing automatic background startup entries...")
+    unregister_startup_entries()
+
+    _notify(0.75, "Unregistering Windows Uninstall entry...")
     unregister_uninstall_entry()
 
     _notify(0.90, "Cleaning up installed files...")
@@ -739,12 +904,14 @@ class InstallerGUI:
         # Options Checkboxes
         self.var_desktop = tk.BooleanVar(value=True)
         self.var_startmenu = tk.BooleanVar(value=True)
+        self.var_startup = tk.BooleanVar(value=True)
         self.var_browser = tk.BooleanVar(value=True)
         self.var_launch = tk.BooleanVar(value=True)
 
         for text, var in [
             ("Create Desktop Shortcut", self.var_desktop),
             ("Create Start Menu Shortcut", self.var_startmenu),
+            ("Start Smart Download on Windows startup (Silent background)", self.var_startup),
             ("Enable Chrome & Microsoft Edge Browser Integration", self.var_browser),
             (f"Launch {APP_NAME} after installation", self.var_launch)
         ]:
@@ -845,6 +1012,7 @@ class InstallerGUI:
                         create_desktop=self.var_desktop.get(),
                         create_start_menu=self.var_startmenu.get(),
                         register_browser=self.var_browser.get(),
+                        register_startup=self.var_startup.get(),
                         progress_cb=_cb
                     )
                     self.launch_after = self.var_launch.get()
@@ -898,6 +1066,7 @@ def main():
     parser.add_argument("--launch", action="store_true", help="Launch application after silent installation")
     parser.add_argument("--no-shortcuts", action="store_true", help="Do not create desktop or start menu shortcuts")
     parser.add_argument("--no-browser", action="store_true", help="Do not register browser native messaging")
+    parser.add_argument("--no-startup", action="store_true", help="Do not register auto-start on boot")
 
     args, unknown = parser.parse_known_args()
 
@@ -921,7 +1090,8 @@ def main():
                 target_dir=target_dir,
                 create_desktop=not args.no_shortcuts,
                 create_start_menu=not args.no_shortcuts,
-                register_browser=not args.no_browser
+                register_browser=not args.no_browser,
+                register_startup=not args.no_startup
             )
             if args.launch and res.get("success") and os.path.isfile(res.get("exe_path", "")):
                 try:

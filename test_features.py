@@ -1671,6 +1671,92 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             self.assertEqual(un_progress[-1][0], 1.0)
             self.assertFalse(os.path.exists(install_target))
 
+    def test_installer_startup_registration_and_uninstallation(self):
+        """Verifies that install_application registers auto-start entries (Run registry, Scheduled Task, Startup shortcut) and uninstall_application removes them."""
+        if not sys.platform.startswith("win"):
+            self.skipTest("Installer startup tests only run on Windows OS.")
+
+        import tempfile
+        import winreg
+        from unittest.mock import patch, MagicMock
+
+        with tempfile.TemporaryDirectory() as tmp_target, \
+             tempfile.TemporaryDirectory() as tmp_startup:
+
+            recorded_commands = []
+            orig_subprocess_run = subprocess.run
+
+            def mock_subprocess_run(cmd, *args, **kwargs):
+                recorded_commands.append(cmd)
+                if isinstance(cmd, list) and len(cmd) > 0 and "schtasks.exe" in str(cmd[0]):
+                    m = MagicMock()
+                    m.returncode = 0
+                    m.stdout = "SUCCESS"
+                    m.stderr = ""
+                    return m
+                return orig_subprocess_run(cmd, *args, **kwargs)
+
+            with patch.object(installer, "get_startup_dir", return_value=tmp_startup), \
+                 patch("subprocess.run", side_effect=mock_subprocess_run):
+
+                res = installer.install_application(
+                    target_dir=tmp_target,
+                    create_desktop=False,
+                    create_start_menu=False,
+                    register_browser=False,
+                    register_startup=True
+                )
+                self.assertTrue(res.get("success"))
+                self.assertIn("startup_registered", res)
+                self.assertTrue(res["startup_registered"].get("run_key"))
+                self.assertTrue(res["startup_registered"].get("scheduled_task"))
+                self.assertTrue(res["startup_registered"].get("startup_shortcut"))
+
+                # 1. Assert HKCU Run registry value exists and points to installed exe --minimized
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, installer.STARTUP_REG_KEY, 0, winreg.KEY_READ) as key:
+                    run_val, _ = winreg.QueryValueEx(key, installer.STARTUP_REG_KEY_NAME)
+                    expected_exe = os.path.join(tmp_target, "SmartDownload.exe")
+                    self.assertIn(expected_exe, run_val)
+                    self.assertTrue(run_val.endswith(" --minimized"))
+
+                # 2. Assert silent startup shortcut exists in Startup folder
+                startup_lnk = os.path.join(tmp_startup, f"{installer.APP_NAME}.lnk")
+                self.assertTrue(os.path.isfile(startup_lnk), "Startup folder shortcut must exist after install")
+
+                # 3. Assert schtasks.exe was invoked to create SmartDownloadAutoStart
+                schtasks_create_calls = [
+                    c for c in recorded_commands
+                    if isinstance(c, list) and len(c) > 0 and "schtasks.exe" in str(c[0]) and "/Create" in c
+                ]
+                self.assertTrue(len(schtasks_create_calls) >= 1, "schtasks.exe /Create must be called during install")
+                create_cmd = schtasks_create_calls[0]
+                self.assertIn("/TN", create_cmd)
+                self.assertIn(installer.TASK_NAME, create_cmd)
+                self.assertIn("/SC", create_cmd)
+                self.assertIn("ONLOGON", create_cmd)
+
+                # Now execute uninstallation
+                un_res = installer.uninstall_application(target_dir=tmp_target)
+                self.assertTrue(un_res.get("success"))
+
+                # 1. Assert HKCU Run registry value was deleted
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, installer.STARTUP_REG_KEY, 0, winreg.KEY_READ) as key:
+                    with self.assertRaises(FileNotFoundError):
+                        winreg.QueryValueEx(key, installer.STARTUP_REG_KEY_NAME)
+
+                # 2. Assert Startup folder shortcut was deleted
+                self.assertFalse(os.path.exists(startup_lnk), "Startup folder shortcut must be deleted after uninstall")
+
+                # 3. Assert schtasks.exe was invoked to delete the task
+                schtasks_delete_calls = [
+                    c for c in recorded_commands
+                    if isinstance(c, list) and len(c) > 0 and "schtasks.exe" in str(c[0]) and "/Delete" in c
+                ]
+                self.assertTrue(len(schtasks_delete_calls) >= 1, "schtasks.exe /Delete must be called during uninstall")
+                del_cmd = schtasks_delete_calls[0]
+                self.assertIn("/TN", del_cmd)
+                self.assertIn(installer.TASK_NAME, del_cmd)
+
     def test_build_installer_payload_deduplication(self):
         """Verifies build_installer.prepare_payload() bundles ONLY SmartDownload.exe and excludes TurboDownloader.exe."""
         import build_installer
@@ -3209,6 +3295,33 @@ class TestWindowsStartupRegistryIntegration(unittest.TestCase):
                 self.assertFalse(is_startup_enabled())
             with patch("winreg.QueryValueEx", return_value=(None, 1)):
                 self.assertFalse(is_startup_enabled())
+
+    def test_startup_harmonization_and_stale_key_cleanup(self):
+        """Verifies that is_startup_enabled detects and cleans up stale/broken entries pointing to missing binaries."""
+        import winreg
+        # 1. Inject a broken/stale entry into the Run key
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY) as key:
+            broken_cmd = r'"C:\PathThatDoesNotExist_12345\SmartDownload.exe" --minimized'
+            winreg.SetValueEx(key, STARTUP_REG_KEY_NAME, 0, winreg.REG_SZ, broken_cmd)
+
+        # 2. is_startup_enabled must recognize this as broken/stale, delete it, and return False
+        enabled = is_startup_enabled()
+        self.assertFalse(enabled, "is_startup_enabled must return False for broken/stale keys")
+
+        # 3. Verify registry key was cleaned up
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_READ) as key:
+            with self.assertRaises(FileNotFoundError):
+                winreg.QueryValueEx(key, STARTUP_REG_KEY_NAME)
+
+        # 4. enable_startup must successfully register active command
+        ok = enable_startup(minimized=True)
+        self.assertTrue(ok)
+        self.assertTrue(is_startup_enabled())
+
+        # 5. disable_startup cleanly unregisters
+        disable_ok = disable_startup()
+        self.assertTrue(disable_ok)
+        self.assertFalse(is_startup_enabled())
 
 
 class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
