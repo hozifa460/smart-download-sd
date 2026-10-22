@@ -37,7 +37,7 @@ async function checkAppHealth() {
   try {
     const nativeOnline = await new Promise((resolve) => {
       chrome.runtime.sendNativeMessage(
-        "com.turbodownloader.host",
+        "com.smartdownload.host",
         { action: "ping" },
         (res) => {
           if (chrome.runtime.lastError || !res) {
@@ -82,13 +82,13 @@ async function checkAppHealth() {
   return false;
 }
 
-// Send download task to Turbo Download Manager Pro via Native Messaging or HTTP IPC
+// Send download task to Smart Download (SD) via Native Messaging or HTTP IPC
 async function sendToTurbo(payload) {
   // 1. Try Native Messaging Host first (direct Windows Registry IPC)
   try {
     const nativeSuccess = await new Promise((resolve) => {
       chrome.runtime.sendNativeMessage(
-        "com.turbodownloader.host",
+        "com.smartdownload.host",
         { action: "download", ...payload },
         (res) => {
           if (chrome.runtime.lastError || !res) {
@@ -145,13 +145,13 @@ chrome.runtime.onInstalled.addListener(() => {
 
   chrome.contextMenus.create({
     id: "turbo-download-target",
-    title: "⚡ Download with Turbo Download Manager",
+    title: "⚡ Download with Smart Download",
     contexts: ["link", "video", "audio", "image"]
   });
 
   chrome.contextMenus.create({
     id: "turbo-download-page",
-    title: "⚡ Download Current Video / Page with Turbo",
+    title: "⚡ Download Current Video / Page with Smart Download",
     contexts: ["page"]
   });
 
@@ -187,15 +187,15 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     chrome.notifications.create({
       type: "basic",
       iconUrl: "icons/icon128.png",
-      title: "Turbo Download Manager Pro",
-      message: "Download task dispatched to Turbo Download Manager!"
+      title: "Smart Download (SD)",
+      message: "Download task dispatched to Smart Download (SD)!"
     });
   } else {
     chrome.notifications.create({
       type: "basic",
       iconUrl: "icons/icon128.png",
-      title: "Turbo Download Manager Pro",
-      message: "Could not connect to desktop app. Please make sure Turbo Download Manager is running."
+      title: "Smart Download (SD)",
+      message: "Could not connect to desktop app. Please make sure Smart Download (SD) is running."
     });
   }
 });

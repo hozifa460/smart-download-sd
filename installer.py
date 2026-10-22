@@ -36,11 +36,14 @@ except ImportError:
     HAS_WINREG = False
 
 # Application Constants
-APP_NAME = "Turbo Download Manager Pro"
-APP_ID = "TurboDownloader"
+APP_NAME = "Smart Download (SD)"
+APP_ID = "SmartDownload"
 APP_VERSION = "1.0.0"
-APP_PUBLISHER = "TurboDownloader Team"
-APP_URL = "https://turbopro.app"
+APP_PUBLISHER = "Smart Download Team"
+APP_URL = "https://github.com/hozifa460/smart-download-sd"
+
+LEGACY_APP_ID = "TurboDownloader"
+LEGACY_UNINSTALL_REG_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{LEGACY_APP_ID}"
 
 def get_default_install_dir() -> str:
     local_app_data = os.environ.get("LOCALAPPDATA")
@@ -207,16 +210,18 @@ def register_uninstall_entry(
 
 
 def unregister_uninstall_entry() -> bool:
-    """Removes the Windows HKCU Uninstall registry key."""
+    """Removes the Windows HKCU Uninstall registry key (including legacy key)."""
     if not HAS_WINREG or not sys.platform.startswith("win"):
         return False
-    try:
-        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_REG_KEY)
-        return True
-    except FileNotFoundError:
-        return True
-    except Exception:
-        return False
+    ok = True
+    for k in (UNINSTALL_REG_KEY, LEGACY_UNINSTALL_REG_KEY):
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, k)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            ok = False
+    return ok
 
 
 def find_payload_sources() -> Dict[str, str]:
@@ -236,9 +241,12 @@ def find_payload_sources() -> Dict[str, str]:
     base_dirs.append(current_dir)
 
     for b in base_dirs:
-        cand = os.path.join(b, "TurboDownloader.exe")
-        if os.path.isfile(cand) and "TurboDownloader.exe" not in sources:
-            sources["TurboDownloader.exe"] = cand
+        cand = os.path.join(b, "SmartDownload.exe")
+        if os.path.isfile(cand) and "SmartDownload.exe" not in sources:
+            sources["SmartDownload.exe"] = cand
+        cand_legacy = os.path.join(b, "TurboDownloader.exe")
+        if os.path.isfile(cand_legacy) and "TurboDownloader.exe" not in sources:
+            sources["TurboDownloader.exe"] = cand_legacy
 
     for b in base_dirs:
         cand = os.path.join(b, "app_icon.ico")
@@ -256,13 +264,19 @@ def find_payload_sources() -> Dict[str, str]:
             sources["extension"] = cand
 
     for b in base_dirs:
-        cand = os.path.join(b, "turbo_host.bat")
-        if os.path.isfile(cand) and "turbo_host.bat" not in sources:
-            sources["turbo_host.bat"] = cand
+        cand = os.path.join(b, "sd_host.bat")
+        if os.path.isfile(cand) and "sd_host.bat" not in sources:
+            sources["sd_host.bat"] = cand
+        cand_legacy = os.path.join(b, "turbo_host.bat")
+        if os.path.isfile(cand_legacy) and "turbo_host.bat" not in sources:
+            sources["turbo_host.bat"] = cand_legacy
 
     for b in base_dirs:
-        cand = os.path.join(b, "com.turbodownloader.host.json")
-        if os.path.isfile(cand) and "com.turbodownloader.host.json" not in sources:
+        cand = os.path.join(b, "com.smartdownload.host.json")
+        if os.path.isfile(cand) and "com.smartdownload.host.json" not in sources:
+            sources["com.smartdownload.host.json"] = cand
+        cand_legacy = os.path.join(b, "com.turbodownloader.host.json")
+        if os.path.isfile(cand_legacy) and "com.turbodownloader.host.json" not in sources:
             sources["com.turbodownloader.host.json"] = cand
 
     for b in base_dirs:
@@ -274,19 +288,20 @@ def find_payload_sources() -> Dict[str, str]:
 
 
 def terminate_running_app():
-    """Terminates any active TurboDownloader.exe processes to allow overwriting."""
+    """Terminates any active SmartDownload.exe or TurboDownloader.exe processes to allow overwriting."""
     if not sys.platform.startswith("win"):
         return
-    try:
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "TurboDownloader.exe"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5
-        )
-        time.sleep(0.3)
-    except Exception:
-        pass
+    for proc in ("SmartDownload.exe", "TurboDownloader.exe"):
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", proc],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5
+            )
+        except Exception:
+            pass
+    time.sleep(0.3)
 
 
 def install_application(
@@ -323,12 +338,14 @@ def install_application(
     _notify(0.30, "Extracting application binaries and resources...")
     sources = find_payload_sources()
 
-    # 1. Copy TurboDownloader.exe
-    exe_dest = os.path.join(target_dir, "TurboDownloader.exe")
-    if "TurboDownloader.exe" in sources:
+    # 1. Copy SmartDownload.exe
+    exe_dest = os.path.join(target_dir, "SmartDownload.exe")
+    if "SmartDownload.exe" in sources:
+        shutil.copy2(sources["SmartDownload.exe"], exe_dest)
+    elif "TurboDownloader.exe" in sources:
         shutil.copy2(sources["TurboDownloader.exe"], exe_dest)
     else:
-        # If running from source and TurboDownloader.exe not pre-built, create a placeholder/copy
+        # If running from source and SmartDownload.exe not pre-built, create a placeholder/copy
         if not os.path.exists(exe_dest):
             with open(exe_dest, "wb") as f:
                 f.write(b"")
@@ -441,22 +458,24 @@ def uninstall_application(
     _notify(0.50, "Removing application shortcuts...")
     # Desktop shortcut (check both shell resolved and userprofile)
     for dt_dir in {get_desktop_dir(), os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Desktop")}:
-        dt_lnk = os.path.join(dt_dir, f"{APP_NAME}.lnk")
-        if os.path.isfile(dt_lnk):
-            try:
-                os.remove(dt_lnk)
-            except Exception:
-                pass
+        for name in (APP_NAME, "Turbo Download Manager Pro"):
+            dt_lnk = os.path.join(dt_dir, f"{name}.lnk")
+            if os.path.isfile(dt_lnk):
+                try:
+                    os.remove(dt_lnk)
+                except Exception:
+                    pass
 
     # Start menu shortcut
     for sm_dir in {get_start_menu_programs_dir(), os.path.join(os.environ.get("APPDATA", os.path.expanduser(r"~\AppData\Roaming")),
                                                                "Microsoft", "Windows", "Start Menu", "Programs")}:
-        sm_lnk = os.path.join(sm_dir, f"{APP_NAME}.lnk")
-        if os.path.isfile(sm_lnk):
-            try:
-                os.remove(sm_lnk)
-            except Exception:
-                pass
+        for name in (APP_NAME, "Turbo Download Manager Pro"):
+            sm_lnk = os.path.join(sm_dir, f"{name}.lnk")
+            if os.path.isfile(sm_lnk):
+                try:
+                    os.remove(sm_lnk)
+                except Exception:
+                    pass
 
     _notify(0.70, "Unregistering Windows Uninstall entry...")
     unregister_uninstall_entry()
@@ -683,7 +702,7 @@ class InstallerGUI:
             ("Create Desktop Shortcut", self.var_desktop),
             ("Create Start Menu Shortcut", self.var_startmenu),
             ("Enable Chrome & Microsoft Edge Browser Integration", self.var_browser),
-            ("Launch Turbo Download Manager Pro after installation", self.var_launch)
+            (f"Launch {APP_NAME} after installation", self.var_launch)
         ]:
             cb = tk.Checkbutton(pad_f, text=text, variable=var, font=("Segoe UI", 9),
                                 bg=self.BG_CARD, fg=self.TEXT_MAIN, selectcolor=self.BG_INPUT,
@@ -699,7 +718,7 @@ class InstallerGUI:
         pad_f = tk.Frame(self.content_frame, bg=self.BG_CARD)
         pad_f.pack(fill=tk.BOTH, expand=True, padx=24, pady=24)
 
-        lbl_warn = tk.Label(pad_f, text="Are you sure you want to completely uninstall Turbo Download Manager Pro?",
+        lbl_warn = tk.Label(pad_f, text=f"Are you sure you want to completely uninstall {APP_NAME}?",
                             font=("Segoe UI", 11, "bold"), bg=self.BG_CARD, fg=self.TEXT_MAIN, wraplength=480, justify="left")
         lbl_warn.pack(anchor="w", pady=(0, 12))
 
@@ -849,7 +868,7 @@ def main():
     target_dir = args.dir
     if mode == "uninstall" and args.dir == DEFAULT_INSTALL_DIR:
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-        if os.path.isfile(os.path.join(exe_dir, "TurboDownloader.exe")):
+        if os.path.isfile(os.path.join(exe_dir, "SmartDownload.exe")) or os.path.isfile(os.path.join(exe_dir, "TurboDownloader.exe")):
             target_dir = exe_dir
 
     if silent:

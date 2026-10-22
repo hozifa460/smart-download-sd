@@ -76,7 +76,7 @@ def enable_high_dpi_awareness():
             import ctypes
             # Explicit AppUserModelID ensures Windows taskbar associates the app with its high-res icon
             try:
-                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TurboDownloader.Pro.App")
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SmartDownload.SD.App")
             except Exception:
                 pass
             # 1. Windows 10 Creators Update (1703+) Per-Monitor V2
@@ -152,11 +152,17 @@ def get_config_dir() -> str:
     if sys.platform.startswith("win"):
         appdata = os.environ.get("APPDATA")
         if appdata:
-            cfg = os.path.join(appdata, "TurboDownloader")
+            cfg = os.path.join(appdata, "SmartDownload")
+            legacy_cfg = os.path.join(appdata, "TurboDownloader")
+            if os.path.isdir(legacy_cfg) and not os.path.exists(cfg):
+                try:
+                    shutil.copytree(legacy_cfg, cfg)
+                except Exception:
+                    pass
         else:
-            cfg = os.path.join(os.path.expanduser("~"), ".turbodownloader")
+            cfg = os.path.join(os.path.expanduser("~"), ".smartdownload")
     else:
-        cfg = os.path.join(os.path.expanduser("~"), ".turbodownloader")
+        cfg = os.path.join(os.path.expanduser("~"), ".smartdownload")
     try:
         os.makedirs(cfg, exist_ok=True)
     except Exception:
@@ -289,7 +295,8 @@ else:
 # ======================================================================================
 
 WINDOWS_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-STARTUP_REG_KEY_NAME = "TurboDownloader"
+STARTUP_REG_KEY_NAME = "SmartDownload"
+LEGACY_STARTUP_REG_KEY_NAME = "TurboDownloader"
 
 def get_startup_command(minimized: bool = True) -> str:
     """
@@ -307,12 +314,13 @@ def get_startup_command(minimized: bool = True) -> str:
 
     # Prioritize compiled standalone binary in dist/ directory or adjacent to script
     base_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() and isinstance(__file__, str) else os.getcwd()
-    dist_exe = os.path.join(base_dir, "dist", "TurboDownloader.exe")
-    alt_exe = os.path.join(base_dir, "TurboDownloader.exe")
-    if os.path.isfile(dist_exe):
-        return f'"{os.path.abspath(dist_exe)}"{flag}'
-    elif os.path.isfile(alt_exe):
-        return f'"{os.path.abspath(alt_exe)}"{flag}'
+    for exe_name in ("SmartDownload.exe", "TurboDownloader.exe"):
+        dist_cand = os.path.join(base_dir, "dist", exe_name)
+        alt_cand = os.path.join(base_dir, exe_name)
+        if os.path.isfile(dist_cand):
+            return f'"{os.path.abspath(dist_cand)}"{flag}'
+        elif os.path.isfile(alt_cand):
+            return f'"{os.path.abspath(alt_cand)}"{flag}'
 
     # Script mode fallback: prefer pythonw.exe if available so no console window flashes
     py_exe = str(sys.executable).strip('"')
@@ -333,8 +341,14 @@ def is_startup_enabled() -> bool:
         return False
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_READ) as key:
-            val, _ = winreg.QueryValueEx(key, STARTUP_REG_KEY_NAME)
-            return bool(val and str(val).strip())
+            for k_name in (STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME):
+                try:
+                    val, _ = winreg.QueryValueEx(key, k_name)
+                    if val and str(val).strip():
+                        return True
+                except FileNotFoundError:
+                    pass
+            return False
     except (FileNotFoundError, OSError):
         return False
 
@@ -363,10 +377,11 @@ def disable_startup() -> bool:
         return False
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-            try:
-                winreg.DeleteValue(key, STARTUP_REG_KEY_NAME)
-            except FileNotFoundError:
-                pass
+            for k_name in (STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME):
+                try:
+                    winreg.DeleteValue(key, k_name)
+                except FileNotFoundError:
+                    pass
         return True
     except FileNotFoundError:
         return True
@@ -696,12 +711,12 @@ def notify_running_instance(url: Optional[str] = None, show: bool = True) -> boo
     dispatches the download URL. Returns True if an existing instance was handled.
     """
     try:
-        req = urllib.request.Request("http://127.0.0.1:9242/ping", headers={"User-Agent": "TurboDownloader-Launcher"})
+        req = urllib.request.Request("http://127.0.0.1:9242/ping", headers={"User-Agent": "SmartDownload-Launcher"})
         with urllib.request.urlopen(req, timeout=0.6) as resp:
             if resp.status == 200:
                 raw = resp.read().decode("utf-8")
                 data = json.loads(raw)
-                if data.get("app") == "Turbo Download Manager Pro":
+                if data.get("app") in ("Smart Download (SD)", "Smart Download", "Turbo Download Manager Pro"):
                     if url and is_downloadable_url(url):
                         try:
                             post_data = json.dumps({"url": url, "start_immediately": False}).encode("utf-8")
@@ -718,7 +733,7 @@ def notify_running_instance(url: Optional[str] = None, show: bool = True) -> boo
                         try:
                             show_req = urllib.request.Request(
                                 "http://127.0.0.1:9242/show",
-                                headers={"User-Agent": "TurboDownloader-Launcher"}
+                                headers={"User-Agent": "SmartDownload-Launcher"}
                             )
                             with urllib.request.urlopen(show_req, timeout=1.0) as _:
                                 pass
@@ -1082,13 +1097,14 @@ class TurboDownloadEngine:
         self.total_size = 0
         self.supports_ranges = False
         self.filename = os.path.basename(destination_path)
-        self.temp_dir = destination_path + ".tdm_parts"
-        legacy_dir = destination_path + ".idm_parts"
-        if os.path.isdir(legacy_dir) and not os.path.exists(self.temp_dir):
-            try:
-                os.replace(legacy_dir, self.temp_dir)
-            except Exception:
-                pass
+        self.temp_dir = destination_path + ".sd_parts"
+        for legacy_d in [destination_path + ".tdm_parts", destination_path + ".idm_parts"]:
+            if os.path.isdir(legacy_d) and not os.path.exists(self.temp_dir):
+                try:
+                    os.replace(legacy_d, self.temp_dir)
+                    break
+                except Exception:
+                    pass
 
         self.chunks: List[DownloadChunk] = []
         self.active_workers: List[threading.Thread] = []
@@ -1283,7 +1299,14 @@ class TurboDownloadEngine:
         # Update destination path if filename discovered
         if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
             self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
-            self.temp_dir = self.destination_path + ".tdm_parts"
+            self.temp_dir = self.destination_path + ".sd_parts"
+            for legacy_d in [self.destination_path + ".tdm_parts", self.destination_path + ".idm_parts"]:
+                if os.path.isdir(legacy_d) and not os.path.exists(self.temp_dir):
+                    try:
+                        os.replace(legacy_d, self.temp_dir)
+                        break
+                    except Exception:
+                        pass
 
         if self.supports_ranges and self.total_size > 0:
             size_mb = self.total_size / (1024 * 1024)
@@ -2480,12 +2503,13 @@ class StreamDownloadCoordinator:
                                 os.remove(p)
                             except Exception:
                                 pass
-                        parts_dir = p + ".tdm_parts"
-                        if os.path.isdir(parts_dir):
-                            try:
-                                shutil.rmtree(parts_dir, ignore_errors=True)
-                            except Exception:
-                                pass
+                        for ext in (".sd_parts", ".tdm_parts"):
+                            parts_dir = p + ext
+                            if os.path.isdir(parts_dir):
+                                try:
+                                    shutil.rmtree(parts_dir, ignore_errors=True)
+                                except Exception:
+                                    pass
 
 
 # ======================================================================================
@@ -2539,7 +2563,7 @@ class FetchingLinkToast(tk.Toplevel):
         self.c_success = th.get("c_success", "#10b981")
         self.c_input_bg = th.get("c_input_bg", "#0b1220")
 
-        self.title("Fetching Link Information — Turbo Downloader")
+        self.title("Fetching Link Information — Smart Download")
         self.overrideredirect(True)
         self.configure(bg=self.c_border)
 
@@ -2838,7 +2862,7 @@ class QualitySelectionModal(tk.Toplevel):
         self.selected_option: Optional[VideoFormatOption] = self.options[0] if self.options else None
         self._confirmed = False
 
-        self.title("Select Video Quality — Turbo Downloader")
+        self.title("Select Video Quality — Smart Download")
         self.configure(bg=self.theme["c_bg"])
         # Do not use grab_set(): Overrideredirect parent causes Win32 message pump traps and UI freezes
 
@@ -3657,7 +3681,7 @@ class DownloadConfirmationModal(tk.Toplevel):
         self.c_warning = th.get("c_warning", "#f59e0b")
         self.c_input_bg = th.get("c_input_bg", "#0b1220")
 
-        self.title("Download File Info — Turbo Downloader")
+        self.title("Download File Info — Smart Download")
         self.configure(bg=self.c_bg)
         self._last_pct = 0.0
 
@@ -3777,7 +3801,7 @@ class DownloadConfirmationModal(tk.Toplevel):
 
         lbl_sub = tk.Label(
             hdr_frame,
-            text="TDM Smart Interception",
+            text="SD Smart Interception",
             font=("Segoe UI", 8),
             bg=self.c_bg,
             fg=self.c_text_muted,
@@ -4216,7 +4240,7 @@ class DownloadConfirmationModal(tk.Toplevel):
     def show_progress_view(self):
         """Transitions modal interface into standalone compact download progress view."""
         self.is_in_progress_view = True
-        self.title(f"Downloading: {self.file_name} — Turbo Downloader")
+        self.title(f"Downloading: {self.file_name} — Smart Download")
         self.frame_confirmation.pack_forget()
         self.frame_progress.pack(fill=tk.BOTH, expand=True)
 
@@ -4713,7 +4737,7 @@ class RefreshLinkModal(tk.Toplevel):
         self.c_warning = th.get("c_warning", "#f59e0b")
         self.c_input_bg = th.get("c_input_bg", "#0b1220")
 
-        self.title("🔄 Refresh Download Address — Turbo Downloader")
+        self.title("🔄 Refresh Download Address — Smart Download")
         self.configure(bg=self.c_bg)
 
         if parent:
@@ -5196,7 +5220,7 @@ class SystemTrayManager:
         if not PYSTRAY_AVAILABLE or TrayMenuItem is None or TrayMenu is None:
             return None
         return TrayMenu(
-            TrayMenuItem("🖥️ Open Turbo Downloader", self._on_menu_open, default=True),
+            TrayMenuItem("🖥️ Open Smart Download", self._on_menu_open, default=True),
             TrayMenuItem(self._get_sniffer_text, self._on_menu_toggle_sniffer),
             TrayMenuItem(self._get_startup_text, self._on_menu_toggle_startup),
             TrayMenuItem("❌ Exit Completely", self._on_menu_exit),
@@ -5219,7 +5243,7 @@ class SystemTrayManager:
                 return
             menu = self._build_menu()
             try:
-                self.icon = pystray.Icon("TurboDownloader", img, "Turbo Download Manager Pro", menu=menu)
+                self.icon = pystray.Icon("SmartDownload", img, "Smart Download (SD)", menu=menu)
                 # Patch notify to catch both WM_LBUTTONUP (0x0202) and WM_LBUTTONDBLCLK (0x0203)
                 orig_notify = getattr(self.icon, "_on_notify", None)
                 if orig_notify:
@@ -5233,7 +5257,7 @@ class SystemTrayManager:
                         return orig_notify(wparam, lparam)
                     self.icon._on_notify = _patched_notify
                 # Run in a daemon thread so it never blocks Python process termination
-                tray_thread = threading.Thread(target=self.icon.run, daemon=True, name='TurboDownloaderTrayThread')
+                tray_thread = threading.Thread(target=self.icon.run, daemon=True, name='SmartDownloadTrayThread')
                 tray_thread.start()
                 self._running = True
             except Exception:
@@ -5260,7 +5284,7 @@ class SystemTrayManager:
                 except Exception:
                     pass
 
-    def notify(self, message: str, title: str = "Turbo Downloader"):
+    def notify(self, message: str, title: str = "Smart Download (SD)"):
         """Displays Windows system tray notification balloon if supported."""
         with self._lock:
             if self.icon is not None and getattr(self.icon, "visible", False):
@@ -5410,8 +5434,8 @@ class ModernFramelessGUI:
             return
         if not getattr(self, "_start_hidden", False) and not getattr(self, "_was_started_hidden", False):
             return
-        msg = "Turbo Download Manager Pro is active in the background"
-        title = "Turbo Download Manager Pro"
+        msg = "Smart Download (SD) is active in the background"
+        title = "Smart Download (SD)"
         # 1. Windows System Tray notification balloon if tray icon is active
         if hasattr(self, "tray_manager") and self.tray_manager:
             try:
@@ -5462,7 +5486,7 @@ class ModernFramelessGUI:
             text_frame = tk.Frame(inner, bg=self.c_panel)
             text_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-            lbl_t = tk.Label(text_frame, text="Turbo Download Manager Pro", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent, anchor="w")
+            lbl_t = tk.Label(text_frame, text="Smart Download (SD)", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent, anchor="w")
             lbl_t.pack(anchor="w")
 
             lbl_m = tk.Label(text_frame, text=message, font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_bright, anchor="w")
@@ -5954,7 +5978,7 @@ class ModernFramelessGUI:
         # App Title
         title_lbl = tk.Label(
             title_bar,
-            text="TURBO DOWNLOAD MANAGER PRO",
+            text="SMART DOWNLOAD (SD)",
             font=("Segoe UI", 10, "bold"),
             bg=self.c_panel,
             fg=self.c_accent
@@ -5965,7 +5989,7 @@ class ModernFramelessGUI:
 
         subtitle_lbl = tk.Label(
             title_bar,
-            text="[TDM Dynamic Chunking & Bandwidth Throttle Engine]",
+            text="[SD Dynamic Chunking & Bandwidth Throttle Engine]",
             font=("Segoe UI", 8),
             bg=self.c_panel,
             fg=self.c_text_muted
@@ -6591,7 +6615,7 @@ class ModernFramelessGUI:
         header_row = tk.Frame(card, bg=self.c_panel)
         header_row.pack(fill=tk.X, pady=(0, 4))
 
-        lbl = tk.Label(header_row, text="TDM DYNAMIC CHUNK VISUALIZER (Segmented Byte Map)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl = tk.Label(header_row, text="SD DYNAMIC CHUNK VISUALIZER (Segmented Byte Map)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl.pack(side=tk.LEFT)
 
         lbl_legend = tk.Label(header_row, text="■ Active (Cyan)   ■ Done (Green)   ■ Remaining (Dark)", font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
@@ -7642,7 +7666,7 @@ class ModernFramelessGUI:
         card_sniff = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_sniff.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_sniff_t = tk.Label(card_sniff, text="📋 ZERO-INSTALL CLIPBOARD MONITOR (TDM SMART CAPTURE — ALL BROWSERS)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
+        lbl_sniff_t = tk.Label(card_sniff, text="📋 ZERO-INSTALL CLIPBOARD MONITOR (SD SMART CAPTURE — ALL BROWSERS)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
         lbl_sniff_t.pack(anchor="w")
 
         sniff_row = tk.Frame(card_sniff, bg=self.c_panel)
@@ -7650,7 +7674,7 @@ class ModernFramelessGUI:
 
         lbl_sniff_desc = tk.Label(
             sniff_row,
-            text="Works 100% across ALL browsers (Chrome, Edge, Firefox, Brave, Opera, Safari) without any extension.\nJust right-click any link or video and choose 'Copy Link Address' — Turbo Downloader catches it instantly!",
+            text="Works 100% across ALL browsers (Chrome, Edge, Firefox, Brave, Opera, Safari) without any extension.\nJust right-click any link or video and choose 'Copy Link Address' — Smart Download catches it instantly!",
             font=("Segoe UI", 8),
             bg=self.c_panel,
             fg=self.c_text_bright,
@@ -7769,7 +7793,7 @@ class ModernFramelessGUI:
             if status.get("is_registered"):
                 chrome_str = "Chrome ✓" if status.get("chrome_registered") else "Chrome ✕"
                 edge_str = "Edge ✓" if status.get("edge_registered") else "Edge ✕"
-                lbl_reg_status.configure(text=f"● Registry Active: {chrome_str}  {edge_str} (com.turbodownloader.host)", fg=self.c_success)
+                lbl_reg_status.configure(text=f"● Registry Active: {chrome_str}  {edge_str} (com.smartdownload.host)", fg=self.c_success)
                 btn_reg.configure(text="🔄 Re-Register", bg=self.c_panel_light)
             else:
                 lbl_reg_status.configure(text="● Not Registered in Windows Registry", fg=self.c_warning)
@@ -7782,7 +7806,7 @@ class ModernFramelessGUI:
                 self.show_safe_info(
                     "Registration Successful! 🚀",
                     "Native Messaging Host successfully linked in Windows Registry for Google Chrome and Microsoft Edge!\n\n"
-                    f"Host Name: com.turbodownloader.host\n"
+                    f"Host Name: com.smartdownload.host\n"
                     f"Manifest: {res.get('manifest_path')}"
                 )
             else:
@@ -7978,7 +8002,7 @@ class ModernFramelessGUI:
             "2. Turn ON 'Developer mode' using the toggle in the top-right corner.\n"
             "3. Click the 'Load unpacked' button at the top-left.\n"
             "4. Select the extension directory displayed above.\n"
-            "5. The ⚡ Turbo Download icon will appear in your extensions bar!"
+            "5. The ⚡ Smart Download icon will appear in your extensions bar!"
         )
         tk.Label(tab_chrome, text=chrome_txt, font=("Segoe UI", 9), bg=self.c_panel, fg=self.c_text_bright, justify="left").pack(anchor="w")
 
@@ -8003,7 +8027,7 @@ class ModernFramelessGUI:
             "1. Open Firefox and type about:debugging#/runtime/this-firefox in the address bar.\n"
             "2. Click the 'Load Temporary Add-on...' button.\n"
             "3. Select the 'manifest.json' file inside the extension folder.\n"
-            "4. The extension is immediately loaded and connects to Turbo Download Manager."
+            "4. The extension is immediately loaded and connects to Smart Download."
         )
         tk.Label(tab_firefox, text=firefox_txt, font=("Segoe UI", 9), bg=self.c_panel, fg=self.c_text_bright, justify="left").pack(anchor="w")
 
@@ -8561,7 +8585,7 @@ def main():
     enable_high_dpi_awareness()
 
     root = tk.Tk()
-    root.title("Turbo Download Manager Pro")
+    root.title("Smart Download (SD)")
 
     # Set application icon on root window
     ico_path = get_resource_path("app_icon.ico")
@@ -8597,3 +8621,7 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+
+# Backward-compatible and modern engine alias
+SmartDownloadEngine = TurboDownloadEngine

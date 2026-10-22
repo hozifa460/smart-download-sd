@@ -3,10 +3,10 @@
   <assemblyIdentity
     version="1.0.0.0"
     processorArchitecture="*"
-    name="TurboDownloader"
+    name="SmartDownload"
     type="win32"
   />
-  <description>Turbo Download Manager Pro</description>
+  <description>Smart Download (SD)</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

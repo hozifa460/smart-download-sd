@@ -20,8 +20,12 @@ import hashlib
 import time
 from typing import Dict, List, Optional, Any
 
-HOST_NAME = "com.turbodownloader.host"
-HOST_DESCRIPTION = "Turbo Download Manager Pro Native Messaging Host"
+HOST_NAME = "com.smartdownload.host"
+HOST_DESCRIPTION = "Smart Download (SD) Native Messaging Host"
+
+LEGACY_HOST_NAME = "com.turbodownloader.host"
+LEGACY_CHROME_REG_KEY = rf"Software\Google\Chrome\NativeMessagingHosts\{LEGACY_HOST_NAME}"
+LEGACY_EDGE_REG_KEY = rf"Software\Microsoft\Edge\NativeMessagingHosts\{LEGACY_HOST_NAME}"
 
 CHROME_REG_KEY = rf"Software\Google\Chrome\NativeMessagingHosts\{HOST_NAME}"
 EDGE_REG_KEY = rf"Software\Microsoft\Edge\NativeMessagingHosts\{HOST_NAME}"
@@ -145,16 +149,20 @@ def generate_host_manifest(
 def generate_launcher_batch(output_bat_path: str) -> str:
     """
     Creates a robust Windows .bat launcher that works for both frozen .exe and Python source.
-    Prioritizes direct TurboDownloader.exe --native-host execution (<5ms) when present in the directory,
+    Prioritizes direct SmartDownload.exe --native-host execution (<5ms) when present in the directory,
     falling back seamlessly to Python script execution in development environments.
     """
     bat_content = (
         "@echo off\r\n"
         "setlocal\r\n"
-        "REM Launcher for Turbo Download Manager Native Messaging Host\r\n"
+        "REM Launcher for Smart Download (SD) Native Messaging Host\r\n"
         "set SCRIPT_DIR=%~dp0\r\n"
         "\r\n"
-        "REM 1. Fast Standalone path: If TurboDownloader.exe exists in directory, launch immediately (<5ms)\r\n"
+        "REM 1. Fast Standalone path: If SmartDownload.exe exists in directory, launch immediately (<5ms)\r\n"
+        "if exist \"%SCRIPT_DIR%SmartDownload.exe\" (\r\n"
+        "    \"%SCRIPT_DIR%SmartDownload.exe\" --native-host %*\r\n"
+        "    goto :EOF\r\n"
+        ")\r\n"
         "if exist \"%SCRIPT_DIR%TurboDownloader.exe\" (\r\n"
         "    \"%SCRIPT_DIR%TurboDownloader.exe\" --native-host %*\r\n"
         "    goto :EOF\r\n"
@@ -171,6 +179,10 @@ def generate_launcher_batch(output_bat_path: str) -> str:
         ")\r\n"
         "\r\n"
         "REM 3. Dist folder fallback\r\n"
+        "if exist \"%SCRIPT_DIR%dist\\SmartDownload.exe\" (\r\n"
+        "    \"%SCRIPT_DIR%dist\\SmartDownload.exe\" --native-host %*\r\n"
+        "    goto :EOF\r\n"
+        ")\r\n"
         "if exist \"%SCRIPT_DIR%dist\\TurboDownloader.exe\" (\r\n"
         "    \"%SCRIPT_DIR%dist\\TurboDownloader.exe\" --native-host %*\r\n"
         "    goto :EOF\r\n"
@@ -354,11 +366,15 @@ def register_native_host(
 
     os.makedirs(target_dir, exist_ok=True)
 
-    bat_path = os.path.join(target_dir, "turbo_host.bat")
+    bat_path = os.path.join(target_dir, "sd_host.bat")
     json_path = os.path.join(target_dir, f"{HOST_NAME}.json")
 
-    # 1. Generate files
+    # 1. Generate files (generate both sd_host.bat and turbo_host.bat for backward compatibility)
     generate_launcher_batch(bat_path)
+    try:
+        generate_launcher_batch(os.path.join(target_dir, "turbo_host.bat"))
+    except Exception:
+        pass
     allowed_origins = get_default_extension_origins(extension_id=extension_id, target_dir=target_dir)
     manifest_abs_path = generate_host_manifest(bat_path, json_path, allowed_origins)
 
@@ -394,6 +410,7 @@ def register_native_host(
 def unregister_native_host(unregister_extensions: bool = True) -> Dict[str, Any]:
     """
     Removes native messaging registry entries for Chrome and Edge from HKCU.
+    Also cleans up legacy TurboDownloader host keys.
     Optionally unregisters extension keys.
     """
     if not HAS_WINREG or not sys.platform.startswith("win"):
@@ -403,14 +420,24 @@ def unregister_native_host(unregister_extensions: bool = True) -> Dict[str, Any]
         }
 
     results = {}
-    for browser_name, reg_key_path in [("Chrome", CHROME_REG_KEY), ("Edge", EDGE_REG_KEY)]:
+    for browser_name, reg_key_path, legacy_key_path in [
+        ("Chrome", CHROME_REG_KEY, LEGACY_CHROME_REG_KEY),
+        ("Edge", EDGE_REG_KEY, LEGACY_EDGE_REG_KEY)
+    ]:
+        # Delete primary key
         try:
             winreg.DeleteKey(winreg.HKEY_CURRENT_USER, reg_key_path)
             results[browser_name] = True
         except FileNotFoundError:
-            results[browser_name] = True  # Already deleted
+            results[browser_name] = True
         except Exception:
             results[browser_name] = False
+
+        # Delete legacy key if present
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, legacy_key_path)
+        except Exception:
+            pass
 
     ext_results = None
     if unregister_extensions:
@@ -426,18 +453,25 @@ def unregister_native_host(unregister_extensions: bool = True) -> Dict[str, Any]
 def is_registered(browser: str = "chrome") -> bool:
     """
     Checks if Native Messaging Host registry key exists and points to a valid manifest file.
+    Checks primary com.smartdownload.host first, then falls back to legacy com.turbodownloader.host.
     """
     if not HAS_WINREG or not sys.platform.startswith("win"):
         return False
 
-    reg_key_path = CHROME_REG_KEY if browser.lower() == "chrome" else EDGE_REG_KEY
-    try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_key_path, 0, winreg.KEY_READ)
-        manifest_path, _ = winreg.QueryValueEx(key, "")
-        winreg.CloseKey(key)
-        return bool(manifest_path and os.path.isfile(manifest_path))
-    except Exception:
-        return False
+    is_chrome = browser.lower() == "chrome"
+    primary_key = CHROME_REG_KEY if is_chrome else EDGE_REG_KEY
+    legacy_key = LEGACY_CHROME_REG_KEY if is_chrome else LEGACY_EDGE_REG_KEY
+
+    for reg_key_path in [primary_key, legacy_key]:
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_key_path, 0, winreg.KEY_READ)
+            manifest_path, _ = winreg.QueryValueEx(key, "")
+            winreg.CloseKey(key)
+            if manifest_path and os.path.isfile(manifest_path):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def get_status() -> Dict[str, Any]:

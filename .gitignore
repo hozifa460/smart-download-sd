@@ -19,6 +19,7 @@ rea/
 # Download fragments & temp files
 *.tmp
 *.temp
+*.sd_parts
 *.tdm_parts
 *.part
 *.crdownload

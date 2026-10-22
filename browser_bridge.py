@@ -65,7 +65,7 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
         if path in ("/ping", "/status", ""):
             payload = {
                 "status": "ok",
-                "app": "Turbo Download Manager Pro",
+                "app": "Smart Download (SD)",
                 "version": "1.0.0",
                 "active": True
             }
@@ -87,7 +87,7 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
                     server.log(f"[BROWSER BRIDGE] Error in on_show callback: {e}")
             payload = {
                 "status": "ok",
-                "app": "Turbo Download Manager Pro",
+                "app": "Smart Download (SD)",
                 "message": "Window restored"
             }
             body = json.dumps(payload).encode("utf-8")
@@ -122,7 +122,7 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
                     server.log(f"[BROWSER BRIDGE] Error in on_show callback: {e}")
             payload = {
                 "success": True,
-                "app": "Turbo Download Manager Pro",
+                "app": "Smart Download (SD)",
                 "message": "Window restored"
             }
             body = json.dumps(payload).encode("utf-8")
@@ -201,7 +201,7 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
 
         response_payload = {
             "success": True,
-            "message": "Download task received and dispatched to Turbo Download Manager Pro",
+            "message": "Download task received and dispatched to Smart Download (SD)",
             "url": url
         }
         body = json.dumps(response_payload).encode("utf-8")

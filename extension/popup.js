@@ -47,7 +47,7 @@ async function checkStatus(port) {
       const data = await res.json();
       statusCard.className = "status-card online";
       statusTitle.textContent = "● Desktop App Connected";
-      statusDesc.textContent = `${data.app || "Turbo Pro"} (v${data.version || "1.0"})`;
+      statusDesc.textContent = `${data.app || "Smart Download"} (v${data.version || "1.0"})`;
       return true;
     }
   } catch (err) {
@@ -56,7 +56,7 @@ async function checkStatus(port) {
 
   statusCard.className = "status-card offline";
   statusTitle.textContent = "● Desktop App Offline";
-  statusDesc.textContent = "Open Turbo Download Manager to connect";
+  statusDesc.textContent = "Open Smart Download to connect";
   return false;
 }
 

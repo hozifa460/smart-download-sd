@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Turbo Download Manager Integration",
+  "name": "Smart Download (SD) Integration",
   "version": "1.0.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1J5wOUE1L6ZT7SQPz9qFAN9GmVq1U2n6c2pLLqTKRj2g5FEkR4F9N82rLfKj3WX0nfbvkr0vn3gMkCRjTKeLjF6227OI4kMoE/0Iz0FxioF2a4GQYPJJopyXq1V505DbAWVuh0QBb1R7dcbvCa2yMGM5eL4uERu36n7Pr1yTSh8jp2Lf80nb/qZExqRmLPuskHQS0kh9wLNyOvqgnu0YOCOr76e0lTRUbcFv7aSwN5Kj8LO/ltBnWcCmgm0EZhC3jY6vWUzkkAEo+nqcMpC68cNiSAjVNPap5vo12U0hUPZP+vbOE1+NpMmAjFnp6pCFDPU9gsYD7JvVU/vnVGl92wIDAQAB",
-  "description": "Seamlessly intercepts browser downloads and media streams into Turbo Download Manager Pro with dynamic multi-chunk acceleration.",
+  "description": "Seamlessly intercepts browser downloads and media streams into Smart Download (SD) with dynamic multi-chunk acceleration.",
   "permissions": [
     "downloads",
     "contextMenus",
@@ -24,13 +24,13 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "turbo-downloader@turbopro.app",
+      "id": "smart-download@smartdownload.app",
       "strict_min_version": "109.0"
     }
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Turbo Download Manager",
+    "default_title": "Smart Download (SD)",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

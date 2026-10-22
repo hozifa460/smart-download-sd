@@ -1,26 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
-import os
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-payload_dir = os.path.abspath('installer_payload')
+yt_hidden = collect_submodules('yt_dlp')
+yt_datas = collect_data_files('yt_dlp')
+pystray_hidden = collect_submodules('pystray')
 
 a = Analysis(
-    ['installer.py'],
+    ['turbo_downloader.py'],
     pathex=[],
     binaries=[],
     datas=[
-        (payload_dir, 'payload'),
+        ('extension', 'extension'),
         ('app_icon.ico', '.'),
         ('app_icon.png', '.'),
-    ],
+    ] + yt_datas,
     hiddenimports=[
-        'win32com',
-        'win32com.client',
+        'youtube_resolver',
+        'browser_bridge',
+        'native_messaging_host',
         'register_browser',
-        'tkinter',
-        'tkinter.ttk',
-        'tkinter.filedialog',
-        'tkinter.messagebox',
-    ],
+        'yt_dlp',
+        'PIL',
+        'PIL.ImageTk',
+        'pystray',
+        'pystray._win32',
+    ] + yt_hidden + pystray_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -29,7 +33,7 @@ a = Analysis(
     optimize=0,
 )
 
-# Strip redundant Tcl/Tk tzdata, msgs, and demos
+# Strip redundant Tcl/Tk tzdata, msgs, and demos to prevent extracting 700+ unnecessary files on startup
 a.datas = [d for d in a.datas if not any(k in d[0].replace('\\', '/').lower().split('/') for k in ('tzdata', 'msgs', 'demos'))]
 
 pyz = PYZ(a.pure)
@@ -40,7 +44,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='TurboDownloader-Setup',
+    name='SmartDownload',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

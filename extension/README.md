@@ -1,14 +1,14 @@
-# 🌐 Turbo Download Manager Pro — Browser Integration Extension
+# 🌐 Smart Download (SD) — Browser Integration Extension
 
 High-performance browser download interceptor for **Google Chrome, Microsoft Edge, Brave, and Mozilla Firefox**.
 
 ---
 
 ## ⚡ How It Works
-When you click a download link or start a file download in your browser, this WebExtension intercepts the request, cancels the standard browser download, and transfers the link directly to **Turbo Download Manager Pro** via a local IPC loopback server (`http://127.0.0.1:9242`).
+When you click a download link or start a file download in your browser, this WebExtension intercepts the request, cancels the standard browser download, and transfers the link directly to **Smart Download (SD)** via Windows Native Messaging (`com.smartdownload.host`) or local IPC loopback server (`http://127.0.0.1:9242`).
 
 Your downloads then benefit immediately from:
-- **Dynamic Multi-Chunk Acceleration** (TDM adaptive midpoint candidate splitting).
+- **Dynamic Multi-Chunk Acceleration** (SD adaptive midpoint candidate splitting).
 - **Smooth Live Speed Limiter** (Token Bucket rate limiter slider).
 - **Segmented visual byte map and instant pause/resume**.
 
@@ -38,12 +38,12 @@ Your downloads then benefit immediately from:
 1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`.
 2. Click **"Load Temporary Add-on..."**.
 3. Select the `manifest.json` file inside this `extension` directory.
-4. The extension is now loaded and connected to Turbo Download Manager Pro.
+4. The extension is now loaded and connected to Smart Download (SD).
 
 ---
 
 ## 🛠️ Features & Usage
-- **Automatic Interception:** Automatically redirects archive files (`.zip`, `.rar`, `.7z`, `.iso`), video & audio streams (`.mp4`, `.mkv`, `.mp3`), and application packages (`.exe`, `.msi`, `.dmg`, `.apk`) to Turbo Download Manager Pro.
-- **Context Menu:** Right-click on any download link, image, or video on any page and choose **"⚡ Download with Turbo Download Manager"**.
+- **Automatic Interception:** Automatically redirects archive files (`.zip`, `.rar`, `.7z`, `.iso`), video & audio streams (`.mp4`, `.mkv`, `.mp3`), and application packages (`.exe`, `.msi`, `.dmg`, `.apk`) to Smart Download (SD).
+- **Context Menu:** Right-click on any download link, image, or video on any page and choose **"⚡ Download with Smart Download"**.
 - **One-Click Page / Video Download:** Click the extension icon in your browser toolbar and press **"📥 Download Current Tab / Video"** to capture streaming links (such as YouTube videos!).
-- **Safe Fallback:** If Turbo Download Manager Pro is not open, the extension gracefully allows your browser to download files normally without dropping them.
+- **Safe Fallback:** If Smart Download (SD) is not open, the extension gracefully allows your browser to download files normally without dropping them.

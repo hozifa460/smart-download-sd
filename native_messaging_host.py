@@ -125,16 +125,16 @@ def handle_payload(payload: Dict[str, Any], port: int = DEFAULT_BRIDGE_PORT) -> 
                 data = json.loads(resp.read().decode("utf-8"))
                 return {
                     "success": True,
-                    "host": "Turbo Downloader Native Host",
+                    "host": "Smart Download Native Host",
                     "app_online": True,
                     "app_info": data
                 }
         except Exception:
             return {
                 "success": True,
-                "host": "Turbo Downloader Native Host",
+                "host": "Smart Download Native Host",
                 "app_online": False,
-                "message": "Native host is active, but Turbo Download Manager desktop app is offline."
+                "message": "Native host is active, but Smart Download (SD) desktop app is offline."
             }
 
     elif action in ("download", "sendUrl", "intercept"):
@@ -164,7 +164,7 @@ def handle_payload(payload: Dict[str, Any], port: int = DEFAULT_BRIDGE_PORT) -> 
         except urllib.error.URLError as e:
             return {
                 "success": False,
-                "error": f"Turbo Download Manager desktop app is not running or unreachable on port {port}: {e}"
+                "error": f"Smart Download (SD) desktop app is not running or unreachable on port {port}: {e}"
             }
         except Exception as e:
             return {"success": False, "error": f"Bridge request failed: {e}"}

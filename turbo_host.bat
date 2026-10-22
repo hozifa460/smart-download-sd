@@ -1,9 +1,13 @@
 @echo off
 setlocal
-REM Launcher for Turbo Download Manager Native Messaging Host
+REM Launcher for Smart Download (SD) Native Messaging Host
 set SCRIPT_DIR=%~dp0
 
-REM 1. Fast Standalone path: If TurboDownloader.exe exists in directory, launch immediately (<5ms)
+REM 1. Fast Standalone path: If SmartDownload.exe exists in directory, launch immediately (<5ms)
+if exist "%SCRIPT_DIR%SmartDownload.exe" (
+    "%SCRIPT_DIR%SmartDownload.exe" --native-host %*
+    goto :EOF
+)
 if exist "%SCRIPT_DIR%TurboDownloader.exe" (
     "%SCRIPT_DIR%TurboDownloader.exe" --native-host %*
     goto :EOF
@@ -20,6 +24,10 @@ if exist "%SCRIPT_DIR%..\native_messaging_host.py" (
 )
 
 REM 3. Dist folder fallback
+if exist "%SCRIPT_DIR%dist\SmartDownload.exe" (
+    "%SCRIPT_DIR%dist\SmartDownload.exe" --native-host %*
+    goto :EOF
+)
 if exist "%SCRIPT_DIR%dist\TurboDownloader.exe" (
     "%SCRIPT_DIR%dist\TurboDownloader.exe" --native-host %*
     goto :EOF

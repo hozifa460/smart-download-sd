@@ -346,7 +346,7 @@ class TestBrowserBridgeServer(unittest.TestCase):
             self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
             data = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(data.get("status"), "ok")
-            self.assertEqual(data.get("app"), "Turbo Download Manager Pro")
+            self.assertEqual(data.get("app"), "Smart Download (SD)")
             self.assertTrue(data.get("active"))
 
     def test_options_cors(self):
@@ -761,7 +761,7 @@ class TestExtensionManifestAndAssets(unittest.TestCase):
             manifest = json.load(f)
 
         self.assertEqual(manifest.get("manifest_version"), 3)
-        self.assertEqual(manifest.get("name"), "Turbo Download Manager Integration")
+        self.assertEqual(manifest.get("name"), "Smart Download (SD) Integration")
         self.assertIn("downloads", manifest.get("permissions", []))
         self.assertIn("contextMenus", manifest.get("permissions", []))
         self.assertIn("storage", manifest.get("permissions", []))
@@ -1087,7 +1087,7 @@ class TestBrowserRegistryIntegration(unittest.TestCase):
             with open(res_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            self.assertEqual(data["name"], "com.turbodownloader.host")
+            self.assertEqual(data["name"], "com.smartdownload.host")
             self.assertEqual(data["type"], "stdio")
             self.assertIn("chrome-extension://test/", data["allowed_origins"])
             self.assertEqual(data["path"], os.path.abspath(bat_path))
@@ -1197,7 +1197,7 @@ class TestBrowserRegistryIntegration(unittest.TestCase):
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, CHROME_REG_KEY)
             manifest_val, _ = winreg.QueryValueEx(key, "")
             winreg.CloseKey(key)
-            expected_m2 = os.path.normcase(os.path.abspath(os.path.join(tmp_dir2, "com.turbodownloader.host.json")))
+            expected_m2 = os.path.normcase(os.path.abspath(os.path.join(tmp_dir2, "com.smartdownload.host.json")))
             self.assertEqual(os.path.normcase(os.path.abspath(manifest_val)), expected_m2)
 
             # Clean up
@@ -1215,9 +1215,9 @@ class TestBrowserRegistryIntegration(unittest.TestCase):
             self.assertTrue(r1.get("success"))
 
             # Simulate corrupted manifest pointing to non-existent launcher
-            manifest_file = os.path.join(tmp_dir, "com.turbodownloader.host.json")
+            manifest_file = os.path.join(tmp_dir, "com.smartdownload.host.json")
             with open(manifest_file, "w", encoding="utf-8") as f:
-                json.dump({"name": "com.turbodownloader.host", "path": r"C:\fake\missing\turbo_host.bat", "type": "stdio"}, f)
+                json.dump({"name": "com.smartdownload.host", "path": r"C:\fake\missing\sd_host.bat", "type": "stdio"}, f)
 
             # Check and register should detect the broken launcher path and heal it
             r2 = check_and_register_browser(target_dir=tmp_dir)
@@ -1252,17 +1252,17 @@ class TestBrowserRegistryIntegration(unittest.TestCase):
         import tempfile
         from register_browser import generate_launcher_batch
         with tempfile.TemporaryDirectory() as tmp_dir:
-            bat_path = os.path.join(tmp_dir, "turbo_host.bat")
+            bat_path = os.path.join(tmp_dir, "sd_host.bat")
             generate_launcher_batch(bat_path)
             with open(bat_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Ensure TurboDownloader.exe check appears before where python
-            idx_exe = content.find("TurboDownloader.exe")
+            idx_exe = content.find("SmartDownload.exe")
             idx_py = content.find("where py")
             self.assertNotEqual(idx_exe, -1)
             if idx_py != -1:
-                self.assertLess(idx_exe, idx_py, "TurboDownloader.exe standalone check must precede python search in batch launcher")
+                self.assertLess(idx_exe, idx_py, "SmartDownload.exe standalone check must precede python search in batch launcher")
 
 
 
@@ -1270,9 +1270,9 @@ class TestWindowsInstallerLogic(unittest.TestCase):
     """Verifies standalone Windows Installer logic, zero-elevation paths, and shortcuts."""
 
     def test_default_install_dir_and_constants(self):
-        self.assertEqual(installer.APP_ID, "TurboDownloader")
-        self.assertEqual(installer.APP_NAME, "Turbo Download Manager Pro")
-        self.assertTrue(installer.DEFAULT_INSTALL_DIR.endswith(r"Programs\TurboDownloader"))
+        self.assertEqual(installer.APP_ID, "SmartDownload")
+        self.assertEqual(installer.APP_NAME, "Smart Download (SD)")
+        self.assertTrue(installer.DEFAULT_INSTALL_DIR.endswith(r"Programs\SmartDownload"))
         # Ensure path is user-level inside LocalAppData (zero admin/UAC elevation needed)
         local_app_data = os.environ.get("LOCALAPPDATA", "")
         if local_app_data:
@@ -1284,7 +1284,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
         import tempfile, winreg
         with tempfile.TemporaryDirectory() as tmp_dir:
-            exe_path = os.path.join(tmp_dir, "TurboDownloader.exe")
+            exe_path = os.path.join(tmp_dir, "SmartDownload.exe")
             with open(exe_path, "w") as f:
                 f.write("mock")
             uninst_path = os.path.join(tmp_dir, "Uninstall.exe")
@@ -1302,7 +1302,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             no_modify, _ = winreg.QueryValueEx(key, "NoModify")
             winreg.CloseKey(key)
 
-            self.assertEqual(disp_name, "Turbo Download Manager Pro")
+            self.assertEqual(disp_name, "Smart Download (SD)")
             self.assertIn("Uninstall.exe", uninst_cmd)
             self.assertIn("--uninstall", uninst_cmd)
             self.assertIn("--silent", quiet_uninst_cmd)
@@ -1354,7 +1354,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             )
             self.assertTrue(res.get("success"))
             self.assertTrue(os.path.isdir(install_target))
-            self.assertTrue(os.path.isfile(os.path.join(install_target, "TurboDownloader.exe")))
+            self.assertTrue(os.path.isfile(os.path.join(install_target, "SmartDownload.exe")))
             self.assertTrue(os.path.isfile(os.path.join(install_target, "app_icon.ico")))
             self.assertTrue(len(progress_events) >= 5)
             self.assertEqual(progress_events[-1][0], 1.0)
@@ -1399,7 +1399,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
     def test_uninstaller_binary_mode_detection(self):
         """Verifies that running with an uninstaller binary name defaults to uninstall mode."""
-        with patch("sys.executable", "C:\\Programs\\TurboDownloader\\Uninstall.exe"):
+        with patch("sys.executable", "C:\\Programs\\SmartDownload\\Uninstall.exe"):
             exe_name = os.path.basename(sys.executable).lower()
             is_uninst = "uninstall" in exe_name
             self.assertTrue(is_uninst)
@@ -2798,7 +2798,7 @@ class TestWindowsStartupRegistryIntegration(unittest.TestCase):
 
     def test_startup_command_script_mode(self):
         # Fallback script mode when standalone exe is absent
-        with patch("os.path.isfile", side_effect=lambda p: False if "TurboDownloader.exe" in p else os.path.exists(p)):
+        with patch("os.path.isfile", side_effect=lambda p: False if ("SmartDownload.exe" in p or "TurboDownloader.exe" in p) else os.path.exists(p)):
             cmd_min = get_startup_command(minimized=True)
             self.assertIn("--minimized", cmd_min)
             self.assertTrue(cmd_min.endswith(" --minimized"))
@@ -2811,18 +2811,18 @@ class TestWindowsStartupRegistryIntegration(unittest.TestCase):
     def test_startup_command_prioritizes_standalone_exe(self):
         # Standalone binary dist/TurboDownloader.exe is prioritized when present
         cmd_min = get_startup_command(minimized=True)
-        self.assertIn("TurboDownloader.exe", cmd_min)
+        self.assertTrue("SmartDownload.exe" in cmd_min or "TurboDownloader.exe" in cmd_min)
         self.assertNotIn("pythonw.exe", cmd_min)
         self.assertTrue(cmd_min.endswith(" --minimized"))
 
     def test_startup_command_frozen_mode(self):
         with patch.object(sys, "frozen", True, create=True):
-            with patch.object(sys, "executable", r"C:\Program Files\TurboDownloader\TurboDownloader.exe"):
+            with patch.object(sys, "executable", r"C:\Program Files\SmartDownload\SmartDownload.exe"):
                 cmd_min = get_startup_command(minimized=True)
-                self.assertEqual(cmd_min, r'"C:\Program Files\TurboDownloader\TurboDownloader.exe" --minimized')
+                self.assertEqual(cmd_min, r'"C:\Program Files\SmartDownload\SmartDownload.exe" --minimized')
 
                 cmd_full = get_startup_command(minimized=False)
-                self.assertEqual(cmd_full, r'"C:\Program Files\TurboDownloader\TurboDownloader.exe"')
+                self.assertEqual(cmd_full, r'"C:\Program Files\SmartDownload\SmartDownload.exe"')
 
     def test_startup_lifecycle_enable_disable(self):
         # Enable with minimized=True
@@ -2876,10 +2876,10 @@ class TestWindowsStartupRegistryIntegration(unittest.TestCase):
 
     def test_startup_command_strip_quotes(self):
         with patch.object(sys, "frozen", True, create=True):
-            with patch.object(sys, "executable", r'"C:\Path With Spaces\TurboDownloader.exe"'):
+            with patch.object(sys, "executable", r'"C:\Path With Spaces\SmartDownload.exe"'):
                 cmd = get_startup_command(minimized=True)
                 self.assertNotIn('""', cmd)
-                self.assertEqual(cmd, r'"C:\Path With Spaces\TurboDownloader.exe" --minimized')
+                self.assertEqual(cmd, r'"C:\Path With Spaces\SmartDownload.exe" --minimized')
 
     def test_is_startup_enabled_whitespace_or_empty(self):
         with patch("winreg.OpenKey"):
@@ -3722,7 +3722,7 @@ class TestSystemTrayAndBackgroundMinimization(unittest.TestCase):
         self.assertEqual(len(items), 4)
 
         # 1. Open Turbo Downloader (default action for single / double click)
-        self.assertEqual(items[0].text, "🖥️ Open Turbo Downloader")
+        self.assertEqual(items[0].text, "🖥️ Open Smart Download")
         self.assertTrue(items[0].default)
 
         # 2. Clipboard Sniffer
@@ -4374,21 +4374,21 @@ class TestStandaloneExeBuild(unittest.TestCase):
 
     def test_exe_binary_properties(self):
         dist_dir = os.path.join(os.path.dirname(__file__), "dist")
-        exe_path = os.path.join(dist_dir, "TurboDownloader.exe")
-        self.assertTrue(os.path.exists(exe_path), f"TurboDownloader.exe not found at {exe_path}")
+        exe_path = os.path.join(dist_dir, "SmartDownload.exe")
+        self.assertTrue(os.path.exists(exe_path), f"SmartDownload.exe not found at {exe_path}")
         file_size = os.path.getsize(exe_path)
         self.assertGreater(file_size, 5 * 1024 * 1024, f"Binary size {file_size} is suspiciously small")
 
     def test_exe_binary_header_pe_signature(self):
         dist_dir = os.path.join(os.path.dirname(__file__), "dist")
-        exe_path = os.path.join(dist_dir, "TurboDownloader.exe")
+        exe_path = os.path.join(dist_dir, "SmartDownload.exe")
         with open(exe_path, "rb") as f:
             header = f.read(2)
         self.assertEqual(header, b"MZ", "Executable missing valid Windows PE MZ header")
 
     def test_exe_binary_startup_verification(self):
         dist_dir = os.path.join(os.path.dirname(__file__), "dist")
-        exe_path = os.path.join(dist_dir, "TurboDownloader.exe")
+        exe_path = os.path.join(dist_dir, "SmartDownload.exe")
         if not os.path.exists(exe_path):
             self.skipTest(f"{exe_path} not found")
         # Run with --test-startup (DEVNULL for windowed GUI executables)
@@ -4397,7 +4397,7 @@ class TestStandaloneExeBuild(unittest.TestCase):
 
     def test_exe_binary_minimized_background_launch(self):
         dist_dir = os.path.join(os.path.dirname(__file__), "dist")
-        exe_path = os.path.join(dist_dir, "TurboDownloader.exe")
+        exe_path = os.path.join(dist_dir, "SmartDownload.exe")
         if not os.path.exists(exe_path):
             self.skipTest(f"{exe_path} not found")
         proc = subprocess.Popen([exe_path, "--minimized"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
