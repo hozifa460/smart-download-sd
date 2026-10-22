@@ -16,6 +16,7 @@ Comprehensive verification covering:
 """
 
 import os
+os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
 import sys
 import time
 import json
@@ -3159,6 +3160,7 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
 
     def tearDown(self):
         try:
+            self.root.update_idletasks()
             self.root.destroy()
         except Exception:
             pass
@@ -3181,20 +3183,25 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             gui._cleanup_resources()
 
     def test_cli_flags_detection(self):
-        with patch.object(sys, "argv", ["turbo_downloader.py", "--minimized"]):
-            gui1 = ModernFramelessGUI(self.root)
-            self.assertTrue(gui1._start_hidden)
-            gui1._cleanup_resources()
-
-        with patch.object(sys, "argv", ["turbo_downloader.py", "--background"]):
-            gui2 = ModernFramelessGUI(self.root)
-            self.assertTrue(gui2._start_hidden)
-            gui2._cleanup_resources()
-
-        with patch.object(sys, "argv", ["turbo_downloader.py"]):
-            gui3 = ModernFramelessGUI(self.root)
-            self.assertFalse(gui3._start_hidden)
-            gui3._cleanup_resources()
+        flags = [
+            (["turbo_downloader.py", "--minimized"], True),
+            (["turbo_downloader.py", "--background"], True),
+            (["turbo_downloader.py"], False)
+        ]
+        for argv, expected_hidden in flags:
+            with patch.object(sys, "argv", argv):
+                sub_root = tk.Tk()
+                sub_root.withdraw()
+                try:
+                    gui = ModernFramelessGUI(sub_root)
+                    self.assertEqual(gui._start_hidden, expected_hidden)
+                    gui._cleanup_resources()
+                finally:
+                    try:
+                        sub_root.update_idletasks()
+                        sub_root.destroy()
+                    except Exception:
+                        pass
 
     def test_clipboard_detection_suppresses_window_and_shows_modal(self):
         gui = ModernFramelessGUI(self.root, start_hidden=True)
@@ -3301,10 +3308,19 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
         ]
         for v in variants:
             with patch.object(sys, "argv", v):
-                gui = ModernFramelessGUI(self.root)
-                self.assertTrue(gui._start_hidden, f"Flag {v} failed to activate _start_hidden")
-                self.assertTrue(gui._was_started_hidden, f"Flag {v} failed to set _was_started_hidden")
-                gui._cleanup_resources()
+                sub_root = tk.Tk()
+                sub_root.withdraw()
+                try:
+                    gui = ModernFramelessGUI(sub_root)
+                    self.assertTrue(gui._start_hidden, f"Flag {v} failed to activate _start_hidden")
+                    self.assertTrue(gui._was_started_hidden, f"Flag {v} failed to set _was_started_hidden")
+                    gui._cleanup_resources()
+                finally:
+                    try:
+                        sub_root.update_idletasks()
+                        sub_root.destroy()
+                    except Exception:
+                        pass
 
     def test_was_started_hidden_preserves_confirmation_modal(self):
         gui = ModernFramelessGUI(self.root, start_hidden=True)
@@ -3565,14 +3581,15 @@ class TestRefreshExpiredLinks(unittest.TestCase):
     def setUp(self):
         self.test_dir = os.path.join(os.path.dirname(__file__), "test_temp_refresh")
         os.makedirs(self.test_dir, exist_ok=True)
-        self.root = tk.Tk()
-        self.root.withdraw()
+        self.root = None
 
     def tearDown(self):
-        try:
-            self.root.destroy()
-        except Exception:
-            pass
+        if getattr(self, "root", None) is not None:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            self.root = None
         if os.path.isdir(self.test_dir):
             try:
                 shutil.rmtree(self.test_dir, ignore_errors=True)
@@ -3743,6 +3760,8 @@ class TestRefreshExpiredLinks(unittest.TestCase):
         self.assertEqual(downloaded_hash, self.test_hash, "Multi-chunk split resume must match SHA-256 hash")
 
     def test_09_refresh_link_modal_grab_free_and_clipboard_autofill(self):
+        self.root = tk.Tk()
+        self.root.withdraw()
         modal = RefreshLinkModal(
             parent=self.root,
             old_url=f"{self.base_url}/old.bin",
@@ -3779,6 +3798,8 @@ class TestRefreshExpiredLinks(unittest.TestCase):
                 modal.destroy()
 
     def test_10_gui_refresh_link_context_menu_and_action_bar(self):
+        self.root = tk.Tk()
+        self.root.withdraw()
         gui = ModernFramelessGUI(self.root, start_hidden=True)
         try:
             self.assertTrue(hasattr(gui, "btn_refresh_link"))
@@ -4858,6 +4879,7 @@ class TestClipboardSequenceRecopying(unittest.TestCase):
 
     def tearDown(self):
         try:
+            self.root.update_idletasks()
             self.root.destroy()
         except Exception:
             pass

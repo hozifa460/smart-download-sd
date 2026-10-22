@@ -2868,7 +2868,7 @@ class QualitySelectionModal(tk.Toplevel):
         parent_app: Optional[Any] = None
     ):
         super().__init__(parent)
-        self.video_title = str(video_title or "Media Video")
+        self.video_title = str(video_title or "YouTube Video")
         self.duration = int(duration or 0)
         self.options = options or []
         self.dest_path = str(default_dest_path or "")
@@ -2955,7 +2955,7 @@ class QualitySelectionModal(tk.Toplevel):
         self.lift()
         self.attributes("-topmost", True)
         self.focus_force()
-        self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
+        self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
 
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -3229,6 +3229,12 @@ class QualitySelectionModal(tk.Toplevel):
         pass
 
     def destroy(self):
+        if getattr(self, "_idle_job", None):
+            try:
+                self.after_cancel(self._idle_job)
+            except Exception:
+                pass
+            self._idle_job = None
         try:
             self.grab_release()
         except Exception:
@@ -3774,7 +3780,7 @@ class DownloadConfirmationModal(tk.Toplevel):
             self.lift()
             self.attributes("-topmost", True)
             self.focus_force()
-            self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
+            self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
         except Exception:
             pass
 
@@ -4648,6 +4654,12 @@ class DownloadConfirmationModal(tk.Toplevel):
         pass
 
     def destroy(self):
+        if getattr(self, "_idle_job", None):
+            try:
+                self.after_cancel(self._idle_job)
+            except Exception:
+                pass
+            self._idle_job = None
         try:
             self.grab_release()
         except Exception:
@@ -4814,7 +4826,7 @@ class RefreshLinkModal(tk.Toplevel):
             self.lift()
             self.attributes("-topmost", True)
             self.focus_force()
-            self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
+            self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
         except Exception:
             pass
 
@@ -4833,7 +4845,7 @@ class RefreshLinkModal(tk.Toplevel):
         if not getattr(self, "_closing", False):
             try:
                 if self.winfo_exists():
-                    self.after(30, self._poll_pending_ui)
+                    self._poll_job = self.after(30, self._poll_pending_ui)
             except Exception:
                 pass
 
@@ -4857,6 +4869,18 @@ class RefreshLinkModal(tk.Toplevel):
 
     def destroy(self):
         self._closing = True
+        if getattr(self, "_idle_job", None):
+            try:
+                self.after_cancel(self._idle_job)
+            except Exception:
+                pass
+            self._idle_job = None
+        if hasattr(self, "_poll_job") and self._poll_job:
+            try:
+                self.after_cancel(self._poll_job)
+            except Exception:
+                pass
+            self._poll_job = None
         try:
             self.grab_release()
         except Exception:
@@ -5254,6 +5278,10 @@ class SystemTrayManager:
         """Starts the tray icon in a background worker thread."""
         if not PYSTRAY_AVAILABLE or pystray is None:
             return
+        if os.environ.get("SD_DISABLE_SYSTEM_TRAY") == "1":
+            with self._lock:
+                self._running = True
+            return
         with self._lock:
             if self._running and self.icon is not None:
                 return
@@ -5277,6 +5305,7 @@ class SystemTrayManager:
                     self.icon._on_notify = _patched_notify
                 # Run in a daemon thread so it never blocks Python process termination
                 tray_thread = threading.Thread(target=self.icon.run, daemon=True, name='SmartDownloadTrayThread')
+                self._thread = tray_thread
                 tray_thread.start()
                 self._running = True
             except Exception:
@@ -5289,10 +5318,22 @@ class SystemTrayManager:
             self._running = False
             if self.icon is not None:
                 try:
+                    q = getattr(self.icon, "_Icon__queue", None)
+                    if q is not None and q.empty():
+                        try:
+                            q.put_nowait(True)
+                        except Exception:
+                            pass
                     self.icon.stop()
                 except Exception:
                     pass
                 self.icon = None
+            if hasattr(self, "_thread") and self._thread and self._thread != threading.current_thread():
+                try:
+                    self._thread.join(timeout=0.5)
+                except Exception:
+                    pass
+                self._thread = None
 
     def update_menu(self):
         """Refreshes dynamic labels in context menu."""
@@ -5876,7 +5917,7 @@ class ModernFramelessGUI:
         try:
             self.root.lift()
             self.root.attributes("-topmost", True)
-            self.root.after_idle(lambda: self.root.attributes("-topmost", False) if hasattr(self, "root") and self.root else None)
+            self._restore_idle_job = self.root.after_idle(lambda: self.root.attributes("-topmost", False) if hasattr(self, "root") and self.root else None)
             self.root.focus_force()
         except Exception:
             pass
@@ -6137,6 +6178,28 @@ class ModernFramelessGUI:
             self._refresh_modal = None
         self._close_fetching_toast()
         self._dismiss_bg_toast()
+        for var_name in ("conn_var", "limit_preset_var"):
+            if hasattr(self, var_name):
+                v = getattr(self, var_name)
+                if v is not None and hasattr(v, "_tk"):
+                    v._tk = None
+        if hasattr(self, "_restore_idle_job") and self._restore_idle_job:
+            try:
+                self.root.after_cancel(self._restore_idle_job)
+            except Exception:
+                pass
+            self._restore_idle_job = None
+        if hasattr(self, "_browser_integration_dlg") and self._browser_integration_dlg:
+            try:
+                if self._browser_integration_dlg.winfo_exists():
+                    self._browser_integration_dlg.destroy()
+            except Exception:
+                pass
+            self._browser_integration_dlg = None
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
 
     def _on_close(self, force_exit: bool = False):
         """

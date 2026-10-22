@@ -308,6 +308,13 @@ class BrowserBridgeServer:
                     pass
                 self.httpd = None
 
+            if hasattr(self, "_thread") and self._thread and self._thread != threading.current_thread():
+                try:
+                    self._thread.join(timeout=1.0)
+                except Exception:
+                    pass
+                self._thread = None
+
         self.log("[BROWSER BRIDGE] Loopback IPC server stopped.")
 
     @property
