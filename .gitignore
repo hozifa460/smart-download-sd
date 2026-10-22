@@ -6,6 +6,7 @@ __pycache__/
 # PyInstaller / Build outputs
 build/
 dist/
+installer_payload/
 *.spec.bak
 
 # Exclude standalone executables from git tracking (use GitHub Releases)

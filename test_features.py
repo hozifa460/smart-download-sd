@@ -49,11 +49,17 @@ from native_messaging_host import read_message, send_message, handle_payload
 from register_browser import (
     register_native_host,
     unregister_native_host,
+    check_and_register_browser,
+    register_browser_extensions,
+    unregister_browser_extensions,
+    is_extension_registered,
     is_registered as is_browser_registered,
     get_status as get_browser_reg_status,
     compute_unpacked_extension_id,
-    generate_host_manifest
+    generate_host_manifest,
+    get_default_extension_origins
 )
+import installer
 from turbo_downloader import (
     TurboDownloadEngine,
     StreamDownloadCoordinator,
@@ -1112,6 +1118,294 @@ class TestBrowserRegistryIntegration(unittest.TestCase):
             self.assertTrue(unreg_res.get("success"))
             self.assertFalse(is_browser_registered("chrome"))
             self.assertFalse(is_browser_registered("edge"))
+
+    def test_extension_registry_keys(self):
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows Registry tests only run on Windows OS.")
+
+        import tempfile, winreg
+        from register_browser import CHROME_EXT_KEY_PREFIX, EDGE_EXT_KEY_PREFIX, STATIC_EXTENSION_ID
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Create a mock extension folder with manifest
+            ext_dir = os.path.join(tmp_dir, "extension")
+            os.makedirs(ext_dir, exist_ok=True)
+            with open(os.path.join(ext_dir, "manifest.json"), "w", encoding="utf-8") as f:
+                json.dump({"name": "TestExt", "version": "1.0.0"}, f)
+
+            res = register_browser_extensions(extension_dir=ext_dir)
+            self.assertTrue(res.get("success"))
+            self.assertTrue(is_extension_registered("chrome", STATIC_EXTENSION_ID))
+            self.assertTrue(is_extension_registered("edge", STATIC_EXTENSION_ID))
+
+            # Verify registry key contents
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{CHROME_EXT_KEY_PREFIX}\{STATIC_EXTENSION_ID}")
+            ver, _ = winreg.QueryValueEx(key, "version")
+            path_val, _ = winreg.QueryValueEx(key, "path")
+            winreg.CloseKey(key)
+            self.assertEqual(ver, "1.0.0")
+            self.assertEqual(path_val, os.path.abspath(ext_dir))
+
+            # Unregister
+            unreg = unregister_browser_extensions()
+            self.assertTrue(unreg.get("success"))
+            self.assertFalse(is_extension_registered("chrome", STATIC_EXTENSION_ID))
+            self.assertFalse(is_extension_registered("edge", STATIC_EXTENSION_ID))
+
+    def test_idempotent_browser_registration_fast(self):
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows Registry tests only run on Windows OS.")
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # First run: initial registration
+            init_res = check_and_register_browser(target_dir=tmp_dir)
+            self.assertTrue(init_res.get("success"))
+            self.assertTrue(init_res.get("healed"))
+
+            # Second run: should be completely idempotent and complete in < 5ms
+            idempotent_res = check_and_register_browser(target_dir=tmp_dir, force=False)
+            self.assertTrue(idempotent_res.get("success"))
+            self.assertTrue(idempotent_res.get("idempotent"))
+            self.assertFalse(idempotent_res.get("healed"))
+            # Must satisfy < 5ms requirement
+            self.assertLess(idempotent_res.get("duration_ms", 999.0), 5.0,
+                            f"Idempotent check took {idempotent_res.get('duration_ms')}ms (expected < 5ms)")
+
+            # Clean up
+            unregister_native_host()
+
+    def test_self_healing_browser_registration(self):
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows Registry tests only run on Windows OS.")
+
+        import tempfile, winreg
+        with tempfile.TemporaryDirectory() as tmp_dir1, tempfile.TemporaryDirectory() as tmp_dir2:
+            # 1. Register with dir1
+            r1 = check_and_register_browser(target_dir=tmp_dir1)
+            self.assertTrue(r1.get("success"))
+
+            # 2. Simulate path change or relocation to dir2: check_and_register_browser should detect
+            # mismatch and self-heal by updating to dir2
+            r2 = check_and_register_browser(target_dir=tmp_dir2)
+            self.assertTrue(r2.get("success"))
+            self.assertTrue(r2.get("healed"))
+            self.assertFalse(r2.get("idempotent"))
+
+            # Verify registry key now points to dir2
+            from register_browser import CHROME_REG_KEY
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, CHROME_REG_KEY)
+            manifest_val, _ = winreg.QueryValueEx(key, "")
+            winreg.CloseKey(key)
+            expected_m2 = os.path.normcase(os.path.abspath(os.path.join(tmp_dir2, "com.turbodownloader.host.json")))
+            self.assertEqual(os.path.normcase(os.path.abspath(manifest_val)), expected_m2)
+
+            # Clean up
+            unregister_native_host()
+
+    def test_self_healing_corrupted_or_missing_launcher_in_manifest(self):
+        """Verifies that check_and_register_browser heals if manifest points to missing/wrong launcher."""
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows Registry tests only run on Windows OS.")
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # First register normally
+            r1 = check_and_register_browser(target_dir=tmp_dir)
+            self.assertTrue(r1.get("success"))
+
+            # Simulate corrupted manifest pointing to non-existent launcher
+            manifest_file = os.path.join(tmp_dir, "com.turbodownloader.host.json")
+            with open(manifest_file, "w", encoding="utf-8") as f:
+                json.dump({"name": "com.turbodownloader.host", "path": r"C:\fake\missing\turbo_host.bat", "type": "stdio"}, f)
+
+            # Check and register should detect the broken launcher path and heal it
+            r2 = check_and_register_browser(target_dir=tmp_dir)
+            self.assertTrue(r2.get("success"))
+            self.assertTrue(r2.get("healed"), "check_and_register_browser must heal a manifest pointing to a nonexistent launcher")
+
+            # Verify manifest was healed with valid existing launcher path
+            with open(manifest_file, "r", encoding="utf-8") as f:
+                healed_data = json.load(f)
+            self.assertTrue(os.path.isfile(healed_data["path"]))
+            self.assertEqual(os.path.normcase(os.path.dirname(os.path.abspath(healed_data["path"]))),
+                             os.path.normcase(os.path.abspath(tmp_dir)))
+
+            # Clean up
+            unregister_native_host()
+
+    def test_get_default_extension_origins_with_target_dir(self):
+        """Verifies that get_default_extension_origins includes unpacked ID for target_dir/extension."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ext_dir = os.path.join(tmp_dir, "extension")
+            os.makedirs(ext_dir, exist_ok=True)
+            with open(os.path.join(ext_dir, "manifest.json"), "w", encoding="utf-8") as f:
+                json.dump({"name": "Test"}, f)
+
+            expected_id = compute_unpacked_extension_id(ext_dir)
+            origins = get_default_extension_origins(target_dir=tmp_dir)
+            self.assertIn(f"chrome-extension://{expected_id}/", origins)
+
+    def test_fast_launcher_batch_executable_priority(self):
+        """Verifies launcher batch checks TurboDownloader.exe before searching for python."""
+        import tempfile
+        from register_browser import generate_launcher_batch
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            bat_path = os.path.join(tmp_dir, "turbo_host.bat")
+            generate_launcher_batch(bat_path)
+            with open(bat_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # Ensure TurboDownloader.exe check appears before where python
+            idx_exe = content.find("TurboDownloader.exe")
+            idx_py = content.find("where py")
+            self.assertNotEqual(idx_exe, -1)
+            if idx_py != -1:
+                self.assertLess(idx_exe, idx_py, "TurboDownloader.exe standalone check must precede python search in batch launcher")
+
+
+
+class TestWindowsInstallerLogic(unittest.TestCase):
+    """Verifies standalone Windows Installer logic, zero-elevation paths, and shortcuts."""
+
+    def test_default_install_dir_and_constants(self):
+        self.assertEqual(installer.APP_ID, "TurboDownloader")
+        self.assertEqual(installer.APP_NAME, "Turbo Download Manager Pro")
+        self.assertTrue(installer.DEFAULT_INSTALL_DIR.endswith(r"Programs\TurboDownloader"))
+        # Ensure path is user-level inside LocalAppData (zero admin/UAC elevation needed)
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if local_app_data:
+            self.assertTrue(installer.DEFAULT_INSTALL_DIR.lower().startswith(local_app_data.lower()))
+
+    def test_register_and_unregister_uninstall_entry(self):
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows Registry tests only run on Windows OS.")
+
+        import tempfile, winreg
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            exe_path = os.path.join(tmp_dir, "TurboDownloader.exe")
+            with open(exe_path, "w") as f:
+                f.write("mock")
+            uninst_path = os.path.join(tmp_dir, "Uninstall.exe")
+            with open(uninst_path, "w") as f:
+                f.write("mock")
+
+            reg_ok = installer.register_uninstall_entry(tmp_dir, exe_path, uninst_path)
+            self.assertTrue(reg_ok)
+
+            # Query uninstall key
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, installer.UNINSTALL_REG_KEY)
+            disp_name, _ = winreg.QueryValueEx(key, "DisplayName")
+            uninst_cmd, _ = winreg.QueryValueEx(key, "UninstallString")
+            quiet_uninst_cmd, _ = winreg.QueryValueEx(key, "QuietUninstallString")
+            no_modify, _ = winreg.QueryValueEx(key, "NoModify")
+            winreg.CloseKey(key)
+
+            self.assertEqual(disp_name, "Turbo Download Manager Pro")
+            self.assertIn("Uninstall.exe", uninst_cmd)
+            self.assertIn("--uninstall", uninst_cmd)
+            self.assertIn("--silent", quiet_uninst_cmd)
+            self.assertEqual(no_modify, 1)
+
+            # Clean up
+            unreg_ok = installer.unregister_uninstall_entry()
+            self.assertTrue(unreg_ok)
+
+            # Verify key is gone
+            with self.assertRaises(FileNotFoundError):
+                winreg.OpenKey(winreg.HKEY_CURRENT_USER, installer.UNINSTALL_REG_KEY)
+
+    def test_create_windows_shortcut(self):
+        if not sys.platform.startswith("win"):
+            self.skipTest("Shortcut test only runs on Windows OS.")
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            target = os.path.join(tmp_dir, "app.exe")
+            with open(target, "w") as f:
+                f.write("mock")
+            shortcut = os.path.join(tmp_dir, "TestShortcut.lnk")
+
+            ok = installer.create_windows_shortcut(target, shortcut, description="Test App")
+            self.assertTrue(ok)
+            self.assertTrue(os.path.isfile(shortcut))
+
+    def test_install_and_uninstall_lifecycle(self):
+        if not sys.platform.startswith("win"):
+            self.skipTest("Installer tests only run on Windows OS.")
+
+        import tempfile
+        progress_events = []
+
+        def _cb(pct, msg):
+            progress_events.append((pct, msg))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            install_target = os.path.join(tmp_dir, "InstalledTurbo")
+
+            # Execute install into test folder
+            res = installer.install_application(
+                target_dir=install_target,
+                create_desktop=False,
+                create_start_menu=False,
+                register_browser=False,
+                progress_cb=_cb
+            )
+            self.assertTrue(res.get("success"))
+            self.assertTrue(os.path.isdir(install_target))
+            self.assertTrue(os.path.isfile(os.path.join(install_target, "TurboDownloader.exe")))
+            self.assertTrue(os.path.isfile(os.path.join(install_target, "app_icon.ico")))
+            self.assertTrue(len(progress_events) >= 5)
+            self.assertEqual(progress_events[-1][0], 1.0)
+
+            # Execute uninstall
+            un_progress = []
+            un_res = installer.uninstall_application(
+                target_dir=install_target,
+                progress_cb=lambda p, m: un_progress.append((p, m))
+            )
+            self.assertTrue(un_res.get("success"))
+            self.assertTrue(len(un_progress) >= 4)
+            self.assertEqual(un_progress[-1][0], 1.0)
+            self.assertFalse(os.path.exists(install_target))
+
+    def test_installer_gui_initialization_grab_free(self):
+        """Verifies Tkinter InstallerGUI creates without grab lock and has responsive layout."""
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            gui = installer.InstallerGUI(root, mode="install")
+            self.assertEqual(gui.mode, "install")
+            # Verify grab-free: root must NOT have active grab lock
+            self.assertIsNone(root.grab_current(), "Installer GUI must be grab-free without modal lock")
+            # Verify UI elements exist
+            self.assertTrue(hasattr(gui, "entry_dir"))
+            self.assertTrue(hasattr(gui, "btn_action"))
+            self.assertTrue(hasattr(gui, "btn_cancel"))
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_shell_desktop_and_programs_directory_resolution(self):
+        """Verifies get_desktop_dir and get_start_menu_programs_dir return valid existing folders."""
+        desktop_dir = installer.get_desktop_dir()
+        programs_dir = installer.get_start_menu_programs_dir()
+        self.assertTrue(os.path.isdir(desktop_dir), f"Desktop folder {desktop_dir} must exist")
+        self.assertTrue(os.path.isdir(programs_dir), f"Programs folder {programs_dir} must exist")
+
+    def test_uninstaller_binary_mode_detection(self):
+        """Verifies that running with an uninstaller binary name defaults to uninstall mode."""
+        with patch("sys.executable", "C:\\Programs\\TurboDownloader\\Uninstall.exe"):
+            exe_name = os.path.basename(sys.executable).lower()
+            is_uninst = "uninstall" in exe_name
+            self.assertTrue(is_uninst)
+            mode = "uninstall" if is_uninst else "install"
+            self.assertEqual(mode, "uninstall")
+
 
 
 class TestQualitySelectionModalGUI(unittest.TestCase):

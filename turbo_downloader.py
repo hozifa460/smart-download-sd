@@ -125,6 +125,9 @@ from browser_bridge import BrowserBridgeServer, DEFAULT_BRIDGE_PORT
 from register_browser import (
     register_native_host,
     unregister_native_host,
+    check_and_register_browser,
+    register_browser_extensions,
+    unregister_browser_extensions,
     is_registered as is_browser_registered,
     get_status as get_browser_reg_status
 )
@@ -5382,6 +5385,19 @@ class ModernFramelessGUI:
             except Exception:
                 pass
 
+        # Idempotent and non-blocking embedded browser self-registration
+        self._start_browser_self_registration()
+
+    def _start_browser_self_registration(self):
+        """Asynchronously checks and registers or heals browser integration in background without blocking GUI."""
+        def _task():
+            try:
+                check_and_register_browser()
+            except Exception:
+                pass
+        t = threading.Thread(target=_task, daemon=True, name="BrowserAutoRegisterThread")
+        t.start()
+
     def _show_background_startup_notification(self):
         """Displays Windows system tray notification balloon and sleek brief toast when running in background."""
         if getattr(self, "_closing", False):
@@ -8493,14 +8509,24 @@ def main():
         os._exit(0)
 
     # CLI handler for Chrome/Edge Native Messaging Host execution
-    if "--native-host" in sys.argv or "--native-messaging-host" in sys.argv:
+    if (
+        "--native-host" in sys.argv
+        or "--native-messaging-host" in sys.argv
+        or any(arg.startswith("chrome-extension://") or arg.startswith("edge-extension://") for arg in sys.argv[1:])
+    ):
         from native_messaging_host import run_host
         run_host()
         return
 
     # CLI handler for browser registration
     if "--register-browser" in sys.argv:
-        res = register_native_host()
+        res = check_and_register_browser(force=True)
+        print(json.dumps(res, indent=2))
+        return
+
+    if "--unregister-browser" in sys.argv:
+        res = unregister_native_host()
+        print(json.dumps(res, indent=2))
         return
 
     # Check for CLI download URLs (e.g. TurboDownloader.exe https://example.com/file.zip)
