@@ -108,16 +108,22 @@ enable_high_dpi_awareness()
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-# Import modular YouTube & Browser Bridge components
+# Import modular YouTube & Streaming Media components
 from youtube_resolver import (
     is_youtube_url,
+    is_social_media_url,
+    is_media_url,
     extract_youtube_id,
+    extract_media_platform,
+    extract_media_id,
     is_ytdlp_available,
     has_ffmpeg,
     find_ffmpeg_bin,
     sanitize_filename,
     YouTubeResolver,
+    MediaResolver,
     YouTubeStreamInfo,
+    MediaStreamInfo,
     VideoFormatOption,
     format_filesize
 )
@@ -463,8 +469,8 @@ def is_downloadable_url(url: Any) -> bool:
     if scheme not in ("http", "https", "ftp"):
         return False
 
-    # Fast-path for recognized YouTube links
-    if is_youtube_url(url_str):
+    # Fast-path for recognized YouTube and social media links
+    if is_media_url(url_str):
         return True
 
     try:
@@ -633,6 +639,9 @@ def derive_download_filename(url: str) -> str:
         if not url_fn or url_fn.lower() in ("__down", "download", "file", "videoplayback") or not os.path.splitext(url_fn)[1]:
             if is_youtube_url(url):
                 url_fn = "youtube_video.mp4"
+            elif is_social_media_url(url):
+                plat = extract_media_platform(url).lower().replace(" / x", "").replace(" ", "_")
+                url_fn = f"{plat}_video.mp4"
             elif url_fn and os.path.splitext(url_fn)[0]:
                 clean_base = url_fn.lstrip("_") or "download"
                 url_fn = f"{clean_base}.bin"
@@ -641,7 +650,12 @@ def derive_download_filename(url: str) -> str:
 
         return url_fn
     except Exception:
-        return "download.bin" if not is_youtube_url(url) else "youtube_video.mp4"
+        if is_youtube_url(url):
+            return "youtube_video.mp4"
+        elif is_social_media_url(url):
+            plat = extract_media_platform(url).lower().replace(" / x", "").replace(" ", "_")
+            return f"{plat}_video.mp4"
+        return "download.bin"
 
 
 def _win32_clipboard_get() -> Optional[str]:
@@ -2133,10 +2147,11 @@ class StreamDownloadCoordinator:
 
         # YouTube googlevideo CDN detection and concurrency safety
         self.is_youtube_stream = (
-            bool(getattr(self.stream_info, "video_id", None))
-            or TurboDownloadEngine.is_googlevideo_url(self.stream_info.video_url)
+            TurboDownloadEngine.is_googlevideo_url(self.stream_info.video_url)
             or (bool(self.stream_info.audio_url) and TurboDownloadEngine.is_googlevideo_url(self.stream_info.audio_url))
             or is_youtube_url(getattr(self.stream_info, "video_id", ""))
+            or "googlevideo.com" in (self.stream_info.video_url or "")
+            or getattr(self.stream_info, "platform", "").lower() == "youtube"
         )
         if self.is_youtube_stream:
             # YouTube googlevideo CDN issues HTTP 403 Forbidden on concurrent range requests.
@@ -2287,9 +2302,9 @@ class StreamDownloadCoordinator:
                     and has_ffmpeg()
                 )
                 actual_dest = self.destination_path + ".audio.tmp" if is_mp3_request else self.destination_path
-                audio_tmp = actual_dest if is_mp3_request else ""
-
-                self.log(f"[YOUTUBE] Initializing dynamic multi-chunk download for: {os.path.basename(self.destination_path)}")
+                plat = getattr(self.stream_info, "platform", "Media")
+                tag = plat.upper().replace(" / X", "")
+                self.log(f"[{tag}] Initializing dynamic multi-chunk download for: {os.path.basename(self.destination_path)}")
 
                 def _on_single_complete(path, size, elapsed):
                     if is_mp3_request:
@@ -2361,7 +2376,9 @@ class StreamDownloadCoordinator:
 
             # 1. Download Video Stream
             self._active_phase = 1
-            self.log(f"[YOUTUBE] Phase 1/3: Downloading Video Stream ({self.stream_info.video_resolution})...")
+            plat = getattr(self.stream_info, "platform", "Media")
+            tag = plat.upper().replace(" / X", "")
+            self.log(f"[{tag}] Phase 1/3: Downloading Video Stream ({self.stream_info.video_resolution})...")
             v_completed = threading.Event()
             v_error: List[str] = []
 
@@ -2416,7 +2433,7 @@ class StreamDownloadCoordinator:
 
             # 2. Download Audio Stream
             self._active_phase = 2
-            self.log("[YOUTUBE] Phase 2/3: Video stream downloaded. Downloading Audio Stream...")
+            self.log(f"[{tag}] Phase 2/3: Video stream downloaded. Downloading Audio Stream...")
             a_completed = threading.Event()
             a_error: List[str] = []
 
@@ -2476,19 +2493,21 @@ class StreamDownloadCoordinator:
             if self.on_progress:
                 self.on_progress(combined_total, combined_total, 0.0, "Merging...", 0)
 
-            self.log("[YOUTUBE] Phase 3/3: Merging video and audio streams into final container...")
+            self.log(f"[{tag}] Phase 3/3: Merging video and audio streams into final container...")
             YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log)
 
             elapsed = max(0.01, time.time() - self.start_time)
             final_size = os.path.getsize(self.destination_path)
-            self.log(f"[SUCCESS] YouTube video assembled & merged successfully ({final_size:,} bytes in {elapsed:.1f}s)!")
+            self.log(f"[SUCCESS] {plat} media assembled & merged successfully ({final_size:,} bytes in {elapsed:.1f}s)!")
 
             if self.on_complete:
                 self.on_complete(self.destination_path, final_size, elapsed)
 
         except Exception as e:
             has_error = True
-            self.log(f"[YOUTUBE ERROR] {e}")
+            plat = getattr(self.stream_info, "platform", "Media")
+            tag = plat.upper().replace(" / X", "")
+            self.log(f"[{tag} ERROR] {e}")
             if self.on_error:
                 self.on_error(str(e))
         finally:
@@ -2849,7 +2868,7 @@ class QualitySelectionModal(tk.Toplevel):
         parent_app: Optional[Any] = None
     ):
         super().__init__(parent)
-        self.video_title = str(video_title or "YouTube Video")
+        self.video_title = str(video_title or "Media Video")
         self.duration = int(duration or 0)
         self.options = options or []
         self.dest_path = str(default_dest_path or "")
@@ -6857,8 +6876,8 @@ class ModernFramelessGUI:
         except Exception:
             pass
 
-        # Check if URL is YouTube
-        if is_youtube_url(url):
+        # Check if URL is YouTube or supported social media
+        if is_media_url(url, check_ytdlp_extractors=True):
             self._start_youtube_download(url, dest, max_conn, bytes_limit, modal=modal)
             return
 
@@ -6939,8 +6958,10 @@ class ModernFramelessGUI:
         except Exception:
             pass
 
-        self.log(f"[YOUTUBE] Detected YouTube stream URL: {url}")
-        self.log("[YOUTUBE] Querying available video resolutions and formats via yt-dlp...")
+        plat = extract_media_platform(url)
+        tag = plat.upper().replace(" / X", "")
+        self.log(f"[{tag}] Detected {plat} stream URL: {url}")
+        self.log(f"[{tag}] Querying available video resolutions and formats via yt-dlp...")
 
         # In < 50ms, display sleek frameless fetching toast indicator if main window is hidden or minimized
         if self.is_window_hidden_or_minimized():
@@ -6955,13 +6976,13 @@ class ModernFramelessGUI:
                 info, options = resolver.extract_format_options(url)
 
                 if self._yt_cancel_event.is_set():
-                    self.log("[YOUTUBE] Quality analysis cancelled.")
+                    self.log(f"[{tag}] Quality analysis cancelled.")
                     return
 
                 if not options:
-                    raise RuntimeError("No downloadable media formats found for this YouTube video.")
+                    raise RuntimeError(f"No downloadable media formats found for this {plat} video.")
 
-                raw_title = info.get("title", "YouTube_Video")
+                raw_title = info.get("title") or f"{plat}_Video"
                 clean_title = sanitize_filename(raw_title)
                 duration = int(info.get("duration") or 0)
 
@@ -7056,7 +7077,7 @@ class ModernFramelessGUI:
                                 _start_coordinator(selected_opt, final_dest, yt_modal=yt_prog_modal)
                             except Exception as e:
                                 self._quality_modal = None
-                                self.log(f"[YOUTUBE START ERROR] {e}")
+                                self.log(f"[{tag} START ERROR] {e}")
                                 self._engine_error_cb(str(e))
 
                         def _on_open_in_main(selected_opt: VideoFormatOption, final_dest: str):
@@ -7067,7 +7088,7 @@ class ModernFramelessGUI:
                                 _start_coordinator(selected_opt, final_dest, yt_modal=None)
                             except Exception as e:
                                 self._quality_modal = None
-                                self.log(f"[YOUTUBE START ERROR] {e}")
+                                self.log(f"[{tag} START ERROR] {e}")
                                 self._engine_error_cb(str(e))
 
                         def _on_cancel():
@@ -7080,7 +7101,7 @@ class ModernFramelessGUI:
                                 self.card_size.configure(text="Ready")
                             except Exception:
                                 pass
-                            self.log("[YOUTUBE] Video quality selection cancelled.")
+                            self.log(f"[{tag}] Video quality selection cancelled.")
 
                         theme_dict = {
                             "c_bg": self.c_bg,
@@ -7120,7 +7141,7 @@ class ModernFramelessGUI:
                     except Exception as e:
                         self._quality_modal = None
                         self.clear_last_clipboard_url()
-                        self.log(f"[YOUTUBE MODAL ERROR] {e}")
+                        self.log(f"[{tag} MODAL ERROR] {e}")
                         self._engine_error_cb(str(e))
 
                 try:
@@ -7135,7 +7156,7 @@ class ModernFramelessGUI:
                 except Exception:
                     pass
                 if not self._yt_cancel_event.is_set():
-                    self.log(f"[YOUTUBE ERROR] {e}")
+                    self.log(f"[{tag} ERROR] {e}")
                     try:
                         self.dispatch_to_main_thread(lambda: self._engine_error_cb(str(e)))
                     except Exception:
@@ -7143,6 +7164,8 @@ class ModernFramelessGUI:
 
         resolve_thread = threading.Thread(target=_resolve_and_prompt, daemon=True)
         resolve_thread.start()
+
+    _start_media_download = _start_youtube_download
 
     # ----------------------------------------------------------------------------------
     # TDM-Style Automatic Clipboard Sniffer / URL Monitor
@@ -7272,11 +7295,12 @@ class ModernFramelessGUI:
                 pass
 
         # Non-blocking TDM-style download handling (no blocking modal dialogs / grab_set traps)
-        if is_youtube_url(url):
+        if is_media_url(url):
+            plat = extract_media_platform(url)
             if self.engine and self.engine.is_running:
-                self.log(f"[CLIPBOARD] Note: Active task is running. YouTube stream queued in URL field.")
+                self.log(f"[CLIPBOARD] Note: Active task is running. {plat} stream queued in URL field.")
             elif getattr(self, "_auto_start_clipboard", True):
-                self.log(f"[CLIPBOARD] YouTube stream detected: {url}. Starting format analysis...")
+                self.log(f"[CLIPBOARD] {plat} stream detected: {url}. Starting format analysis...")
                 try:
                     max_conn = int(self.conn_var.get())
                 except Exception:
@@ -7288,7 +7312,7 @@ class ModernFramelessGUI:
                 bytes_limit = kb_limit * 1024.0 if kb_limit > 0 else 0.0
                 self._start_youtube_download(url, new_dest, max_conn, bytes_limit)
             else:
-                self.log(f"[CLIPBOARD] YouTube stream populated: {url}. Ready for one-click start.")
+                self.log(f"[CLIPBOARD] {plat} stream populated: {url}. Ready for one-click start.")
         else:
             if self.engine and self.engine.is_running:
                 self.log(f"[CLIPBOARD] Note: Active transfer in progress. URL '{url_fn}' populated in inputs.")
@@ -7572,12 +7596,13 @@ class ModernFramelessGUI:
             except Exception:
                 pass
 
-        # Handle YouTube vs regular file downloads
-        if is_youtube_url(url):
+        # Handle Media (YouTube / Social media) vs regular file downloads
+        if is_media_url(url):
+            plat = extract_media_platform(url)
             if self.engine and self.engine.is_running:
-                self.log(f"[BROWSER] Note: Active task is running. YouTube stream queued in URL field.")
+                self.log(f"[BROWSER] Note: Active task is running. {plat} stream queued in URL field.")
             else:
-                self.log(f"[BROWSER] YouTube stream detected: {url}. Starting format analysis...")
+                self.log(f"[BROWSER] {plat} stream detected: {url}. Starting format analysis...")
                 try:
                     max_conn = int(self.conn_var.get())
                 except Exception:

@@ -35,12 +35,18 @@ from unittest.mock import patch, MagicMock
 # Import modules under test
 from youtube_resolver import (
     is_youtube_url,
+    is_social_media_url,
+    is_media_url,
     extract_youtube_id,
+    extract_media_platform,
+    extract_media_id,
     sanitize_filename,
     is_ytdlp_available,
     has_ffmpeg,
     YouTubeResolver,
+    MediaResolver,
     YouTubeStreamInfo,
+    MediaStreamInfo,
     VideoFormatOption,
     format_filesize
 )
@@ -315,6 +321,267 @@ class TestYouTubeResolver(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 resolver.extract_format_options("https://youtu.be/GTNypvv2Nbg")
             self.assertIn("empty metadata", str(ctx.exception))
+
+
+class TestSocialMediaDetectionAndSanitization(unittest.TestCase):
+    """Verifies recognition and platform identification for social media URLs."""
+
+    def test_social_media_url_detection(self):
+        valid_cases = [
+            # TikTok
+            ("https://www.tiktok.com/@username/video/7123456789012345678", "TikTok"),
+            ("https://vt.tiktok.com/ZS1234567/", "TikTok"),
+            ("https://vm.tiktok.com/ZM1234567/", "TikTok"),
+            ("https://www.tiktok.com/t/ZT1234567/", "TikTok"),
+            ("http://m.tiktok.com/v/7123456789012345678", "TikTok"),
+            # Instagram
+            ("https://www.instagram.com/reel/C1234567890/", "Instagram"),
+            ("https://www.instagram.com/p/B1234567890/", "Instagram"),
+            ("https://instagram.com/stories/user/1234567890/", "Instagram"),
+            ("https://instagr.am/p/B1234567890/", "Instagram"),
+            ("https://www.instagram.com/tv/C1234567890/", "Instagram"),
+            # Facebook
+            ("https://www.facebook.com/watch/?v=1234567890", "Facebook"),
+            ("https://www.facebook.com/reel/1234567890", "Facebook"),
+            ("https://fb.watch/aBcDeFgHiJ/", "Facebook"),
+            ("https://www.facebook.com/page/videos/1234567890/", "Facebook"),
+            ("https://facebook.com/share/v/xyz123/", "Facebook"),
+            ("https://facebook.com/share/r/abc456/", "Facebook"),
+            # Twitter / X
+            ("https://twitter.com/jack/status/20", "Twitter / X"),
+            ("https://x.com/elonmusk/status/1234567890123456789", "Twitter / X"),
+            ("https://mobile.twitter.com/user/status/987654321", "Twitter / X"),
+            # Reddit, Vimeo, Dailymotion, Pinterest
+            ("https://reddit.com/r/videos/comments/123abc/title/", "Reddit"),
+            ("https://v.redd.it/abcdef123456", "Reddit"),
+            ("https://vimeo.com/123456789", "Vimeo"),
+            ("https://dailymotion.com/video/x8abcde", "Dailymotion"),
+            ("https://dai.ly/x8abcde", "Dailymotion"),
+            ("https://www.pinterest.com/pin/123456789012345678/", "Pinterest"),
+            ("https://pin.it/1234567", "Pinterest"),
+        ]
+
+        for url, expected_plat in valid_cases:
+            self.assertTrue(is_social_media_url(url), f"Failed is_social_media_url: {url}")
+            self.assertTrue(is_media_url(url), f"Failed is_media_url: {url}")
+            self.assertEqual(extract_media_platform(url), expected_plat, f"Platform mismatch for {url}")
+
+    def test_social_media_url_negatives(self):
+        negative_cases = [
+            "https://google.com",
+            "https://facebook.com/settings",
+            "https://facebook.com/friends",
+            "https://twitter.com/home",
+            "https://instagram.com/explore",
+            "https://tiktok.com/@username",
+            "https://speed.cloudflare.com/__down?bytes=50000000",
+            "https://example.com/file.mp4",
+            "",
+            "   ",
+            None
+        ]
+        for url in negative_cases:
+            self.assertFalse(is_social_media_url(url), f"False positive is_social_media_url: {url}")
+
+    def test_extract_media_id(self):
+        self.assertEqual(extract_media_id("https://www.tiktok.com/@user/video/7123456789"), "7123456789")
+        self.assertEqual(extract_media_id("https://vt.tiktok.com/ZS1234567/"), "ZS1234567")
+        self.assertEqual(extract_media_id("https://www.instagram.com/reel/C1234567890/"), "C1234567890")
+        self.assertEqual(extract_media_id("https://x.com/user/status/123456789"), "123456789")
+        self.assertEqual(extract_media_id("https://fb.watch/aBcDeFgHiJ/"), "aBcDeFgHiJ")
+        self.assertEqual(extract_media_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ")
+        self.assertIsNone(extract_media_id("https://google.com"))
+
+
+class TestSocialMediaResolverAndExtraction(unittest.TestCase):
+    """Verifies media extraction for TikTok, Instagram, Facebook, and Twitter/X using mock yt-dlp metadata."""
+
+    def test_tiktok_mock_extraction(self):
+        """Simulates vertical TikTok video format extraction."""
+        mock_info = {
+            "id": "7123456789012345678",
+            "title": "Amazing TikTok dance video #trending",
+            "duration": 35,
+            "thumbnail": "https://p16-sign-va.tiktokcdn.com/thumb.jpg",
+            "webpage_url": "https://www.tiktok.com/@creator/video/7123456789012345678",
+            "formats": [
+                {
+                    "format_id": "download_addr-0",
+                    "ext": "mp4",
+                    "width": 1080,
+                    "height": 1920,
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "protocol": "https",
+                    "url": "https://v16-webapp-prime.tiktok.com/video/tos/useast2a/mock.mp4",
+                    "filesize": 8500000
+                }
+            ]
+        }
+
+        with patch("yt_dlp.YoutubeDL") as MockYDL:
+            instance = MockYDL.return_value.__enter__.return_value
+            instance.extract_info.return_value = mock_info
+
+            resolver = YouTubeResolver()
+            stream_info = resolver.resolve("https://www.tiktok.com/@creator/video/7123456789012345678")
+
+            self.assertTrue(stream_info.is_progressive)
+            self.assertEqual(stream_info.platform, "TikTok")
+            self.assertIn("Amazing TikTok dance video #trending", stream_info.title)
+            self.assertIn("tiktok.com", stream_info.video_url)
+            self.assertIn("1080p Vertical", stream_info.video_resolution)
+
+    def test_instagram_mock_extraction(self):
+        """Simulates Instagram Reel progressive extraction."""
+        mock_info = {
+            "id": "C1234567890",
+            "title": "Beautiful Sunset Reel",
+            "duration": 15,
+            "webpage_url": "https://www.instagram.com/reel/C1234567890/",
+            "formats": [
+                {
+                    "format_id": "dash-hd",
+                    "ext": "mp4",
+                    "height": 1080,
+                    "width": 1080,
+                    "vcodec": "avc1",
+                    "acodec": "mp4a",
+                    "protocol": "https",
+                    "url": "https://scontent.cdninstagram.com/v/mock_ig.mp4",
+                    "filesize": 4200000
+                }
+            ]
+        }
+
+        with patch("yt_dlp.YoutubeDL") as MockYDL:
+            instance = MockYDL.return_value.__enter__.return_value
+            instance.extract_info.return_value = mock_info
+
+            resolver = YouTubeResolver()
+            stream_info = resolver.resolve("https://www.instagram.com/reel/C1234567890/")
+
+            self.assertTrue(stream_info.is_progressive)
+            self.assertEqual(stream_info.platform, "Instagram")
+            self.assertEqual(stream_info.video_resolution, "1080p")
+            self.assertEqual(stream_info.clean_filename, "Beautiful Sunset Reel.mp4")
+
+    def test_facebook_mock_extraction(self):
+        """Simulates Facebook video extraction with SD and HD formats."""
+        mock_info = {
+            "id": "1234567890",
+            "title": "Interesting Facebook Documentary Clip",
+            "duration": 240,
+            "webpage_url": "https://www.facebook.com/watch/?v=1234567890",
+            "formats": [
+                {
+                    "format_id": "hd",
+                    "ext": "mp4",
+                    "height": 720,
+                    "vcodec": "avc1",
+                    "acodec": "mp4a",
+                    "protocol": "https",
+                    "url": "https://video.faly1-1.fna.fbcdn.net/mock_hd.mp4",
+                    "filesize": 25000000
+                },
+                {
+                    "format_id": "sd",
+                    "ext": "mp4",
+                    "height": 360,
+                    "vcodec": "avc1",
+                    "acodec": "mp4a",
+                    "protocol": "https",
+                    "url": "https://video.faly1-1.fna.fbcdn.net/mock_sd.mp4",
+                    "filesize": 10000000
+                }
+            ]
+        }
+
+        with patch("yt_dlp.YoutubeDL") as MockYDL:
+            instance = MockYDL.return_value.__enter__.return_value
+            instance.extract_info.return_value = mock_info
+
+            resolver = YouTubeResolver()
+            info, options = resolver.extract_format_options("https://www.facebook.com/watch/?v=1234567890")
+
+            self.assertGreaterEqual(len(options), 2)
+            self.assertEqual(options[0].height, 720)
+            self.assertEqual(options[1].height, 360)
+
+    def test_twitter_mock_extraction(self):
+        """Simulates Twitter/X post video extraction."""
+        mock_info = {
+            "id": "1234567890123456789",
+            "title": "Breaking News Update Video",
+            "duration": 45,
+            "webpage_url": "https://x.com/user/status/1234567890123456789",
+            "formats": [
+                {
+                    "format_id": "http-1080",
+                    "ext": "mp4",
+                    "height": 720,
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "protocol": "https",
+                    "url": "https://video.twimg.com/ext_tw_video/mock_720.mp4",
+                    "filesize": 6000000
+                }
+            ]
+        }
+
+        with patch("yt_dlp.YoutubeDL") as MockYDL:
+            instance = MockYDL.return_value.__enter__.return_value
+            instance.extract_info.return_value = mock_info
+
+            resolver = YouTubeResolver()
+            stream_info = resolver.resolve("https://x.com/user/status/1234567890123456789")
+
+            self.assertEqual(stream_info.platform, "Twitter / X")
+            self.assertTrue(stream_info.is_progressive)
+            self.assertEqual(stream_info.clean_filename, "Breaking News Update Video.mp4")
+
+    def test_social_media_dual_stream_merge_extraction(self):
+        """Simulates social media platform with split video and audio streams (e.g. Reddit v.redd.it)."""
+        mock_info = {
+            "id": "mock_reddit_id",
+            "title": "Viral Reddit Clip",
+            "duration": 60,
+            "webpage_url": "https://reddit.com/r/videos/comments/123abc/viral_clip/",
+            "formats": [
+                {
+                    "format_id": "DASH_1080",
+                    "ext": "mp4",
+                    "height": 1080,
+                    "vcodec": "h264",
+                    "acodec": "none",
+                    "protocol": "https",
+                    "url": "https://v.redd.it/mock/DASH_1080.mp4",
+                    "filesize": 15000000
+                },
+                {
+                    "format_id": "DASH_audio",
+                    "ext": "m4a",
+                    "height": 0,
+                    "vcodec": "none",
+                    "acodec": "aac",
+                    "protocol": "https",
+                    "url": "https://v.redd.it/mock/DASH_audio.mp4",
+                    "filesize": 2000000
+                }
+            ]
+        }
+
+        with patch("yt_dlp.YoutubeDL") as MockYDL, patch("youtube_resolver.has_ffmpeg", return_value=True):
+            instance = MockYDL.return_value.__enter__.return_value
+            instance.extract_info.return_value = mock_info
+
+            resolver = YouTubeResolver()
+            stream_info = resolver.resolve("https://reddit.com/r/videos/comments/123abc/viral_clip/")
+
+            self.assertFalse(stream_info.is_progressive)
+            self.assertEqual(stream_info.video_resolution, "1080p")
+            self.assertIsNotNone(stream_info.audio_url)
+            self.assertEqual(stream_info.platform, "Reddit")
 
 
 class TestBrowserBridgeServer(unittest.TestCase):

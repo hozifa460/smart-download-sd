@@ -37,6 +37,58 @@ YOUTUBE_URL_REGEX = re.compile(
     re.IGNORECASE
 )
 
+# Robust regex patterns for major social media platforms
+SOCIAL_MEDIA_PATTERNS = {
+    "tiktok": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?tiktok\.com/(?:@[^/?#]+/(?:video|photo)/\d+|t/[a-zA-Z0-9_-]+|v/\d+)|^(?:https?://)?(?:vt|vm)\.tiktok\.com/[a-zA-Z0-9_-]+',
+        re.IGNORECASE
+    ),
+    "instagram": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:instagram\.com|instagr\.am)/(?:p|reel|reels|stories|tv)/[a-zA-Z0-9_.-]+',
+        re.IGNORECASE
+    ),
+    "facebook": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?fb\.watch/[a-zA-Z0-9_.-]+/?|^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?facebook\.com/(?:watch/?(?:\?|$)|reel/\d+|reels/\d+|share/[vr]/[a-zA-Z0-9_-]+|[^/?#]+/videos/\d+|video\.php\?(?:.*&)?v=\d+)',
+        re.IGNORECASE
+    ),
+    "twitter": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:twitter\.com|x\.com)/[^/?#]+/status/\d+',
+        re.IGNORECASE
+    ),
+    "reddit": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:reddit\.com/r/[^/?#]+/comments/[a-zA-Z0-9]+|redd\.it/[a-zA-Z0-9]+|v\.redd\.it/[a-zA-Z0-9]+)',
+        re.IGNORECASE
+    ),
+    "vimeo": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?vimeo\.com/(?:channels/[a-zA-Z0-9_-]+/|groups/[a-zA-Z0-9_-]+/videos/|album/\d+/video/|video/)?\d+',
+        re.IGNORECASE
+    ),
+    "dailymotion": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:dailymotion\.com/(?:video|embed/video)/|dai\.ly/)[a-zA-Z0-9]+',
+        re.IGNORECASE
+    ),
+    "pinterest": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:pinterest\.(?:com|[a-z]{2}(?:\.[a-z]{2})?)/pin/|pin\.it/)[a-zA-Z0-9_-]+',
+        re.IGNORECASE
+    ),
+    "threads": re.compile(
+        r'^(?:https?://)?(?:www\.)?threads\.net/@?[^/?#]+/post/[a-zA-Z0-9_-]+',
+        re.IGNORECASE
+    ),
+    "snapchat": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?snapchat\.com/(?:spotlight|story|t)/[a-zA-Z0-9_-]+',
+        re.IGNORECASE
+    ),
+    "twitch": re.compile(
+        r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?twitch\.tv/(?:videos/\d+|clips/[a-zA-Z0-9_-]+)',
+        re.IGNORECASE
+    ),
+    "rumble": re.compile(
+        r'^(?:https?://)?(?:www\.)?rumble\.com/v[a-zA-Z0-9_-]+',
+        re.IGNORECASE
+    ),
+}
+
 # Reserved filename characters for Windows / Linux cross-compatibility
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -46,6 +98,113 @@ def is_youtube_url(url: str) -> bool:
     if not url or not isinstance(url, str):
         return False
     return bool(YOUTUBE_URL_REGEX.search(url.strip()))
+
+
+def is_social_media_url(url: str) -> bool:
+    """
+    Returns True if the given URL is a recognized social media post/video URL
+    (Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Pinterest, etc.).
+    """
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip()
+    for pat in SOCIAL_MEDIA_PATTERNS.values():
+        if pat.search(u):
+            return True
+    return False
+
+
+_YTDLP_EXTRACTORS_CACHE = None
+
+
+def is_ytdlp_extractor_supported(url: str) -> bool:
+    """
+    Checks whether yt-dlp has a dedicated extractor matching the URL (excluding generic).
+    Cached lazily for fast subsequent checks.
+    """
+    global _YTDLP_EXTRACTORS_CACHE
+    if not is_ytdlp_available() or not url:
+        return False
+    try:
+        import yt_dlp
+        if _YTDLP_EXTRACTORS_CACHE is None:
+            _YTDLP_EXTRACTORS_CACHE = yt_dlp.extractor.gen_extractors()
+        for ie in _YTDLP_EXTRACTORS_CACHE:
+            if ie.suitable(url) and ie.IE_NAME != 'generic':
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def is_media_url(url: str, check_ytdlp_extractors: bool = False) -> bool:
+    """
+    Returns True if the URL is recognized as YouTube or any supported social media platform.
+    If check_ytdlp_extractors=True, falls back to querying yt-dlp extractor catalog.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip()
+    if is_youtube_url(u) or is_social_media_url(u):
+        return True
+    if check_ytdlp_extractors:
+        return is_ytdlp_extractor_supported(u)
+    return False
+
+
+PLATFORM_DISPLAY_NAMES = {
+    "youtube": "YouTube",
+    "tiktok": "TikTok",
+    "instagram": "Instagram",
+    "facebook": "Facebook",
+    "twitter": "Twitter / X",
+    "reddit": "Reddit",
+    "vimeo": "Vimeo",
+    "dailymotion": "Dailymotion",
+    "pinterest": "Pinterest",
+    "threads": "Threads",
+    "snapchat": "Snapchat",
+    "twitch": "Twitch",
+    "rumble": "Rumble",
+}
+
+
+def extract_media_platform(url: str) -> str:
+    """
+    Identifies the platform name for a given URL (e.g. 'YouTube', 'TikTok', 'Instagram',
+    'Facebook', 'Twitter / X', 'Reddit', 'Vimeo', 'Dailymotion', 'Pinterest', etc.).
+    """
+    if not url or not isinstance(url, str):
+        return "Media"
+    u = url.strip()
+    if is_youtube_url(u):
+        return "YouTube"
+    for name, pat in SOCIAL_MEDIA_PATTERNS.items():
+        if pat.search(u):
+            return PLATFORM_DISPLAY_NAMES.get(name, name.capitalize())
+    return "Media"
+
+
+def extract_media_id(url: str) -> Optional[str]:
+    """
+    Extracts an identifier from a media URL if detectable, otherwise None.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    yt_id = extract_youtube_id(url)
+    if yt_id:
+        return yt_id
+    u = url.strip()
+    m = re.search(r'/(?:video|reel|reels|status|pin|comments|videos|p)/([a-zA-Z0-9_-]+)', u)
+    if m:
+        return m.group(1)
+    m2 = re.search(r'/(?:vt|vm)\.tiktok\.com/([a-zA-Z0-9_-]+)', u)
+    if m2:
+        return m2.group(1)
+    m3 = re.search(r'/fb\.watch/([a-zA-Z0-9_.-]+)', u)
+    if m3:
+        return m3.group(1)
+    return None
 
 
 def extract_youtube_id(url: str) -> Optional[str]:
@@ -149,7 +308,7 @@ def format_filesize(num_bytes: int) -> str:
 @dataclass
 class YouTubeStreamInfo:
     """
-    Resolved metadata and stream URLs for a YouTube video.
+    Resolved metadata and stream URLs for YouTube and social media streams.
     """
     video_id: str
     title: str
@@ -167,13 +326,18 @@ class YouTubeStreamInfo:
     duration: int = 0
     thumbnail_url: str = ""
     is_audio_only: bool = False
+    platform: str = "YouTube"
+
+
+# Clean alias
+MediaStreamInfo = YouTubeStreamInfo
 
 
 class YouTubeResolver:
     """
     High-level resolver that communicates with yt-dlp to extract high-speed direct
     stream URLs, extracts all available video qualities/formats, and orchestrates
-    video + audio merging with FFmpeg.
+    video + audio merging with FFmpeg for YouTube and social media platforms.
     """
 
     def __init__(self, on_log: Optional[Callable[[str], None]] = None, socket_timeout: int = 12):
@@ -191,18 +355,21 @@ class YouTubeResolver:
         """
         Extracts raw metadata and a structured, deduplicated list of available VideoFormatOption choices
         (e.g. 4K, 1440p, 1080p, 720p, 480p, 360p, and Audio-only) sorted by resolution descending.
+        Supports YouTube as well as Instagram, Facebook, Twitter/X, TikTok, Reddit, Vimeo, Dailymotion, Pinterest, etc.
         """
-        if not is_youtube_url(url):
-            raise ValueError(f"URL is not a recognized YouTube URL: {url}")
+        if not is_media_url(url, check_ytdlp_extractors=True):
+            raise ValueError(f"URL is not a recognized media or streaming URL: {url}")
 
         if not is_ytdlp_available():
             raise RuntimeError(
-                "yt-dlp is not installed. To download YouTube streams, please install it with:\n"
+                "yt-dlp is not installed. To download media streams, please install it with:\n"
                 "pip install yt-dlp"
             )
 
-        video_id = extract_youtube_id(url) or "video"
-        self.log(f"[YOUTUBE] Extracting formats and stream metadata for video ID: {video_id}...")
+        platform = extract_media_platform(url)
+        media_id = extract_media_id(url) or extract_youtube_id(url) or "media"
+        tag = platform.upper().replace(" / X", "")
+        self.log(f"[{tag}] Extracting formats and stream metadata for {platform} media (ID: {media_id})...")
 
         try:
             import yt_dlp
@@ -223,7 +390,7 @@ class YouTubeResolver:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as e:
-            raise RuntimeError(f"Failed to extract YouTube stream info: {e}")
+            raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
 
         if not info:
             raise RuntimeError("yt-dlp returned empty metadata for the provided URL.")
@@ -241,12 +408,28 @@ class YouTubeResolver:
         """
         Processes formats dictionary from yt-dlp info and constructs sorted VideoFormatOption list.
         Accurately estimates sizes from bitrate and duration when raw filesize is omitted.
+        Handles YouTube, TikTok, Instagram, Twitter/X, Facebook, Reddit, Vimeo, and generic media streams.
         """
-        formats = info.get("formats", [])
-        if not formats:
-            return []
-
+        raw_formats = info.get("formats", [])
         duration = int(info.get("duration") or 0)
+
+        # If formats is empty but top-level url exists (e.g. some direct Instagram/TikTok/Pinterest posts)
+        if not raw_formats and info.get("url"):
+            raw_formats = [{
+                "format_id": info.get("format_id") or "direct",
+                "url": info.get("url"),
+                "ext": info.get("ext") or "mp4",
+                "height": info.get("height") or 720,
+                "width": info.get("width") or 1280,
+                "filesize": info.get("filesize") or info.get("filesize_approx") or 0,
+                "vcodec": info.get("vcodec") or "h264",
+                "acodec": info.get("acodec") or "aac",
+                "http_headers": info.get("http_headers") or {},
+                "protocol": info.get("protocol") or "https",
+            }]
+
+        if not raw_formats:
+            return []
 
         def _is_direct_stream(f: Dict[str, Any]) -> bool:
             url = f.get("url") or ""
@@ -266,6 +449,8 @@ class YouTubeResolver:
             return bool(vcodec and vcodec != "none")
 
         def _estimate_size(f: Dict[str, Any]) -> int:
+            if not f:
+                return 0
             raw_sz = f.get("filesize") or f.get("filesize_approx")
             if raw_sz:
                 try:
@@ -282,10 +467,35 @@ class YouTubeResolver:
                 return int((bitrate_kbps * 1000.0 / 8.0) * duration)
             return 0
 
+        # Filter direct streams; fallback to any HTTP stream if strict filter removes all
+        formats = [f for f in raw_formats if _is_direct_stream(f)]
+        if not formats:
+            formats = [f for f in raw_formats if f.get("url") and str(f.get("url")).startswith("http")]
+        if not formats:
+            return []
+
+        # Fix missing / zero heights by inferring from width or resolution string
+        for f in formats:
+            h = int(f.get("height") or 0)
+            w = int(f.get("width") or 0)
+            if h <= 0 and w > 0:
+                f["height"] = int(w * 9 / 16) if w > 1000 else int(w * 16 / 9)
+            elif h <= 0:
+                res_str = str(f.get("resolution") or f.get("format_note") or f.get("format_id") or "")
+                m = re.search(r'(\d{3,4})p', res_str)
+                if m:
+                    f["height"] = int(m.group(1))
+                else:
+                    m2 = re.search(r'\d+x(\d+)', res_str)
+                    if m2:
+                        f["height"] = int(m2.group(1))
+            if int(f.get("height") or 0) <= 0:
+                f["height"] = 720
+
         # 1. Identify valid audio-only formats
         audio_only_formats = [
             f for f in formats
-            if _is_direct_stream(f) and _has_audio(f) and not _has_video(f)
+            if _has_audio(f) and not _has_video(f)
         ]
 
         def _audio_rank(f):
@@ -304,14 +514,22 @@ class YouTubeResolver:
         # 2. Identify video-only formats
         video_only_formats = [
             f for f in formats
-            if _is_direct_stream(f) and _has_video(f) and not _has_audio(f)
+            if _has_video(f) and not _has_audio(f)
         ]
 
         # 3. Identify progressive (combined audio+video) formats
         progressive_formats = [
             f for f in formats
-            if _is_direct_stream(f) and _has_video(f) and _has_audio(f)
+            if _has_video(f) and _has_audio(f)
         ]
+
+        # Critical adaptation for social media (TikTok, Instagram, Twitter, etc.):
+        # If there are no separate audio streams available, treat all video streams as progressive
+        if not audio_only_formats:
+            for vf in video_only_formats:
+                if vf not in progressive_formats:
+                    progressive_formats.append(vf)
+            video_only_formats = []
 
         options: List[VideoFormatOption] = []
         ffmpeg_available = has_ffmpeg()
@@ -327,9 +545,18 @@ class YouTubeResolver:
             if h > 0:
                 all_heights.add(h)
 
-        def _label_for_height(h: int, fps: int = 30) -> str:
-            # Map standard and cropped widescreen heights accurately
-            if h >= 2000:
+        def _label_for_height(h: int, fps: int = 30, w: int = 0) -> str:
+            if w > 0 and h > w:
+                # Vertical format video (TikTok, Instagram Reels, Shorts)
+                if w >= 1080 or h >= 1920:
+                    base = f"1080p Vertical ({w}x{h})"
+                elif w >= 720 or h >= 1280:
+                    base = f"720p Vertical ({w}x{h})"
+                elif w >= 480 or h >= 854:
+                    base = f"480p Vertical ({w}x{h})"
+                else:
+                    base = f"{w}p Vertical ({w}x{h})"
+            elif h >= 2000:
                 base = "4K (2160p)"
             elif h >= 1350:
                 base = "2K (1440p QHD)"
@@ -345,8 +572,10 @@ class YouTubeResolver:
                 base = "240p (SD)"
             elif h >= 140:
                 base = "144p (SD)"
-            else:
+            elif h > 0:
                 base = f"{h}p"
+            else:
+                base = "Original Quality"
             if fps >= 50:
                 base += f" {fps}fps"
             return base
@@ -367,6 +596,7 @@ class YouTubeResolver:
             if ffmpeg_available and best_audio and v_matches:
                 best_v = sorted(v_matches, key=_video_rank, reverse=True)[0]
                 fps = int(best_v.get("fps") or 30)
+                w = int(best_v.get("width") or 0)
                 v_size = _estimate_size(best_v)
                 approx_total = v_size + best_audio_size if (v_size and best_audio_size) else (v_size or best_audio_size)
                 v_ext = (best_v.get("ext") or "mp4").lower()
@@ -374,7 +604,7 @@ class YouTubeResolver:
 
                 options.append(VideoFormatOption(
                     format_id=f"{best_v.get('format_id')}+{best_audio.get('format_id')}",
-                    resolution_label=_label_for_height(h, fps),
+                    resolution_label=_label_for_height(h, fps, w),
                     height=h,
                     ext=target_ext,
                     filesize_approx=approx_total,
@@ -402,11 +632,12 @@ class YouTubeResolver:
                 p_size = _estimate_size(best_p)
                 p_ext = (best_p.get("ext") or "mp4").lower()
                 fps = int(best_p.get("fps") or 30)
+                w = int(best_p.get("width") or 0)
 
                 # Avoid duplicate if dual-stream with same height exists unless progressive is distinct
                 has_dual = any(opt.height == h and not opt.is_progressive for opt in options)
                 if not has_dual or not ffmpeg_available or h <= 720:
-                    prog_label = _label_for_height(h, fps)
+                    prog_label = _label_for_height(h, fps, w)
                     if has_dual:
                         prog_label += " (Progressive)"
                     options.append(VideoFormatOption(
@@ -462,6 +693,25 @@ class YouTubeResolver:
                     note=f"Universal MP3 Audio (~{best_audio_abr} kbps • FFmpeg)"
                 ))
 
+        # 5. Safety fallback if options is still empty but formats exist
+        if not options and formats:
+            f0 = formats[0]
+            options.append(VideoFormatOption(
+                format_id=str(f0.get("format_id", "default")),
+                resolution_label="Original Quality",
+                height=int(f0.get("height") or 720),
+                ext=(f0.get("ext") or "mp4").lower(),
+                filesize_approx=_estimate_size(f0),
+                fps=int(f0.get("fps") or 30),
+                vcodec=str(f0.get("vcodec") or ""),
+                acodec=str(f0.get("acodec") or ""),
+                is_progressive=True,
+                is_audio_only=False,
+                video_url=f0["url"],
+                video_headers=f0.get("http_headers", {}),
+                note="Direct Stream"
+            ))
+
         # Sort options: Video height descending, then filesize descending, audio-only (height 0) at end
         def _sort_key(opt: VideoFormatOption):
             return (opt.height > 0, opt.height, opt.filesize_approx)
@@ -473,13 +723,15 @@ class YouTubeResolver:
         Constructs a YouTubeStreamInfo instance ready for StreamDownloadCoordinator
         based on the selected VideoFormatOption.
         """
-        video_id = info.get("id") or extract_youtube_id(info.get("webpage_url", "")) or "video"
-        raw_title = info.get("title", f"YouTube_Video_{video_id}")
+        web_url = info.get("webpage_url") or ""
+        platform = extract_media_platform(web_url)
+        video_id = str(info.get("id") or extract_youtube_id(web_url) or extract_media_id(web_url) or "video")
+        raw_title = info.get("title") or f"{platform}_Video_{video_id}"
         clean_title = sanitize_filename(raw_title)
         duration = int(info.get("duration") or 0)
         thumbnail = info.get("thumbnail", "")
 
-        res_str = f"{option.height}p" if option.height > 0 else "Audio Only"
+        res_str = option.resolution_label if (option.resolution_label and "Vertical" in option.resolution_label) else (f"{option.height}p" if option.height > 0 else "Audio Only")
 
         if option.is_audio_only:
             out_fn = f"{clean_title}.{option.ext}"
@@ -499,7 +751,8 @@ class YouTubeResolver:
                 audio_size=0,
                 duration=duration,
                 thumbnail_url=thumbnail,
-                is_audio_only=True
+                is_audio_only=True,
+                platform=platform
             )
         elif option.is_progressive or not option.audio_url:
             out_fn = f"{clean_title}.{option.ext}"
@@ -519,7 +772,8 @@ class YouTubeResolver:
                 audio_size=0,
                 duration=duration,
                 thumbnail_url=thumbnail,
-                is_audio_only=False
+                is_audio_only=False,
+                platform=platform
             )
         else:
             out_fn = f"{clean_title}.{option.ext}"
@@ -540,19 +794,20 @@ class YouTubeResolver:
                 audio_size=option.audio_size,
                 duration=duration,
                 thumbnail_url=thumbnail,
-                is_audio_only=False
+                is_audio_only=False,
+                platform=platform
             )
 
     def resolve(self, url: str, format_id: Optional[str] = None) -> YouTubeStreamInfo:
         """
-        Extracts stream URLs and metadata from a YouTube link using yt-dlp.
+        Extracts stream URLs and metadata from a YouTube or social media link using yt-dlp.
         If format_id is specified, selects that format; otherwise chooses the best available format.
         Preserves complete backward compatibility for automated tests and direct invocations.
         """
         info, options = self.extract_format_options(url)
 
         if not options:
-            raise RuntimeError("No downloadable media formats found for this YouTube video.")
+            raise RuntimeError("No downloadable media formats found for this media URL.")
 
         selected_option: Optional[VideoFormatOption] = None
         if format_id:
@@ -566,14 +821,16 @@ class YouTubeResolver:
             selected_option = options[0]
 
         stream_info = self.build_stream_info(info, selected_option)
+        plat = extract_media_platform(url)
+        tag = plat.upper().replace(" / X", "")
         if stream_info.is_progressive:
             self.log(
-                f"[YOUTUBE] Selected stream: {stream_info.video_resolution} ({stream_info.video_ext}). "
+                f"[{tag}] Selected stream: {stream_info.video_resolution} ({stream_info.video_ext}). "
                 f"Directly chunk-downloadable without merging."
             )
         else:
             self.log(
-                f"[YOUTUBE] Selected dual-stream: Video {stream_info.video_resolution} ({stream_info.video_ext}) + Audio ({stream_info.audio_ext}). "
+                f"[{tag}] Selected dual-stream: Video {stream_info.video_resolution} ({stream_info.video_ext}) + Audio ({stream_info.audio_ext}). "
                 f"Will download both and merge seamlessly with FFmpeg."
             )
         return stream_info
@@ -709,3 +966,7 @@ class YouTubeResolver:
             on_log(f"[FFMPEG SUCCESS] Merged file successfully created ({merged_size:,} bytes).")
 
         return True
+
+
+# Backward-compatible alias for universal media resolution
+MediaResolver = YouTubeResolver

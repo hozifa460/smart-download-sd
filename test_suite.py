@@ -43,6 +43,12 @@ from turbo_downloader import (
     QualitySelectionModal,
     VideoFormatOption
 )
+from youtube_resolver import (
+    is_youtube_url,
+    is_social_media_url,
+    is_media_url,
+    extract_media_platform
+)
 
 
 class MockServerHandler(http.server.BaseHTTPRequestHandler):
@@ -713,6 +719,54 @@ class TestClipboardNonBlockingInterception(unittest.TestCase):
                 root.destroy()
             except Exception:
                 pass
+
+    def test_clipboard_interception_social_media_smooth_start(self):
+        """Verifies intercepted social media URLs (TikTok, Instagram, Facebook, Twitter/X) trigger format analysis."""
+        root = tk.Tk()
+        try:
+            gui = ModernFramelessGUI(root)
+            social_urls = [
+                ("https://www.tiktok.com/@creator/video/7123456789012345678", "tiktok_video.mp4"),
+                ("https://www.instagram.com/reel/C1234567890/", "instagram_video.mp4"),
+                ("https://www.facebook.com/reel/1234567890", "facebook_video.mp4"),
+                ("https://x.com/user/status/1234567890123456789", "twitter_video.mp4")
+            ]
+
+            for s_url, expected_fn in social_urls:
+                with patch.object(gui, "_start_youtube_download") as mock_start, \
+                     patch.object(gui, "ask_safe_yesno") as mock_yesno:
+                    gui._on_clipboard_url_detected(s_url)
+
+                    self.assertEqual(gui.entry_url.get(), s_url)
+                    dest_val = gui.entry_dest.get()
+                    self.assertTrue(expected_fn in dest_val, f"Expected {expected_fn} in {dest_val}")
+                    mock_yesno.assert_not_called()
+                    mock_start.assert_called_once()
+                    self.assertIsNone(root.grab_current(), "Main window must remain grab-free")
+
+            gui._cleanup_resources()
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_social_media_url_recognition(self):
+        """Verifies social media URL detection across TikTok, Instagram, Facebook, Twitter/X, Reddit, Vimeo."""
+        test_cases = [
+            ("https://www.tiktok.com/@user/video/7123456789012345678", "TikTok"),
+            ("https://vt.tiktok.com/ZS1234567/", "TikTok"),
+            ("https://www.instagram.com/reel/C1234567890/", "Instagram"),
+            ("https://www.instagram.com/p/B1234567890/", "Instagram"),
+            ("https://www.facebook.com/watch/?v=1234567890", "Facebook"),
+            ("https://fb.watch/aBcDeFgHiJ/", "Facebook"),
+            ("https://x.com/user/status/1234567890123456789", "Twitter / X"),
+            ("https://twitter.com/user/status/1234567890123456789", "Twitter / X"),
+        ]
+        for url, expected_plat in test_cases:
+            self.assertTrue(is_social_media_url(url), f"Failed is_social_media_url: {url}")
+            self.assertTrue(is_media_url(url), f"Failed is_media_url: {url}")
+            self.assertEqual(extract_media_platform(url), expected_plat)
 
     def test_clipboard_interception_one_click_mode(self):
         """Verifies _auto_start_clipboard=False populates fields without starting, ready for one-click manual start."""
