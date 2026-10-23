@@ -22,6 +22,7 @@ import sys
 import time
 import json
 import shutil
+import tempfile
 import struct
 import hashlib
 import unittest
@@ -103,7 +104,11 @@ from turbo_downloader import (
     set_setting,
     parse_speed_limit,
     open_downloaded_file,
-    open_containing_folder
+    open_containing_folder,
+    CATEGORY_SUBFOLDERS,
+    resolve_categorized_path,
+    DownloadHistoryManager,
+    get_app_config_dir
 )
 
 
@@ -6495,6 +6500,327 @@ class TestBrowserCookiesAndMP3Extraction(unittest.TestCase):
         with patch("yt_dlp.YoutubeDL", MockYDL):
             info, options = resolver.extract_format_options("https://www.instagram.com/reel/123")
             self.assertEqual(options[0].video_headers.get("Cookie"), "cdn_token=secure_cdn_token_xyz")
+
+
+
+class TestDownloadHistoryAndCategorization(unittest.TestCase):
+    """
+    Unit test coverage for:
+    1. Smart Auto-Categorization into subfolders (resolve_categorized_path, CATEGORY_SUBFOLDERS).
+    2. Persistent Download History Manager (DownloadHistoryManager add, update, deduplication, filtering, reload, remove, clear).
+    3. ModernFramelessGUI Download History tab (tree_history, combo_history_filter, btn_auto_cat toggle, auto-recording).
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="sd_test_hist_")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_category_subfolders_mapping(self):
+        """Verify CATEGORY_SUBFOLDERS contains all required category-to-subfolder mappings."""
+        self.assertEqual(CATEGORY_SUBFOLDERS.get("Video"), "Video")
+        self.assertEqual(CATEGORY_SUBFOLDERS.get("Audio"), "Music")
+        self.assertEqual(CATEGORY_SUBFOLDERS.get("Programs"), "Programs")
+        self.assertEqual(CATEGORY_SUBFOLDERS.get("Compressed"), "Compressed")
+        self.assertEqual(CATEGORY_SUBFOLDERS.get("Documents"), "Documents")
+        self.assertEqual(CATEGORY_SUBFOLDERS.get("Images"), "Images")
+        self.assertEqual(CATEGORY_SUBFOLDERS.get("General"), "General")
+
+    def test_resolve_categorized_path_extensions(self):
+        """Verify resolve_categorized_path correctly maps extensions into designated subfolders."""
+        base = os.path.join(self.temp_dir, "Downloads")
+        
+        # Video (.mp4) -> Video
+        p_mp4 = resolve_categorized_path(base, "movie.mp4", auto_categorize=True, create_dir=True)
+        self.assertEqual(os.path.normpath(p_mp4), os.path.normpath(os.path.join(base, "Video", "movie.mp4")))
+        self.assertTrue(os.path.isdir(os.path.join(base, "Video")))
+
+        # Audio (.mp3, .m4a) -> Music
+        p_mp3 = resolve_categorized_path(base, "track.mp3", auto_categorize=True, create_dir=True)
+        self.assertEqual(os.path.normpath(p_mp3), os.path.normpath(os.path.join(base, "Music", "track.mp3")))
+        p_m4a = resolve_categorized_path(base, "audio.m4a", auto_categorize=True, create_dir=True)
+        self.assertEqual(os.path.normpath(p_m4a), os.path.normpath(os.path.join(base, "Music", "audio.m4a")))
+
+        # Programs (.exe) -> Programs
+        p_exe = resolve_categorized_path(base, "setup.exe", auto_categorize=True, create_dir=True)
+        self.assertEqual(os.path.normpath(p_exe), os.path.normpath(os.path.join(base, "Programs", "setup.exe")))
+
+        # Compressed (.zip) -> Compressed
+        p_zip = resolve_categorized_path(base, "archive.zip", auto_categorize=True, create_dir=True)
+        self.assertEqual(os.path.normpath(p_zip), os.path.normpath(os.path.join(base, "Compressed", "archive.zip")))
+
+        # Documents (.pdf) -> Documents
+        p_pdf = resolve_categorized_path(base, "doc.pdf", auto_categorize=True, create_dir=True)
+        self.assertEqual(os.path.normpath(p_pdf), os.path.normpath(os.path.join(base, "Documents", "doc.pdf")))
+
+        # Images (.png) -> Images
+        p_png = resolve_categorized_path(base, "photo.png", auto_categorize=True, create_dir=True)
+        self.assertEqual(os.path.normpath(p_png), os.path.normpath(os.path.join(base, "Images", "photo.png")))
+
+        # General (.bin, unknown) -> General
+        p_bin = resolve_categorized_path(base, "payload.bin", auto_categorize=True, create_dir=True)
+        self.assertEqual(os.path.normpath(p_bin), os.path.normpath(os.path.join(base, "General", "payload.bin")))
+
+    def test_resolve_categorized_path_prevents_nested_subfolders(self):
+        """Verify resolve_categorized_path prevents nested Video/Video or Video/Music paths."""
+        base = os.path.join(self.temp_dir, "Downloads")
+        video_dir = os.path.join(base, "Video")
+
+        # Starting inside Video subfolder and saving another video should not nest
+        p1 = resolve_categorized_path(video_dir, "clip.mp4", auto_categorize=True, create_dir=False)
+        self.assertEqual(os.path.normpath(p1), os.path.normpath(os.path.join(base, "Video", "clip.mp4")))
+
+        # Switching to audio while current base is Video subfolder should route to Music, not Video/Music
+        p2 = resolve_categorized_path(video_dir, "song.mp3", auto_categorize=True, create_dir=False)
+        self.assertEqual(os.path.normpath(p2), os.path.normpath(os.path.join(base, "Music", "song.mp3")))
+
+    def test_resolve_categorized_path_auto_categorize_false(self):
+        """Verify auto_categorize=False preserves base_dir without subfolders."""
+        base = os.path.join(self.temp_dir, "Downloads")
+        p = resolve_categorized_path(base, "song.mp3", auto_categorize=False, create_dir=False)
+        self.assertEqual(os.path.normpath(p), os.path.normpath(os.path.join(base, "song.mp3")))
+
+    def test_resolve_categorized_path_empty_inputs(self):
+        """Verify empty base_dir or empty filename fall back safely."""
+        p = resolve_categorized_path("", "", auto_categorize=False, create_dir=False)
+        expected_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        self.assertEqual(os.path.normpath(p), os.path.normpath(os.path.join(expected_dir, "download.bin")))
+
+    def test_download_history_manager_crud_and_persistence(self):
+        """Verify DownloadHistoryManager add, update, deduplication, reload from disk, and remove."""
+        hist_file = os.path.join(self.temp_dir, "history.json")
+        mgr = DownloadHistoryManager(history_file=hist_file)
+
+        # 1. Add new entries
+        file1 = os.path.join(self.temp_dir, "sample.mp4")
+        with open(file1, "wb") as f:
+            f.write(b"0" * 2048)
+        
+        entry1 = mgr.add_or_update_entry(
+            url="https://example.com/sample.mp4",
+            file_path=file1,
+            size_bytes=2048,
+            status="Completed",
+            elapsed_sec=1.5
+        )
+        self.assertEqual(entry1["filename"], "sample.mp4")
+        self.assertEqual(entry1["category"], "Video")
+        self.assertEqual(entry1["status"], "Completed")
+        self.assertEqual(entry1["size_bytes"], 2048)
+
+        file2 = os.path.join(self.temp_dir, "song.mp3")
+        with open(file2, "wb") as f:
+            f.write(b"0" * 4096)
+        
+        entry2 = mgr.add_or_update_entry(
+            url="https://example.com/song.mp3",
+            file_path=file2,
+            size_bytes=4096,
+            status="Completed",
+            elapsed_sec=2.0
+        )
+        self.assertEqual(entry2["filename"], "song.mp3")
+        self.assertEqual(entry2["category"], "Audio")
+
+        # 2. Entries list order (most recent first)
+        entries = mgr.get_entries()
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0]["id"], entry2["id"])
+        self.assertEqual(entries[1]["id"], entry1["id"])
+
+        # 3. Deduplication / update moves matching entry to index 0
+        updated_entry1 = mgr.add_or_update_entry(
+            url="https://example.com/sample.mp4",
+            file_path=file1,
+            size_bytes=2048,
+            status="Completed",
+            elapsed_sec=3.2
+        )
+        entries = mgr.get_entries()
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0]["id"], entry1["id"])
+        self.assertAlmostEqual(entries[0]["elapsed_sec"], 3.2)
+
+        # 4. Category filtering
+        video_entries = mgr.get_entries(category_filter="Video")
+        self.assertEqual(len(video_entries), 1)
+        self.assertEqual(video_entries[0]["category"], "Video")
+
+        audio_entries = mgr.get_entries(category_filter="Audio")
+        self.assertEqual(len(audio_entries), 1)
+        self.assertEqual(audio_entries[0]["category"], "Audio")
+
+        all_entries = mgr.get_entries(category_filter="All Categories")
+        self.assertEqual(len(all_entries), 2)
+
+        # 5. Persistence across reload from disk
+        mgr_reloaded = DownloadHistoryManager(history_file=hist_file)
+        reloaded_entries = mgr_reloaded.get_entries()
+        self.assertEqual(len(reloaded_entries), 2)
+        self.assertEqual(reloaded_entries[0]["filename"], "sample.mp4")
+        self.assertEqual(reloaded_entries[1]["filename"], "song.mp3")
+
+        # 6. Remove entry
+        rem_ok = mgr_reloaded.remove_entry(entry1["id"], delete_file=False)
+        self.assertTrue(rem_ok)
+        self.assertEqual(len(mgr_reloaded.get_entries()), 1)
+        self.assertTrue(os.path.exists(file1))
+
+        # Remove entry with delete_file=True
+        rem_del_ok = mgr_reloaded.remove_entry(entry2["id"], delete_file=True)
+        self.assertTrue(rem_del_ok)
+        self.assertEqual(len(mgr_reloaded.get_entries()), 0)
+        self.assertFalse(os.path.exists(file2))
+
+        # 7. Clear history
+        mgr_reloaded.add_or_update_entry("https://example.com/temp.txt", os.path.join(self.temp_dir, "temp.txt"))
+        self.assertEqual(len(mgr_reloaded.get_entries()), 1)
+        mgr_reloaded.clear_history()
+        self.assertEqual(len(mgr_reloaded.get_entries()), 0)
+
+    def test_gui_history_tab_and_widgets(self):
+        """Verify ModernFramelessGUI initializes history tab, widgets, filter, and auto-sort button."""
+        root = tk.Tk()
+        hist_file = os.path.join(self.temp_dir, "gui_history.json")
+        try:
+            gui = ModernFramelessGUI(root, start_hidden=True)
+            gui.history_manager = DownloadHistoryManager(history_file=hist_file)
+
+            # Check widgets exist
+            self.assertTrue(hasattr(gui, "notebook"))
+            self.assertTrue(hasattr(gui, "tree_history"))
+            self.assertTrue(hasattr(gui, "combo_history_filter"))
+            self.assertTrue(hasattr(gui, "btn_auto_cat"))
+            self.assertTrue(hasattr(gui, "btn_hist_open"))
+            self.assertTrue(hasattr(gui, "btn_hist_folder"))
+            self.assertTrue(hasattr(gui, "btn_hist_redownload"))
+            self.assertTrue(hasattr(gui, "btn_hist_remove"))
+            self.assertTrue(hasattr(gui, "btn_hist_clear"))
+
+            # Check combo_history_filter default
+            self.assertEqual(gui.combo_history_filter.get(), "All Categories")
+
+            # Check btn_auto_cat toggle
+            initial_state = gui.auto_categorize_folders
+            gui.toggle_auto_categorize()
+            self.assertEqual(gui.auto_categorize_folders, not initial_state)
+            if gui.auto_categorize_folders:
+                self.assertIn("ON", gui.btn_auto_cat.cget("text"))
+            else:
+                self.assertIn("OFF", gui.btn_auto_cat.cget("text"))
+            # Toggle back
+            gui.toggle_auto_categorize()
+            self.assertEqual(gui.auto_categorize_folders, initial_state)
+
+            # Simulate completion callback and verify tree_history populated
+            test_file = os.path.join(self.temp_dir, "downloaded_test.mp4")
+            with open(test_file, "wb") as f:
+                f.write(b"data" * 100)
+
+            gui.entry_url.delete(0, tk.END)
+            gui.entry_url.insert(0, "https://example.com/downloaded_test.mp4")
+            gui._engine_complete_cb(test_file, 400, 1.2, suppress_dialog=True)
+
+            gui._drain_dispatch_queue()
+            root.update()
+
+            # Verify recorded in history manager
+            hist_items = gui.history_manager.get_entries()
+            self.assertEqual(len(hist_items), 1)
+            self.assertEqual(hist_items[0]["filename"], "downloaded_test.mp4")
+            self.assertEqual(hist_items[0]["status"], "Completed")
+
+            # Verify populated into tree_history
+            tree_children = gui.tree_history.get_children()
+            self.assertEqual(len(tree_children), 1)
+            vals = gui.tree_history.item(tree_children[0], "values")
+            self.assertIn("downloaded_test.mp4", vals[1])
+
+            # Select and test redownload
+            gui.tree_history.selection_set(tree_children[0])
+            with patch.object(gui, "_on_start_download") as mock_start:
+                gui._history_redownload_selected()
+                self.assertEqual(gui.entry_url.get(), "https://example.com/downloaded_test.mp4")
+                mock_start.assert_called_once()
+        finally:
+            gui._cleanup_resources()
+            root.update_idletasks()
+            root.destroy()
+
+    def test_history_manager_corrupted_json(self):
+        """Verify DownloadHistoryManager gracefully handles corrupt or non-list JSON files."""
+        corrupt_file = os.path.join(self.temp_dir, "corrupt.json")
+        with open(corrupt_file, "w", encoding="utf-8") as f:
+            f.write("NOT_A_JSON{{{")
+        mgr = DownloadHistoryManager(history_file=corrupt_file)
+        self.assertEqual(mgr.get_entries(), [])
+
+        # Non-list JSON (e.g. dict)
+        with open(corrupt_file, "w", encoding="utf-8") as f:
+            f.write('{"hello": "world"}')
+        mgr2 = DownloadHistoryManager(history_file=corrupt_file)
+        self.assertEqual(mgr2.get_entries(), [])
+
+    def test_history_manager_max_entries_truncation(self):
+        """Verify history entries list is strictly capped at max_entries."""
+        hist_file = os.path.join(self.temp_dir, "capped.json")
+        mgr = DownloadHistoryManager(history_file=hist_file, max_entries=5)
+        for i in range(10):
+            mgr.add_or_update_entry(f"https://example.com/file_{i}.zip", f"C:/file_{i}.zip")
+        entries = mgr.get_entries()
+        self.assertEqual(len(entries), 5)
+        self.assertEqual(entries[0]["filename"], "file_9.zip")
+
+    def test_resolve_categorized_path_case_insensitivity(self):
+        """Verify extensions in uppercase (.MP4, .ZIP, .EXE) are mapped correctly."""
+        base = os.path.join(self.temp_dir, "Downloads")
+        p_up = resolve_categorized_path(base, "CLIP.MP4", auto_categorize=True, create_dir=False)
+        self.assertEqual(os.path.normpath(p_up), os.path.normpath(os.path.join(base, "Video", "CLIP.MP4")))
+
+    def test_quality_selection_modal_categorization_switch(self):
+        """Verify QualitySelectionModal updates subfolder between Video and Music if parent is categorized."""
+        root = tk.Tk()
+        try:
+            from turbo_downloader import VideoFormatOption
+            options = [
+                VideoFormatOption(format_id="137", ext="mp4", height=1080, resolution_label="1080p", filesize_approx=1000000),
+                VideoFormatOption(format_id="140", ext="m4a", height=0, is_audio_only=True, resolution_label="Audio", filesize_approx=500000),
+                VideoFormatOption(format_id="mp3", ext="mp3", height=0, is_audio_only=True, resolution_label="MP3", filesize_approx=500000),
+            ]
+            theme = {
+                "c_bg": "#121212", "c_panel": "#1e1e1e", "c_panel_light": "#2a2a2a",
+                "c_border": "#333", "c_accent": "#0ea5e9", "c_accent_dark": "#0284c7",
+                "c_success": "#10b981", "c_text_bright": "#fff", "c_text_muted": "#888",
+                "c_input_bg": "#111"
+            }
+            # 1. Auto-categorized in Video subfolder
+            cat_dest = os.path.join(self.temp_dir, "Downloads", "Video", "clip.mp4")
+            confirmed1 = []
+            modal = QualitySelectionModal(
+                root, "Test Title", 120, options, cat_dest, theme, lambda opt, dest: confirmed1.append((opt, dest))
+            )
+            modal._on_download_mp3()
+            self.assertEqual(len(confirmed1), 1)
+            self.assertIn("Music", confirmed1[0][1])
+            self.assertTrue(confirmed1[0][1].endswith(".mp3"))
+
+            # 2. Non-categorized custom directory (e.g. C:/Downloads/clip.mp4)
+            uncat_dest = os.path.join("C:", os.sep, "Downloads", "clip.mp4")
+            confirmed2 = []
+            modal2 = QualitySelectionModal(
+                root, "Test Title", 120, options, uncat_dest, theme, lambda opt, dest: confirmed2.append((opt, dest))
+            )
+            modal2._on_download_mp3()
+            self.assertEqual(len(confirmed2), 1)
+            self.assertEqual(os.path.dirname(os.path.normpath(confirmed2[0][1])), os.path.normpath("C:/Downloads"))
+            self.assertTrue(confirmed2[0][1].endswith(".mp3"))
+        finally:
+            try:
+                root.update_idletasks()
+                root.destroy()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

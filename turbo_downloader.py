@@ -190,6 +190,8 @@ def get_config_dir() -> str:
         pass
     return cfg
 
+get_app_config_dir = get_config_dir
+
 def get_settings_file_path() -> str:
     """Returns absolute path to persistent settings.json."""
     return os.path.join(get_config_dir(), "settings.json")
@@ -199,6 +201,7 @@ def load_settings() -> Dict[str, Any]:
     path = get_settings_file_path()
     defaults = {
         "minimize_to_tray": True,
+        "auto_categorize_folders": True,
     }
     if os.path.isfile(path):
         try:
@@ -3652,17 +3655,24 @@ class QualitySelectionModal(tk.Toplevel):
                 break
 
         cur_path = self.entry_dest.get().strip()
-        if cur_path:
-            base, _ = os.path.splitext(cur_path)
+        target_path = cur_path or self.dest_path
+        if target_path:
+            base, _ = os.path.splitext(target_path)
+            parent_dir = os.path.dirname(target_path)
+            parent_base = os.path.basename(os.path.normpath(parent_dir)) if parent_dir else ""
+            new_ext = ".mp3"
+            if parent_base in CATEGORY_SUBFOLDERS.values():
+                updated_dest = resolve_categorized_path(
+                    parent_dir,
+                    os.path.basename(base) + new_ext,
+                    auto_categorize=True,
+                    create_dir=False
+                )
+            else:
+                updated_dest = base + new_ext
             self.entry_dest.delete(0, tk.END)
-            self.entry_dest.insert(0, base + ".mp3")
-            if self.dest_path:
-                self.dest_path = base + ".mp3"
-        elif self.dest_path:
-            base, _ = os.path.splitext(self.dest_path)
-            self.dest_path = base + ".mp3"
-            self.entry_dest.delete(0, tk.END)
-            self.entry_dest.insert(0, self.dest_path)
+            self.entry_dest.insert(0, updated_dest)
+            self.dest_path = updated_dest
 
         self._on_download()
 
@@ -3691,8 +3701,21 @@ class QualitySelectionModal(tk.Toplevel):
             new_ext = opt.ext.lower()
             if not new_ext.startswith("."):
                 new_ext = "." + new_ext
+            parent_dir = os.path.dirname(cur_path)
+            parent_base = os.path.basename(os.path.normpath(parent_dir)) if parent_dir else ""
+            if parent_base in CATEGORY_SUBFOLDERS.values():
+                updated_dest = resolve_categorized_path(
+                    parent_dir,
+                    os.path.basename(base) + new_ext,
+                    auto_categorize=True,
+                    create_dir=False
+                )
+            else:
+                updated_dest = base + new_ext
             self.entry_dest.delete(0, tk.END)
-            self.entry_dest.insert(0, base + new_ext)
+            self.entry_dest.insert(0, updated_dest)
+            if self.dest_path:
+                self.dest_path = updated_dest
 
     def _on_browse(self):
         cur = self.entry_dest.get().strip()
@@ -4087,6 +4110,216 @@ def get_file_category_and_icon(filename_or_url: str) -> Tuple[str, str]:
         return ("Images", "🖼️")
     else:
         return ("General", "📥")
+
+
+CATEGORY_SUBFOLDERS: Dict[str, str] = {
+    "Video": "Video",
+    "Audio": "Music",
+    "Programs": "Programs",
+    "Compressed": "Compressed",
+    "Documents": "Documents",
+    "Images": "Images",
+    "General": "General",
+}
+
+
+def resolve_categorized_path(base_dir: str, filename: str, auto_categorize: bool = True, create_dir: bool = True) -> str:
+    """
+    Resolves destination path into typed category subfolders (e.g. Video, Music, Programs, Compressed, etc.)
+    when auto_categorize is enabled. Prevents recursive/nested subfolders if base_dir already points
+    to a category subfolder.
+    """
+    clean_fn = os.path.basename(str(filename or "").strip()) or "download.bin"
+    if not base_dir or not str(base_dir).strip():
+        base_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+    if not auto_categorize:
+        return os.path.join(base_dir, clean_fn)
+
+    category, _ = get_file_category_and_icon(clean_fn)
+    if clean_fn.lower().endswith(".bin"):
+        category = "General"
+    subfolder = CATEGORY_SUBFOLDERS.get(category, "General")
+
+    base_norm = os.path.normpath(str(base_dir))
+    base_name = os.path.basename(base_norm)
+    subfolders_lower = {s.lower() for s in CATEGORY_SUBFOLDERS.values()}
+    if base_name in CATEGORY_SUBFOLDERS.values() or base_name.lower() in subfolders_lower:
+        root_dir = os.path.dirname(base_norm)
+    else:
+        root_dir = base_norm
+
+    target_dir = os.path.join(root_dir, subfolder)
+    if create_dir:
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+        except Exception:
+            pass
+
+    return os.path.join(target_dir, clean_fn)
+
+
+class DownloadHistoryManager:
+    """Thread-safe persistent storage and query manager for completed, paused, and failed downloads."""
+
+    def __init__(self, history_file: Optional[str] = None, max_entries: int = 500):
+        self._lock = threading.RLock()
+        self.max_entries = int(max_entries)
+        if history_file:
+            self.history_file = history_file
+        else:
+            self.history_file = os.path.join(get_config_dir(), "download_history.json")
+        self._entries: List[Dict[str, Any]] = []
+        self._load_entries()
+
+    def _load_entries(self):
+        with self._lock:
+            if not os.path.isfile(self.history_file):
+                self._entries = []
+                return
+            try:
+                with open(self.history_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self._entries = data
+                    else:
+                        self._entries = []
+            except Exception:
+                self._entries = []
+
+    def _save_entries(self) -> bool:
+        with self._lock:
+            try:
+                dir_path = os.path.dirname(os.path.abspath(self.history_file))
+                if dir_path:
+                    os.makedirs(dir_path, exist_ok=True)
+                tmp_file = f"{self.history_file}.tmp_{os.getpid()}_{int(time.time() * 1000)}"
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    json.dump(self._entries, f, indent=2)
+                os.replace(tmp_file, self.history_file)
+                return True
+            except Exception:
+                try:
+                    if 'tmp_file' in locals() and os.path.exists(tmp_file):
+                        os.remove(tmp_file)
+                except Exception:
+                    pass
+                try:
+                    with open(self.history_file, "w", encoding="utf-8") as f:
+                        json.dump(self._entries, f, indent=2)
+                    return True
+                except Exception:
+                    return False
+
+    def add_or_update_entry(
+        self,
+        url: str,
+        file_path: str,
+        size_bytes: int = 0,
+        status: str = "Completed",
+        elapsed_sec: float = 0.0
+    ) -> Dict[str, Any]:
+        with self._lock:
+            norm_path = os.path.abspath(file_path) if file_path else ""
+            filename = os.path.basename(norm_path) if norm_path else derive_download_filename(url)
+            if not filename:
+                filename = "download.bin"
+
+            category, icon = get_file_category_and_icon(filename or url)
+            if filename.lower().endswith(".bin"):
+                category, icon = "General", "📥"
+
+            calc_size = int(size_bytes)
+            if calc_size <= 0 and norm_path and os.path.isfile(norm_path):
+                try:
+                    calc_size = os.path.getsize(norm_path)
+                except Exception:
+                    calc_size = 0
+
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            match_idx = -1
+            matched_id = None
+            for idx, entry in enumerate(self._entries):
+                e_path = entry.get("file_path", "")
+                e_url = entry.get("url", "")
+                e_fn = entry.get("filename", "")
+                if norm_path and e_path and os.path.abspath(e_path) == norm_path:
+                    match_idx = idx
+                    matched_id = entry.get("id")
+                    break
+                if url and e_url == url and filename and e_fn == filename:
+                    match_idx = idx
+                    matched_id = entry.get("id")
+                    break
+
+            if match_idx >= 0:
+                old_entry = self._entries.pop(match_idx)
+                entry_id = matched_id or old_entry.get("id") or f"dl_{int(time.time() * 1000)}_{len(self._entries)}"
+                final_size = calc_size if calc_size > 0 else old_entry.get("size_bytes", 0)
+                final_elapsed = float(elapsed_sec) if elapsed_sec > 0 else float(old_entry.get("elapsed_sec", 0.0))
+            else:
+                entry_id = f"dl_{int(time.time() * 1000)}_{len(self._entries)}"
+                final_size = calc_size
+                final_elapsed = float(elapsed_sec)
+
+            record = {
+                "id": entry_id,
+                "filename": filename,
+                "file_path": norm_path,
+                "url": url,
+                "size_bytes": final_size,
+                "category": category,
+                "icon": icon,
+                "status": status,
+                "timestamp": timestamp,
+                "elapsed_sec": final_elapsed,
+            }
+            self._entries.insert(0, record)
+            if len(self._entries) > self.max_entries:
+                self._entries = self._entries[:self.max_entries]
+
+            self._save_entries()
+            return dict(record)
+
+    def get_entries(self, category_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self._lock:
+            if not category_filter or category_filter.strip().lower() in ("all", "all categories", ""):
+                return [dict(e) for e in self._entries]
+            cat_clean = category_filter.strip().lower()
+            return [dict(e) for e in self._entries if str(e.get("category", "")).strip().lower() == cat_clean]
+
+    def get_entry(self, entry_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            for e in self._entries:
+                if e.get("id") == entry_id:
+                    return dict(e)
+            return None
+
+    def remove_entry(self, entry_id: str, delete_file: bool = False) -> bool:
+        with self._lock:
+            target = None
+            for e in self._entries:
+                if e.get("id") == entry_id:
+                    target = e
+                    break
+            if not target:
+                return False
+            self._entries.remove(target)
+            if delete_file:
+                fp = target.get("file_path", "")
+                if fp and os.path.isfile(fp):
+                    try:
+                        os.remove(fp)
+                    except Exception:
+                        pass
+            self._save_entries()
+            return True
+
+    def clear_history(self) -> bool:
+        with self._lock:
+            self._entries.clear()
+            self._save_entries()
+            return True
 
 
 def open_downloaded_file(file_path: str):
@@ -6313,6 +6546,8 @@ class ModernFramelessGUI:
         self._was_started_hidden: bool = bool(start_hidden)
         self._startup_enabled: bool = is_startup_enabled()
         self.minimize_to_tray: bool = bool(get_setting("minimize_to_tray", True))
+        self.auto_categorize_folders: bool = bool(get_setting("auto_categorize_folders", True))
+        self.history_manager = DownloadHistoryManager()
         self.cookies_browser: str = str(get_setting("cookies_browser", "auto") or "auto")
         self.cookies_file: str = str(get_setting("cookies_file", "") or "")
         self.engine: Optional[Union[TurboDownloadEngine, StreamDownloadCoordinator]] = None
@@ -7353,6 +7588,7 @@ class ModernFramelessGUI:
         self.entry_url = tk.Entry(url_row, font=("Segoe UI", 9), bg=self.c_input_bg, fg=self.c_text_bright, insertbackground=self.c_accent, relief="flat")
         self.entry_url.insert(0, default_url)
         self.entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), ipady=3)
+        self.entry_url.bind("<KeyRelease>", lambda e: self._on_url_change())
 
         btn_paste = tk.Button(url_row, text="📋 Paste", font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._paste_url)
         btn_paste.pack(side=tk.RIGHT)
@@ -7367,7 +7603,12 @@ class ModernFramelessGUI:
         lbl_dest = tk.Label(dest_row, text="Save Location:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
         lbl_dest.pack(side=tk.LEFT)
 
-        default_dest = os.path.join(os.path.expanduser("~"), "Downloads", "cloudflare_50mb.bin")
+        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        default_fn = "cloudflare_50mb.bin"
+        if getattr(self, "auto_categorize_folders", True):
+            default_dest = resolve_categorized_path(downloads_dir, default_fn, auto_categorize=True)
+        else:
+            default_dest = os.path.join(downloads_dir, default_fn)
         self.entry_dest = tk.Entry(dest_row, font=("Segoe UI", 9), bg=self.c_input_bg, fg=self.c_text_bright, insertbackground=self.c_accent, relief="flat")
         self.entry_dest.insert(0, default_dest)
         self.entry_dest.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), ipady=3)
@@ -7381,6 +7622,7 @@ class ModernFramelessGUI:
             if clipboard:
                 self.entry_url.delete(0, tk.END)
                 self.entry_url.insert(0, clipboard.strip())
+                self._on_url_change()
         except Exception:
             pass
 
@@ -7393,6 +7635,43 @@ class ModernFramelessGUI:
         if path:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, path)
+
+    def _is_downloads_or_category_subfolder(self, dest_dir: str, downloads_dir: str) -> bool:
+        """Checks if dest_dir is either the base downloads_dir or one of its category subfolders."""
+        if not dest_dir or not downloads_dir:
+            return False
+        norm_dest = os.path.normcase(os.path.abspath(dest_dir))
+        norm_dl = os.path.normcase(os.path.abspath(downloads_dir))
+        if norm_dest == norm_dl:
+            return True
+        if os.path.dirname(norm_dest) == norm_dl:
+            base = os.path.basename(norm_dest)
+            subfolders_lower = {s.lower() for s in CATEGORY_SUBFOLDERS.values()}
+            if base in subfolders_lower:
+                return True
+        return False
+
+    def _on_url_change(self, *args):
+        """Updates default destination path based on the current URL if not actively transferring."""
+        if hasattr(self, "engine") and self.engine and getattr(self.engine, "is_running", False):
+            return
+        if not hasattr(self, "entry_url") or not hasattr(self, "entry_dest"):
+            return
+        url = self.entry_url.get().strip()
+        if not url:
+            return
+        fn = derive_download_filename(url)
+        cur_dest = self.entry_dest.get().strip()
+        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        dest_dir = os.path.dirname(cur_dest) if cur_dest else downloads_dir
+        if not os.path.isdir(dest_dir):
+            dest_dir = downloads_dir
+        if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+            new_dest = resolve_categorized_path(downloads_dir, fn, auto_categorize=True)
+        else:
+            new_dest = os.path.join(dest_dir, fn)
+        self.entry_dest.delete(0, tk.END)
+        self.entry_dest.insert(0, new_dest)
 
     def _build_limiter_and_actions_card(self, parent):
         """Configuration options: Speed Limiter (Presets + Custom + Dynamic Slider) & Action Buttons."""
@@ -7604,6 +7883,55 @@ class ModernFramelessGUI:
         )
         self.btn_cookies.pack(side=tk.RIGHT, padx=(0, 8))
         self._update_cookies_btn()
+
+        self.btn_auto_cat = tk.Button(
+            row2,
+            text="📁 Auto-Sort: ON" if self.auto_categorize_folders else "📁 Auto-Sort: OFF",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            bg=self.c_panel_light if self.auto_categorize_folders else self.c_panel,
+            fg=self.c_success if self.auto_categorize_folders else self.c_text_muted,
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            command=self.toggle_auto_categorize
+        )
+        self.btn_auto_cat.pack(side=tk.RIGHT, padx=(0, 8))
+        self._update_auto_cat_btn()
+
+    def toggle_auto_categorize(self):
+        """Toggles automatic categorization into subfolders (Videos, Music, etc.)."""
+        self.auto_categorize_folders = not self.auto_categorize_folders
+        set_setting("auto_categorize_folders", self.auto_categorize_folders)
+        self._update_auto_cat_btn()
+        if not (self.engine and getattr(self.engine, "is_running", False)):
+            cur_dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
+            if cur_dest:
+                fn = os.path.basename(cur_dest)
+                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                dest_dir = os.path.dirname(cur_dest)
+                if self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+                    new_dest = resolve_categorized_path(downloads_dir, fn, auto_categorize=self.auto_categorize_folders)
+                    self.entry_dest.delete(0, tk.END)
+                    self.entry_dest.insert(0, new_dest)
+
+    def _update_auto_cat_btn(self):
+        if not hasattr(self, "btn_auto_cat") or not self.btn_auto_cat.winfo_exists():
+            return
+        if self.auto_categorize_folders:
+            self.btn_auto_cat.configure(
+                text="📁 Auto-Sort: ON",
+                fg=self.c_success,
+                bg=self.c_panel_light
+            )
+        else:
+            self.btn_auto_cat.configure(
+                text="📁 Auto-Sort: OFF",
+                fg=self.c_text_muted,
+                bg=self.c_panel
+            )
 
     def _on_slider_moved(self, val_str):
         """Dynamic slider movement throttles engine in real-time."""
@@ -7857,6 +8185,305 @@ class ModernFramelessGUI:
         self.txt_log.configure(yscrollcommand=scroll_log.set)
         self.txt_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll_log.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.notebook = notebook
+
+        # Tab 3: Download History Manager
+        tab_history = tk.Frame(notebook, bg=self.c_panel)
+        notebook.add(tab_history, text="  📂 Download History  ")
+
+        # Top Toolbar
+        hist_toolbar = tk.Frame(tab_history, bg=self.c_panel, padx=8, pady=6)
+        hist_toolbar.pack(side=tk.TOP, fill=tk.X)
+
+        lbl_filter = tk.Label(hist_toolbar, text="Filter:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright)
+        lbl_filter.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.combo_history_filter = ttk.Combobox(
+            hist_toolbar,
+            values=["All Categories", "Video", "Audio", "Programs", "Compressed", "Documents", "Images", "General"],
+            state="readonly",
+            width=15
+        )
+        self.combo_history_filter.set("All Categories")
+        self.combo_history_filter.pack(side=tk.LEFT, padx=(0, 10))
+        self.combo_history_filter.bind("<<ComboboxSelected>>", lambda e: self._refresh_history_table())
+
+        btn_font = ("Segoe UI", 8)
+        self.btn_hist_open = tk.Button(
+            hist_toolbar,
+            text="📂 Open File",
+            command=self._history_open_selected_file,
+            font=btn_font,
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=8,
+            pady=2
+        )
+        self.btn_hist_open.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_hist_folder = tk.Button(
+            hist_toolbar,
+            text="📁 Open Folder",
+            command=self._history_open_selected_folder,
+            font=btn_font,
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=8,
+            pady=2
+        )
+        self.btn_hist_folder.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_hist_redownload = tk.Button(
+            hist_toolbar,
+            text="🔄 Resume / Retry",
+            command=self._history_redownload_selected,
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=8,
+            pady=2
+        )
+        self.btn_hist_redownload.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_hist_remove = tk.Button(
+            hist_toolbar,
+            text="🗑️ Remove",
+            command=self._history_remove_selected,
+            font=btn_font,
+            bg=self.c_panel_light,
+            fg=self.c_text_muted,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=8,
+            pady=2
+        )
+        self.btn_hist_remove.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_hist_clear = tk.Button(
+            hist_toolbar,
+            text="🧹 Clear All",
+            command=self._history_clear_all,
+            font=btn_font,
+            bg=self.c_panel_light,
+            fg="#ef4444",
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=8,
+            pady=2
+        )
+        self.btn_hist_clear.pack(side=tk.LEFT, padx=(0, 6))
+
+        # History Treeview Frame
+        tree_hist_frame = tk.Frame(tab_history, bg=self.c_panel)
+        tree_hist_frame.pack(fill=tk.BOTH, expand=True)
+
+        cols_hist = ("category", "filename", "size", "status", "date", "path")
+        self.tree_history = ttk.Treeview(tree_hist_frame, columns=cols_hist, show="headings", style="Custom.Treeview")
+        self.tree_history.heading("category", text="Category")
+        self.tree_history.heading("filename", text="File Name")
+        self.tree_history.heading("size", text="Size")
+        self.tree_history.heading("status", text="Status")
+        self.tree_history.heading("date", text="Date Added")
+        self.tree_history.heading("path", text="Saved Location")
+
+        self.tree_history.column("category", width=max(80, int(95 * scale)), minwidth=70, anchor="center")
+        self.tree_history.column("filename", width=max(180, int(220 * scale)), minwidth=140, anchor="w")
+        self.tree_history.column("size", width=max(80, int(90 * scale)), minwidth=70, anchor="e")
+        self.tree_history.column("status", width=max(80, int(90 * scale)), minwidth=70, anchor="center")
+        self.tree_history.column("date", width=max(120, int(135 * scale)), minwidth=100, anchor="center")
+        self.tree_history.column("path", width=max(220, int(260 * scale)), minwidth=180, anchor="w")
+
+        scroll_hist = ttk.Scrollbar(tree_hist_frame, orient="vertical", command=self.tree_history.yview)
+        self.tree_history.configure(yscrollcommand=scroll_hist.set)
+        self.tree_history.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll_hist.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._build_history_context_menu()
+        self.tree_history.bind("<Button-3>", self._show_history_context_menu)
+        self.tree_history.bind("<Button-2>", self._show_history_context_menu)
+        self.tree_history.bind("<Double-Button-1>", lambda e: self._history_open_selected_file())
+
+        self._refresh_history_table()
+
+    def _build_history_context_menu(self):
+        """Constructs right-click context menu for download history."""
+        self.history_context_menu = tk.Menu(
+            self.tree_history,
+            tearoff=0,
+            bg=self.c_panel,
+            fg=self.c_text_bright,
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            relief="flat",
+            bd=1
+        )
+        self.history_context_menu.add_command(
+            label="📂 Open File",
+            command=self._history_open_selected_file
+        )
+        self.history_context_menu.add_command(
+            label="📁 Open Containing Folder",
+            command=self._history_open_selected_folder
+        )
+        self.history_context_menu.add_separator()
+        self.history_context_menu.add_command(
+            label="📋 Copy URL",
+            command=self._history_copy_selected_url
+        )
+        self.history_context_menu.add_command(
+            label="🔄 Resume / Retry",
+            command=self._history_redownload_selected
+        )
+        self.history_context_menu.add_separator()
+        self.history_context_menu.add_command(
+            label="🗑️ Remove from History",
+            command=self._history_remove_selected
+        )
+
+    def _show_history_context_menu(self, event):
+        """Displays right-click context menu on history treeview."""
+        if not hasattr(self, "history_context_menu"):
+            self._build_history_context_menu()
+        try:
+            iid = self.tree_history.identify_row(event.y)
+            if iid:
+                self.tree_history.selection_set(iid)
+                self.tree_history.focus(iid)
+        except Exception:
+            pass
+        try:
+            self.history_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                self.history_context_menu.grab_release()
+            except Exception:
+                pass
+
+    def _refresh_history_table(self):
+        """Refreshes tree_history items according to selected filter."""
+        if threading.current_thread() != threading.main_thread():
+            if hasattr(self, "root") and self.root and self.root.winfo_exists():
+                try:
+                    self.root.after(0, self._refresh_history_table)
+                except Exception:
+                    pass
+            return
+
+        if not hasattr(self, "tree_history") or not hasattr(self, "history_manager"):
+            return
+        cat_filter = "All Categories"
+        if hasattr(self, "combo_history_filter"):
+            cat_filter = self.combo_history_filter.get() or "All Categories"
+        entries = self.history_manager.get_entries(category_filter=cat_filter)
+
+        cur_sel = self.tree_history.selection()
+        selected_id = cur_sel[0] if cur_sel else None
+
+        for item in self.tree_history.get_children():
+            self.tree_history.delete(item)
+
+        for e in entries:
+            eid = e.get("id", "")
+            cat_display = f"{e.get('icon', '')} {e.get('category', 'General')}".strip()
+            fn = e.get("filename", "")
+            size_bytes = e.get("size_bytes", 0)
+            size_str = format_filesize(size_bytes) if size_bytes > 0 else "—"
+            status = e.get("status", "Completed")
+            date_str = e.get("timestamp", "")
+            fp = e.get("file_path", "")
+            self.tree_history.insert("", tk.END, iid=eid, values=(cat_display, fn, size_str, status, date_str, fp))
+
+        if selected_id and self.tree_history.exists(selected_id):
+            self.tree_history.selection_set(selected_id)
+            self.tree_history.focus(selected_id)
+
+    def _history_open_selected_file(self):
+        sel = self.tree_history.selection()
+        if not sel:
+            return
+        entry = self.history_manager.get_entry(sel[0])
+        if entry and entry.get("file_path"):
+            fp = entry["file_path"]
+            if os.path.exists(fp):
+                open_downloaded_file(fp)
+            else:
+                self.log(f"[HISTORY] File not found on disk: {fp}")
+
+    def _history_open_selected_folder(self):
+        sel = self.tree_history.selection()
+        if not sel:
+            return
+        entry = self.history_manager.get_entry(sel[0])
+        if entry and entry.get("file_path"):
+            open_containing_folder(entry["file_path"])
+
+    def _history_copy_selected_url(self):
+        sel = self.tree_history.selection()
+        if not sel:
+            return
+        entry = self.history_manager.get_entry(sel[0])
+        if entry and entry.get("url"):
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(entry["url"])
+                self.log(f"[HISTORY] Copied URL to clipboard: {entry['url']}")
+            except Exception:
+                pass
+
+    def _history_redownload_selected(self):
+        """Loads selected history entry into URL/Destination and triggers download."""
+        sel = self.tree_history.selection()
+        if not sel:
+            return
+        entry_id = sel[0]
+        entry = self.history_manager.get_entry(entry_id)
+        if not entry:
+            return
+        url = entry.get("url", "").strip()
+        file_path = entry.get("file_path", "").strip()
+        if not url:
+            return
+        if hasattr(self, "entry_url"):
+            self.entry_url.delete(0, tk.END)
+            self.entry_url.insert(0, url)
+        if file_path and hasattr(self, "entry_dest"):
+            self.entry_dest.delete(0, tk.END)
+            self.entry_dest.insert(0, file_path)
+        if hasattr(self, "notebook"):
+            try:
+                self.notebook.select(0)
+            except Exception:
+                pass
+        self._on_start_download()
+
+    def _history_remove_selected(self, delete_file: bool = False):
+        sel = self.tree_history.selection()
+        if not sel:
+            return
+        entry_id = sel[0]
+        self.history_manager.remove_entry(entry_id, delete_file=delete_file)
+        self._refresh_history_table()
+
+    def _history_clear_all(self):
+        self.history_manager.clear_history()
+        self._refresh_history_table()
 
     def log(self, message: str):
         """Appends message to activity log console."""
@@ -8113,7 +8740,12 @@ class ModernFramelessGUI:
                     pass
 
                 initial_ext = options[0].ext or "mp4"
-                initial_dest = os.path.join(dest_dir, f"{clean_title}.{initial_ext}")
+                initial_fn = f"{clean_title}.{initial_ext}"
+                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+                    initial_dest = resolve_categorized_path(downloads_dir, initial_fn, auto_categorize=True)
+                else:
+                    initial_dest = os.path.join(dest_dir, initial_fn)
 
                 def _show_modal():
                     try:
@@ -8399,7 +9031,10 @@ class ModernFramelessGUI:
             dest_dir = downloads_dir
 
         url_fn = derive_download_filename(url)
-        new_dest = os.path.join(dest_dir, url_fn)
+        if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+            new_dest = resolve_categorized_path(downloads_dir, url_fn, auto_categorize=True)
+        else:
+            new_dest = os.path.join(dest_dir, url_fn)
         try:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, new_dest)
@@ -8780,11 +9415,11 @@ class ModernFramelessGUI:
         if not os.path.isdir(dest_dir):
             dest_dir = downloads_dir
 
-        if filename:
-            new_dest = os.path.join(dest_dir, sanitize_filename(urllib.parse.unquote(filename)))
+        target_fn = sanitize_filename(urllib.parse.unquote(filename)) if filename else derive_download_filename(url)
+        if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+            new_dest = resolve_categorized_path(downloads_dir, target_fn, auto_categorize=True)
         else:
-            url_fn = derive_download_filename(url)
-            new_dest = os.path.join(dest_dir, url_fn)
+            new_dest = os.path.join(dest_dir, target_fn)
 
         self.entry_dest.delete(0, tk.END)
         self.entry_dest.insert(0, new_dest)
@@ -9316,6 +9951,20 @@ class ModernFramelessGUI:
             self.btn_pause.configure(text="▶ Resume", bg=self.c_warning)
             if hasattr(self, "btn_refresh_link"):
                 self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
+            try:
+                dl_url = (self.engine.url if self.engine and getattr(self.engine, "url", None) else self.entry_url.get()).strip()
+                dl_dest = (self.engine.dest_path if self.engine and getattr(self.engine, "dest_path", None) else self.entry_dest.get()).strip()
+                if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
+                    self.history_manager.add_or_update_entry(
+                        url=dl_url,
+                        file_path=dl_dest,
+                        size_bytes=0,
+                        status="Paused",
+                        elapsed_sec=0.0
+                    )
+                    self._refresh_history_table()
+            except Exception:
+                pass
 
     def _on_cancel_download(self):
         if hasattr(self, "_yt_cancel_event"):
@@ -9490,6 +10139,19 @@ class ModernFramelessGUI:
             if hasattr(self, "btn_refresh_link"):
                 self.btn_refresh_link.configure(state="disabled", bg=self.c_panel_light, fg=self.c_text_muted)
             self.log(f"[COMPLETE] Download complete: {os.path.basename(path)} ({total_bytes:,} bytes in {elapsed:.1f}s)")
+            try:
+                dl_url = (self.engine.url if self.engine and getattr(self.engine, "url", None) else self.entry_url.get()).strip()
+                if hasattr(self, "history_manager") and self.history_manager:
+                    self.history_manager.add_or_update_entry(
+                        url=dl_url,
+                        file_path=path,
+                        size_bytes=total_bytes,
+                        status="Completed",
+                        elapsed_sec=elapsed
+                    )
+                    self._refresh_history_table()
+            except Exception:
+                pass
             if suppress_dialog:
                 return
             msg = (
@@ -9567,6 +10229,21 @@ class ModernFramelessGUI:
                     self.log(f"[ERROR] Download Error: {error_msg}")
                 except Exception:
                     pass
+
+            try:
+                dl_url = (self.engine.url if self.engine and getattr(self.engine, "url", None) else self.entry_url.get()).strip()
+                dl_dest = (self.engine.dest_path if self.engine and getattr(self.engine, "dest_path", None) else self.entry_dest.get()).strip()
+                if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
+                    self.history_manager.add_or_update_entry(
+                        url=dl_url,
+                        file_path=dl_dest,
+                        size_bytes=0,
+                        status="Failed",
+                        elapsed_sec=0.0
+                    )
+                    self._refresh_history_table()
+            except Exception:
+                pass
 
             if is_expired:
                 msg = (
