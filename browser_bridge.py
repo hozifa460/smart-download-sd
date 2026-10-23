@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 
 DEFAULT_BRIDGE_HOST = "127.0.0.1"
 DEFAULT_BRIDGE_PORT = 9242
+APP_VERSION = "2.0.0"
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -66,7 +67,7 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
             payload = {
                 "status": "ok",
                 "app": "Smart Download (SD)",
-                "version": "1.0.0",
+                "version": APP_VERSION,
                 "active": True
             }
             body = json.dumps(payload).encode("utf-8")

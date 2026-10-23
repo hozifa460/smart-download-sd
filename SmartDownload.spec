@@ -15,6 +15,7 @@ a = Analysis(
         ('app_icon.png', '.'),
     ] + yt_datas,
     hiddenimports=[
+        'updater',
         'youtube_resolver',
         'browser_bridge',
         'native_messaging_host',

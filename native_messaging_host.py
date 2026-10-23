@@ -21,6 +21,7 @@ import urllib.error
 from typing import Optional, Dict, Any
 
 DEFAULT_BRIDGE_PORT = 9242
+APP_VERSION = "2.0.0"
 MAX_PAYLOAD_SIZE = 1024 * 1024  # 1 MB maximum message size for Chromium native messaging
 
 

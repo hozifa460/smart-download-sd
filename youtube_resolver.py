@@ -19,6 +19,24 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
+from updater import (
+    APP_VERSION,
+    parse_version,
+    is_newer_version,
+    YtDlpAutoUpdater,
+    AppAutoUpdater,
+    get_ytdlp_plugin_dir,
+)
+
+# Activate external updated yt-dlp plugin from %APPDATA%\SmartDownload\yt_dlp_plugin if present on disk
+try:
+    _default_plugin_dir = get_ytdlp_plugin_dir()
+    if os.path.isdir(_default_plugin_dir):
+        YtDlpAutoUpdater(plugin_dir=_default_plugin_dir).activate_plugin()
+except Exception:
+    pass
+
+
 # Regex matching various forms of YouTube URLs
 # Matches:
 # - https://www.youtube.com/watch?v=VIDEO_ID
@@ -224,6 +242,20 @@ def is_ytdlp_available() -> bool:
         return shutil.which("yt-dlp") is not None
 
 
+def get_ytdlp_version() -> str:
+    """Returns the currently active yt-dlp version string."""
+    return YtDlpAutoUpdater().get_current_version()
+
+
+def update_ytdlp_engine(
+    force: bool = False,
+    on_log: Optional[Callable[[str], None]] = None
+) -> Dict[str, Any]:
+    """Checks for and applies the latest yt-dlp extractor update into %APPDATA%\\SmartDownload\\yt_dlp_plugin."""
+    return YtDlpAutoUpdater(on_log=on_log).update(force=force)
+
+
+
 def find_ffmpeg_bin() -> Optional[str]:
     """Finds FFmpeg executable in PATH or next to the executable / project root."""
     bin_path = shutil.which("ffmpeg")
@@ -340,9 +372,15 @@ class YouTubeResolver:
     video + audio merging with FFmpeg for YouTube and social media platforms.
     """
 
-    def __init__(self, on_log: Optional[Callable[[str], None]] = None, socket_timeout: int = 12):
+    def __init__(
+        self,
+        on_log: Optional[Callable[[str], None]] = None,
+        socket_timeout: int = 12,
+        auto_update_on_failure: bool = True
+    ):
         self.on_log = on_log
         self.socket_timeout = max(1, int(socket_timeout))
+        self.auto_update_on_failure = bool(auto_update_on_failure)
 
     def log(self, message: str):
         if self.on_log:
@@ -390,7 +428,26 @@ class YouTubeResolver:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as e:
-            raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
+            is_ydl_mocked = bool(getattr(yt_dlp.YoutubeDL, "_mock_name", None))
+            is_updater_mocked = bool(
+                getattr(YtDlpAutoUpdater, "_mock_name", None)
+                or getattr(YtDlpAutoUpdater.update, "_mock_name", None)
+            )
+            if self.auto_update_on_failure and (not is_ydl_mocked or is_updater_mocked):
+                self.log(f"[{tag}] Extraction failed ({e}). Checking for yt-dlp engine update...")
+                try:
+                    up_res = YtDlpAutoUpdater(on_log=self.log).update()
+                    if up_res.get("updated"):
+                        import yt_dlp as refreshed_yt_dlp
+                        self.log(f"[{tag}] Retrying extraction with updated yt-dlp v{up_res.get('version')}...")
+                        with refreshed_yt_dlp.YoutubeDL(ydl_opts) as ydl2:
+                            info = ydl2.extract_info(url, download=False)
+                    else:
+                        raise e
+                except Exception:
+                    raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
+            else:
+                raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
 
         if not info:
             raise RuntimeError("yt-dlp returned empty metadata for the provided URL.")

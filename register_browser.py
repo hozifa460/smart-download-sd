@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Any
 
 HOST_NAME = "com.smartdownload.host"
 HOST_DESCRIPTION = "Smart Download (SD) Native Messaging Host"
+APP_VERSION = "2.0.0"
 
 LEGACY_HOST_NAME = "com.turbodownloader.host"
 LEGACY_CHROME_REG_KEY = rf"Software\Google\Chrome\NativeMessagingHosts\{LEGACY_HOST_NAME}"
@@ -371,12 +372,8 @@ def register_native_host(
     bat_path = os.path.join(target_dir, "sd_host.bat")
     json_path = os.path.join(target_dir, f"{HOST_NAME}.json")
 
-    # 1. Generate files (generate both sd_host.bat and turbo_host.bat for backward compatibility)
+    # 1. Generate launcher batch and host manifest
     generate_launcher_batch(bat_path)
-    try:
-        generate_launcher_batch(os.path.join(target_dir, "turbo_host.bat"))
-    except Exception:
-        pass
     allowed_origins = get_default_extension_origins(extension_id=extension_id, target_dir=target_dir)
     manifest_abs_path = generate_host_manifest(bat_path, json_path, allowed_origins)
 

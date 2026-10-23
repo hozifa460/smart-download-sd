@@ -10,7 +10,7 @@ REPO_NAME = "smart-download-sd"
 TAG = "v2.0.0"
 RELEASE_NAME = "Smart Download (SD) v2.0.0 — Multi-Platform Social Media Downloader"
 
-RELEASE_BODY = """# Smart Download (SD) v2.0.0 — Multi-Platform Social Media Downloader
+RELEASE_BODY = r"""# Smart Download (SD) v2.0.0 — Multi-Platform Social Media Downloader
 ## الإصدار الجديد v2.0.0 — مُنزّل وسائط وفيديوهات متكامل وعالي السرعة
 
 ---
@@ -24,6 +24,8 @@ Smart Download (SD) v2.0.0 introduces a major rebrand and architectural upgrade 
 - **High-Performance Multi-Segment Engine**: Lightning-fast parallel chunk downloads with dynamic midpoint splitting, rate limiting, and auto-reassembly.
 - **Chrome & Edge Browser Integration**: Seamless native messaging extension integration with automatic one-click media capture.
 - **Instant Zero-Elevation Background Startup**: Multi-tiered instant startup on Windows boot (Run key, Scheduled Task, and Startup shortcut) with zero elevation, starting silently in the tray.
+- **Automatic `yt-dlp` Dynamic Self-Update Engine**: Automatically updates and loads the latest `yt-dlp` extractors in `%APPDATA%\SmartDownload\yt_dlp_plugin` without needing to rebuild or reinstall the `.exe`.
+- **Built-in Application Auto-Updater**: Checks GitHub Releases for new versions in the background and provides a one-click **[⬇ Update Now]** upgrade experience.
 - **Dual Distribution Options**:
   - `SmartDownload-Setup.exe`: Full Windows installer with zero-elevation installation, Desktop & Start Menu shortcuts, auto-startup, and clean uninstaller.
   - `SmartDownload.exe`: Ultra-portable standalone executable requiring no installation.
@@ -34,6 +36,7 @@ Smart Download (SD) v2.0.0 introduces a major rebrand and architectural upgrade 
 يمثل الإصدار **Smart Download (SD) v2.0.0** نقلة نوعية وتطويراً شاملاً للهوية والأداء:
 
 - **تحميل الفيديوهات من كافة منصات التواصل الاجتماعي**: دعم التحميل بأعلى جودة وصيغ متعددة من **تيك توك (TikTok)، إنستغرام (Instagram)، فيسبوك (Facebook)، إكس / تويتر (X/Twitter)، ريديت (Reddit)، ويوتيوب (YouTube)**.
+- **تحديث ذاتي تلقائي لمحرك `yt-dlp` والبرنامج**: تحديث استخراج الفيديوهات تلقائياً في الخلفية مع نظام فحص وتحديث البرنامج بضغطة زر واحدة.
 - **أيقونة شفافة فائقة الدقة (High-DPI)**: تصميم احترافي حديث بخلفية شفافة يدعم كافة شاشات العرض بدقة كاملة من 16×16 وحتى 256×256 بكسل.
 - **مُثبّت فائق الرشاقة وصغير الحجم**: تقليل حجم ملف التثبيت بنسبة تفوق 43% (من ~105 ميجابايت إلى ~56 ميجابايت) عبر إزالة التكرار وربط التوافق ديناميكياً.
 - **تشغيل تلقائي فوري في الخلفية بدون صلاحيات مسؤول**: بدء تلقائي صامت في شريط المهام عند إقلاع ويندوز عبر منظومة ثلاثية موثوقة (Run Key و Scheduled Task واختصار Startup) دون الحاجة لأي صلاحيات إدارية (UAC-free).

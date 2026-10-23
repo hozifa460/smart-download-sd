@@ -18,10 +18,33 @@ DIST_DIR = os.path.join(BASE_DIR, "dist")
 PAYLOAD_DIR = os.path.join(BASE_DIR, "installer_payload")
 
 
+STALE_DIST_ARTIFACTS = (
+    "TurboDownloader.exe",
+    "TurboDownloader-Setup.exe",
+    "com.turbodownloader.host.json",
+    "turbo_host.bat",
+)
+
+
+def clean_stale_dist_artifacts():
+    """Removes legacy TurboDownloader artifacts from dist/ so only clean SmartDownload files remain."""
+    if not os.path.isdir(DIST_DIR):
+        return
+    for name in STALE_DIST_ARTIFACTS:
+        p = os.path.join(DIST_DIR, name)
+        if os.path.exists(p):
+            try:
+                os.chmod(p, 0o777)
+                os.remove(p)
+            except Exception:
+                pass
+
+
 def build_app(rebuild: bool = False):
     """Compiles dist/SmartDownload.exe using PyInstaller."""
     exe_path = os.path.join(DIST_DIR, "SmartDownload.exe")
     if not rebuild and os.path.isfile(exe_path):
+        clean_stale_dist_artifacts()
         print(f"[+] SmartDownload.exe already exists at {exe_path} ({os.path.getsize(exe_path):,} bytes)")
         return exe_path
 
@@ -34,13 +57,7 @@ def build_app(rebuild: bool = False):
     if not os.path.isfile(exe_path):
         raise FileNotFoundError(f"Expected binary not found after build: {exe_path}")
 
-    # Also keep a TurboDownloader.exe copy/symlink in dist for legacy launcher compatibility
-    legacy_exe = os.path.join(DIST_DIR, "TurboDownloader.exe")
-    try:
-        shutil.copy2(exe_path, legacy_exe)
-    except Exception:
-        pass
-
+    clean_stale_dist_artifacts()
     print(f"[+] SmartDownload.exe successfully built: {os.path.getsize(exe_path):,} bytes")
     return exe_path
 
@@ -80,11 +97,9 @@ def prepare_payload():
     # 4. Host launcher batch and registration script
     import register_browser as rb
     rb.generate_launcher_batch(os.path.join(PAYLOAD_DIR, "sd_host.bat"))
-    rb.generate_launcher_batch(os.path.join(PAYLOAD_DIR, "turbo_host.bat"))
-    for h_json in ("com.smartdownload.host.json", "com.turbodownloader.host.json"):
-        src_json = os.path.join(BASE_DIR, h_json)
-        if os.path.isfile(src_json):
-            shutil.copy2(src_json, os.path.join(PAYLOAD_DIR, h_json))
+    src_json = os.path.join(BASE_DIR, "com.smartdownload.host.json")
+    if os.path.isfile(src_json):
+        shutil.copy2(src_json, os.path.join(PAYLOAD_DIR, "com.smartdownload.host.json"))
     reg_script = os.path.join(BASE_DIR, "register_browser.py")
     if os.path.isfile(reg_script):
         shutil.copy2(reg_script, os.path.join(PAYLOAD_DIR, "register_browser.py"))
@@ -104,13 +119,7 @@ def build_installer():
     if not os.path.isfile(setup_path):
         raise FileNotFoundError(f"Installer binary not found: {setup_path}")
 
-    # Also keep a TurboDownloader-Setup.exe copy in dist for legacy script compatibility
-    legacy_setup = os.path.join(DIST_DIR, "TurboDownloader-Setup.exe")
-    try:
-        shutil.copy2(setup_path, legacy_setup)
-    except Exception:
-        pass
-
+    clean_stale_dist_artifacts()
     print(f"[+] SmartDownload-Setup.exe successfully built: {os.path.getsize(setup_path):,} bytes")
     return setup_path
 
