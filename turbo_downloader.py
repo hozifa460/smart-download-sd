@@ -48,6 +48,7 @@ import shutil
 import tempfile
 import hashlib
 import threading
+import weakref
 import queue
 import ssl
 import urllib.request
@@ -3136,6 +3137,185 @@ class FetchingLinkToast(tk.Toplevel):
         super().destroy()
 
 
+def _detach_photo_tk(photo: Any) -> None:
+    """Detaches the underlying Tcl interpreter reference from a PhotoImage/Variable/Style so GC on any thread is safe."""
+    if photo is None:
+        return
+    try:
+        if hasattr(photo, "name"):
+            photo.name = None
+        if hasattr(photo, "tk"):
+            photo.tk = None
+        if hasattr(photo, "_tk"):
+            photo._tk = None
+        if hasattr(photo, "master"):
+            photo.master = None
+        inner = getattr(photo, "_PhotoImage__photo", None)
+        if inner is not None:
+            if hasattr(inner, "name"):
+                inner.name = None
+            if hasattr(inner, "tk"):
+                inner.tk = None
+            if hasattr(inner, "_tk"):
+                inner._tk = None
+    except Exception:
+        pass
+
+
+def _detach_widget_tk_refs(obj: Any) -> None:
+    """Breaks parent-child widget cycles and detaches Tcl interpreter references after widget destruction."""
+    if obj is None:
+        return
+    try:
+        d = getattr(obj, "__dict__", None)
+        if d:
+            for v in list(d.values()):
+                if v is None:
+                    continue
+                if isinstance(v, (tk.Variable, tk.Image, ttk.Style)) or hasattr(v, "_PhotoImage__photo"):
+                    _detach_photo_tk(v)
+        if hasattr(obj, "master"):
+            obj.master = None
+        if hasattr(obj, "tk"):
+            obj.tk = None
+        if hasattr(obj, "_tk"):
+            obj._tk = None
+    except Exception:
+        pass
+
+
+_BG_TK_CALLBACK_QUEUE: "queue.Queue[Tuple[Any, Callable, Tuple]]" = queue.Queue()
+
+
+def _drain_bg_tk_callbacks() -> None:
+    """Drains any widget.after() callbacks queued from background threads on the Tkinter main thread."""
+    if threading.current_thread() is not threading.main_thread():
+        return
+    while not _BG_TK_CALLBACK_QUEUE.empty():
+        try:
+            w_ref, func, args = _BG_TK_CALLBACK_QUEUE.get_nowait()
+        except Exception:
+            break
+        try:
+            w = w_ref() if callable(w_ref) else w_ref
+            if w is not None and getattr(w, "tk", None) is not None and not getattr(w, "_closing", False):
+                func(*args)
+        except Exception:
+            pass
+
+
+if not getattr(tk.Misc, "_sd_safe_destroy_patched", False):
+    _orig_winfo_exists = tk.Misc.winfo_exists
+    _orig_update = tk.Misc.update
+    _orig_update_idletasks = tk.Misc.update_idletasks
+    _orig_after = tk.Misc.after
+    _orig_after_cancel = tk.Misc.after_cancel
+    _orig_grab_release = tk.Misc.grab_release
+    _orig_grab_current = tk.Misc.grab_current
+    _orig_basewidget_destroy = tk.BaseWidget.destroy
+    _orig_tk_destroy = tk.Tk.destroy
+
+    def _safe_winfo_exists(self):
+        if getattr(self, "tk", None) is None or getattr(self, "_closing", False):
+            return 0
+        if threading.current_thread() is not threading.main_thread():
+            return 1
+        try:
+            return _orig_winfo_exists(self)
+        except Exception:
+            return 0
+
+    def _safe_update(self):
+        if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
+            return
+        _drain_bg_tk_callbacks()
+        return _orig_update(self)
+
+    def _safe_update_idletasks(self):
+        if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
+            return
+        _drain_bg_tk_callbacks()
+        return _orig_update_idletasks(self)
+
+    def _safe_after(self, ms, func=None, *args):
+        if getattr(self, "tk", None) is None or getattr(self, "_closing", False):
+            return None
+        if threading.current_thread() is not threading.main_thread():
+            if func is not None:
+                try:
+                    w_ref = weakref.ref(self)
+                except Exception:
+                    w_ref = lambda: None
+                _BG_TK_CALLBACK_QUEUE.put((w_ref, func, args))
+            return "bg_queued"
+        return _orig_after(self, ms, func, *args)
+
+    def _safe_after_cancel(self, id):
+        if (
+            getattr(self, "tk", None) is None
+            or not id
+            or id == "bg_queued"
+            or threading.current_thread() is not threading.main_thread()
+        ):
+            return
+        try:
+            return _orig_after_cancel(self, id)
+        except Exception:
+            return
+
+    def _safe_grab_release(self):
+        if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
+            return
+        try:
+            return _orig_grab_release(self)
+        except Exception:
+            return
+
+    def _safe_grab_current(self):
+        if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
+            return None
+        try:
+            return _orig_grab_current(self)
+        except Exception:
+            return None
+
+    def _safe_basewidget_destroy(self):
+        self._closing = True
+        if getattr(self, "tk", None) is None:
+            _detach_widget_tk_refs(self)
+            return
+        try:
+            _orig_basewidget_destroy(self)
+        finally:
+            _detach_widget_tk_refs(self)
+
+    def _safe_tk_destroy(self):
+        self._closing = True
+        while not _BG_TK_CALLBACK_QUEUE.empty():
+            try:
+                _BG_TK_CALLBACK_QUEUE.get_nowait()
+            except Exception:
+                break
+        if getattr(self, "tk", None) is None:
+            _detach_widget_tk_refs(self)
+            return
+        try:
+            _orig_tk_destroy(self)
+        finally:
+            _detach_widget_tk_refs(self)
+
+    tk.Misc.winfo_exists = _safe_winfo_exists
+    tk.Misc.update = _safe_update
+    tk.Misc.update_idletasks = _safe_update_idletasks
+    tk.Misc.after = _safe_after
+    tk.Misc.after_cancel = _safe_after_cancel
+    tk.Misc.grab_release = _safe_grab_release
+    tk.Misc.grab_current = _safe_grab_current
+    tk.BaseWidget.destroy = _safe_basewidget_destroy
+    tk.Tk.destroy = _safe_tk_destroy
+    tk.Misc._sd_safe_destroy_patched = True
+
+
 # ======================================================================================
 # 3C. YOUTUBE VIDEO QUALITY SELECTION MODAL DIALOG
 # ======================================================================================
@@ -3530,6 +3710,9 @@ class QualitySelectionModal(tk.Toplevel):
             except Exception:
                 pass
             self._idle_job = None
+        if hasattr(self, "_modal_icon_photo"):
+            _detach_photo_tk(self._modal_icon_photo)
+            self._modal_icon_photo = None
         try:
             self.grab_release()
         except Exception:
@@ -3784,6 +3967,9 @@ class SafeModalDialog(tk.Toplevel):
         pass
 
     def destroy(self):
+        if hasattr(self, "_modal_icon_photo"):
+            _detach_photo_tk(self._modal_icon_photo)
+            self._modal_icon_photo = None
         try:
             self.grab_release()
         except Exception:
@@ -4955,6 +5141,9 @@ class DownloadConfirmationModal(tk.Toplevel):
             except Exception:
                 pass
             self._idle_job = None
+        if hasattr(self, "_modal_icon_photo"):
+            _detach_photo_tk(self._modal_icon_photo)
+            self._modal_icon_photo = None
         try:
             self.grab_release()
         except Exception:
@@ -5176,6 +5365,9 @@ class RefreshLinkModal(tk.Toplevel):
             except Exception:
                 pass
             self._poll_job = None
+        if hasattr(self, "_modal_icon_photo"):
+            _detach_photo_tk(self._modal_icon_photo)
+            self._modal_icon_photo = None
         try:
             self.grab_release()
         except Exception:
@@ -5819,10 +6011,27 @@ class SystemTrayManager:
     5. Clean teardown unregistering tray icon without leaving ghost icons.
     """
     def __init__(self, app: Any):
-        self.app = app
+        try:
+            self._app_ref = weakref.ref(app) if app is not None else (lambda: None)
+        except TypeError:
+            self._app_ref = lambda: app
         self.icon: Optional[Any] = None
         self._running = False
         self._lock = threading.Lock()
+
+    @property
+    def app(self) -> Any:
+        return self._app_ref()
+
+    @app.setter
+    def app(self, value: Any):
+        if value is None:
+            self._app_ref = lambda: None
+        else:
+            try:
+                self._app_ref = weakref.ref(value)
+            except TypeError:
+                self._app_ref = lambda: value
 
     def _get_icon_image(self):
         """Loads application icon image for tray area."""
@@ -5847,7 +6056,8 @@ class SystemTrayManager:
             return None
 
     def _get_sniffer_text(self, item=None) -> str:
-        active = getattr(self.app, "_clipboard_sniffer_active", True)
+        app = self.app
+        active = getattr(app, "_clipboard_sniffer_active", True) if app is not None else True
         return f"📋 Clipboard Sniffer: {'Active' if active else 'Paused'}"
 
     def _get_startup_text(self, item=None) -> str:
@@ -5855,38 +6065,52 @@ class SystemTrayManager:
         return f"🚀 Start with Windows: {'ON' if enabled else 'OFF'}"
 
     def _on_menu_open(self, icon=None, item=None):
-        if hasattr(self.app, "dispatch_to_main_thread"):
-            self.app.dispatch_to_main_thread(self.app.restore_window)
+        app = self.app
+        if app is None:
+            return
+        if hasattr(app, "dispatch_to_main_thread"):
+            app.dispatch_to_main_thread(app.restore_window)
         else:
-            self.app.restore_window()
+            app.restore_window()
 
     def _on_menu_toggle_sniffer(self, icon=None, item=None):
-        if hasattr(self.app, "dispatch_to_main_thread"):
-            self.app.dispatch_to_main_thread(self._do_toggle_sniffer)
+        app = self.app
+        if app is None:
+            return
+        if hasattr(app, "dispatch_to_main_thread"):
+            app.dispatch_to_main_thread(self._do_toggle_sniffer)
         else:
             self._do_toggle_sniffer()
 
     def _do_toggle_sniffer(self):
-        if hasattr(self.app, "toggle_clipboard_sniffer"):
-            self.app.toggle_clipboard_sniffer()
+        app = self.app
+        if app is not None and hasattr(app, "toggle_clipboard_sniffer"):
+            app.toggle_clipboard_sniffer()
         self.update_menu()
 
     def _on_menu_toggle_startup(self, icon=None, item=None):
-        if hasattr(self.app, "dispatch_to_main_thread"):
-            self.app.dispatch_to_main_thread(self._do_toggle_startup)
+        app = self.app
+        if app is None:
+            return
+        if hasattr(app, "dispatch_to_main_thread"):
+            app.dispatch_to_main_thread(self._do_toggle_startup)
         else:
             self._do_toggle_startup()
 
     def _do_toggle_startup(self):
-        if hasattr(self.app, "toggle_startup_setting"):
-            self.app.toggle_startup_setting()
+        app = self.app
+        if app is not None and hasattr(app, "toggle_startup_setting"):
+            app.toggle_startup_setting()
         self.update_menu()
 
     def _on_menu_exit(self, icon=None, item=None):
-        if hasattr(self.app, "dispatch_to_main_thread"):
-            self.app.dispatch_to_main_thread(self.app.exit_completely)
+        app = self.app
+        if app is None:
+            return
+        if hasattr(app, "dispatch_to_main_thread"):
+            app.dispatch_to_main_thread(app.exit_completely)
         else:
-            self.app.exit_completely()
+            app.exit_completely()
 
     def _build_menu(self):
         if not PYSTRAY_AVAILABLE or TrayMenuItem is None or TrayMenu is None:
@@ -5926,7 +6150,8 @@ class SystemTrayManager:
                     def _patched_notify(wparam, lparam):
                         if lparam in (0x0202, 0x0203):
                             try:
-                                self.icon()
+                                if self.icon is not None:
+                                    self.icon()
                             except Exception:
                                 pass
                             return
@@ -5945,6 +6170,7 @@ class SystemTrayManager:
         """Stops the tray icon and removes it from the Windows notification area."""
         with self._lock:
             self._running = False
+            self.app = None
             if self.icon is not None:
                 try:
                     q = getattr(self.icon, "_Icon__queue", None)
@@ -6070,12 +6296,30 @@ class ModernFramelessGUI:
             except Exception:
                 pass
 
-        # Initialize Browser Bridge loopback IPC server
+        # Initialize Browser Bridge loopback IPC server using weakref callbacks
+        # so background HTTP threads never retain strong references to self/root.tk
+        _weak_self = weakref.ref(self)
+
+        def _bridge_dl(task):
+            g = _weak_self()
+            if g is not None and not getattr(g, "_closing", False):
+                g._on_browser_download_received(task)
+
+        def _bridge_log(msg):
+            g = _weak_self()
+            if g is not None and not getattr(g, "_closing", False):
+                g.log(msg)
+
+        def _bridge_show():
+            g = _weak_self()
+            if g is not None and not getattr(g, "_closing", False):
+                g.dispatch_to_main_thread(g.restore_window)
+
         self.bridge_server = BrowserBridgeServer(
             port=DEFAULT_BRIDGE_PORT,
-            on_download=self._on_browser_download_received,
-            on_log=self.log,
-            on_show=lambda: self.dispatch_to_main_thread(self.restore_window)
+            on_download=_bridge_dl,
+            on_log=_bridge_log,
+            on_show=_bridge_show
         )
         self.bridge_server.start()
 
@@ -6107,10 +6351,11 @@ class ModernFramelessGUI:
                 pass
 
         # Idempotent and non-blocking embedded browser self-registration
-        self._start_browser_self_registration()
+        if os.environ.get("SD_DISABLE_AUTO_REGISTER") != "1" and "unittest" not in sys.modules:
+            self._start_browser_self_registration()
 
         # Non-blocking background check for application and yt-dlp updates
-        if os.environ.get("SD_DISABLE_AUTO_UPDATE") != "1":
+        if os.environ.get("SD_DISABLE_AUTO_UPDATE") != "1" and "unittest" not in sys.modules:
             try:
                 self._update_check_job = self.root.after(2500, self._start_auto_update_check)
             except Exception:
@@ -6785,6 +7030,20 @@ class ModernFramelessGUI:
 
     def _cleanup_resources(self):
         self._closing = True
+        if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
+            try:
+                self._yt_cancel_event.set()
+            except Exception:
+                pass
+        if hasattr(self, "engine") and self.engine:
+            try:
+                for cb_attr in ("on_progress", "on_chunk_update", "on_log", "on_complete", "on_error"):
+                    if hasattr(self.engine, cb_attr):
+                        setattr(self.engine, cb_attr, None)
+                if getattr(self.engine, "is_running", False):
+                    self.engine.cancel()
+            except Exception:
+                pass
         if hasattr(self, "tray_manager") and self.tray_manager:
             try:
                 self.tray_manager.stop()
@@ -6848,6 +7107,13 @@ class ModernFramelessGUI:
             except Exception:
                 pass
             self._refresh_modal = None
+        if hasattr(self, "_active_modal_dialog") and self._active_modal_dialog:
+            try:
+                if self._active_modal_dialog.winfo_exists():
+                    self._active_modal_dialog.destroy()
+            except Exception:
+                pass
+            self._active_modal_dialog = None
         if hasattr(self, "_update_modal") and self._update_modal:
             try:
                 if hasattr(self._update_modal, "_cancel_event"):
@@ -6859,20 +7125,15 @@ class ModernFramelessGUI:
             self._update_modal = None
         self._close_fetching_toast()
         self._dismiss_bg_toast()
+        if hasattr(self, "style") and self.style is not None:
+            _detach_photo_tk(self.style)
+            self.style = None
         for var_name in ("conn_var", "limit_preset_var"):
             if hasattr(self, var_name):
-                v = getattr(self, var_name)
-                if v is not None and hasattr(v, "_tk"):
-                    v._tk = None
+                _detach_photo_tk(getattr(self, var_name))
         for photo_attr in ("_app_icon_photo", "_title_icon_photo"):
             if hasattr(self, photo_attr):
-                p = getattr(self, photo_attr)
-                if p is not None:
-                    try:
-                        if hasattr(p, "_PhotoImage__photo") and p._PhotoImage__photo is not None:
-                            p._PhotoImage__photo._tk = None
-                    except Exception:
-                        pass
+                _detach_photo_tk(getattr(self, photo_attr))
                 setattr(self, photo_attr, None)
         if hasattr(self, "_restore_idle_job") and self._restore_idle_job:
             try:
@@ -6882,11 +7143,16 @@ class ModernFramelessGUI:
             self._restore_idle_job = None
         if hasattr(self, "_browser_integration_dlg") and self._browser_integration_dlg:
             try:
+                if hasattr(self._browser_integration_dlg, "_browser_icon_photo"):
+                    _detach_photo_tk(self._browser_integration_dlg._browser_icon_photo)
+                    self._browser_integration_dlg._browser_icon_photo = None
                 if self._browser_integration_dlg.winfo_exists():
                     self._browser_integration_dlg.destroy()
             except Exception:
                 pass
             self._browser_integration_dlg = None
+        self._update_dlg_startup_ui = None
+        self._update_dlg_tray_ui = None
         try:
             self.root.update_idletasks()
         except Exception:
@@ -8299,15 +8565,10 @@ class ModernFramelessGUI:
             self._gui_dispatch_queue.put((fn, args, kwargs))
         if threading.current_thread() == threading.main_thread():
             self._drain_dispatch_queue()
-        else:
-            if hasattr(self, "root") and self.root:
-                try:
-                    self.root.after(0, self._drain_dispatch_queue)
-                except Exception:
-                    pass
 
     def _drain_dispatch_queue(self):
         """Executes all pending dispatch tasks on the main thread."""
+        _drain_bg_tk_callbacks()
         if hasattr(self, "_gui_dispatch_queue"):
             while not self._gui_dispatch_queue.empty():
                 try:
@@ -8315,6 +8576,7 @@ class ModernFramelessGUI:
                     action(*a_args, **a_kwargs)
                 except Exception:
                     pass
+        _drain_bg_tk_callbacks()
 
     def _on_browser_download_received(self, download_info: Dict[str, Any]):
         """Dispatches intercepted download from browser bridge thread to Tkinter main thread."""
@@ -8386,7 +8648,19 @@ class ModernFramelessGUI:
 
     def _open_browser_integration_dialog(self):
         """Displays settings, connection status, and extension installation instructions."""
+        if hasattr(self, "_browser_integration_dlg") and self._browser_integration_dlg:
+            try:
+                if hasattr(self._browser_integration_dlg, "_browser_icon_photo"):
+                    _detach_photo_tk(self._browser_integration_dlg._browser_icon_photo)
+                    self._browser_integration_dlg._browser_icon_photo = None
+                if self._browser_integration_dlg.winfo_exists():
+                    self._browser_integration_dlg.destroy()
+            except Exception:
+                pass
+            self._browser_integration_dlg = None
+
         dlg = tk.Toplevel(self.root)
+        self._browser_integration_dlg = dlg
         dlg.title("🌐 Browser Integration & WebExtension Setup")
         dlg.transient(self.root)
         dlg.grab_set = lambda: None
@@ -8429,6 +8703,11 @@ class ModernFramelessGUI:
                 from PIL import ImageTk
                 dlg._browser_icon_photo = ImageTk.PhotoImage(file=png_path)
                 dlg.iconphoto(True, dlg._browser_icon_photo)
+                dlg.bind(
+                    "<Destroy>",
+                    lambda e: _detach_photo_tk(getattr(dlg, "_browser_icon_photo", None)) if e.widget == dlg else None,
+                    add="+"
+                )
             except Exception:
                 pass
 
@@ -8749,7 +9028,7 @@ class ModernFramelessGUI:
         if getattr(sys, "frozen", False):
             exe_dir = os.path.dirname(os.path.abspath(sys.executable))
             persistent_ext_dir = os.path.join(exe_dir, "extension")
-            if not os.path.isdir(persistent_ext_dir) and hasattr(sys, "_MEIPASS"):
+            if hasattr(sys, "_MEIPASS"):
                 bundled_ext = os.path.join(sys._MEIPASS, "extension")
                 if os.path.isdir(bundled_ext):
                     try:
@@ -9328,23 +9607,36 @@ class ModernFramelessGUI:
         if getattr(self, "_closing", False) or os.environ.get("SD_DISABLE_AUTO_UPDATE") == "1":
             return
 
+        weak_self = weakref.ref(self)
+
+        def _safe_log(msg: str):
+            g = weak_self()
+            if g is not None and not getattr(g, "_closing", False):
+                g.log(msg)
+
         def _worker():
-            if getattr(self, "_closing", False):
+            g = weak_self()
+            if g is None or getattr(g, "_closing", False):
                 return
+            del g
             try:
                 # 1. Silently check & update yt-dlp engine in background
-                YtDlpAutoUpdater(on_log=self.log).update()
+                YtDlpAutoUpdater(on_log=_safe_log).update()
             except Exception:
                 pass
-            if getattr(self, "_closing", False):
+            g = weak_self()
+            if g is None or getattr(g, "_closing", False):
                 return
+            del g
             try:
                 # 2. Check GitHub Releases for newer Smart Download (SD) version
-                info = AppAutoUpdater(current_version=APP_VERSION, on_log=self.log).check_for_update()
-                if info.get("update_available") and not getattr(self, "_closing", False):
+                info = AppAutoUpdater(current_version=APP_VERSION, on_log=_safe_log).check_for_update()
+                g = weak_self()
+                if g is not None and info.get("update_available") and not getattr(g, "_closing", False):
                     latest = info.get("latest_version", "")
-                    self.log(f"[UPDATER] New Smart Download version v{latest} is available (current: v{APP_VERSION}).")
-                    self.dispatch_to_main_thread(lambda: self._show_update_dialog(info))
+                    g.log(f"[UPDATER] New Smart Download version v{latest} is available (current: v{APP_VERSION}).")
+                    g.dispatch_to_main_thread(lambda: (weak_self() and weak_self()._show_update_dialog(info)))
+                del g
             except Exception:
                 pass
 
@@ -9363,11 +9655,18 @@ class ModernFramelessGUI:
             except Exception:
                 pass
 
+        weak_self = weakref.ref(self)
+
+        def _safe_log(msg: str):
+            g = weak_self()
+            if g is not None and not getattr(g, "_closing", False):
+                g.log(msg)
+
         def _worker():
-            app_info = AppAutoUpdater(current_version=APP_VERSION, on_log=self.log).check_for_update()
+            app_info = AppAutoUpdater(current_version=APP_VERSION, on_log=_safe_log).check_for_update()
             yt_res = None
             try:
-                yt_updater = YtDlpAutoUpdater(on_log=self.log)
+                yt_updater = YtDlpAutoUpdater(on_log=_safe_log)
                 yt_info = yt_updater.check_for_update()
                 if yt_info.get("update_available"):
                     yt_res = yt_updater.update()
@@ -9380,21 +9679,22 @@ class ModernFramelessGUI:
                 yt_res = {"updated": False, "version": get_ytdlp_version()}
 
             def _on_done():
-                if getattr(self, "_closing", False):
+                g = weak_self()
+                if g is None or getattr(g, "_closing", False):
                     return
-                if hasattr(self, "btn_check_updates") and self.btn_check_updates:
+                if hasattr(g, "btn_check_updates") and g.btn_check_updates:
                     try:
-                        if self.btn_check_updates.winfo_exists():
-                            self.btn_check_updates.configure(text="🔄 Check for Updates", state="normal")
+                        if g.btn_check_updates.winfo_exists():
+                            g.btn_check_updates.configure(text="🔄 Check for Updates", state="normal")
                     except Exception:
                         pass
 
                 if app_info.get("update_available"):
-                    self._show_update_dialog(app_info)
+                    g._show_update_dialog(app_info)
                     return
 
                 if app_info.get("error"):
-                    self.show_safe_error(
+                    g.show_safe_error(
                         "Update Check Failed",
                         f"Could not check GitHub Releases for updates:\n\n{app_info.get('error')}"
                     )
@@ -9406,14 +9706,17 @@ class ModernFramelessGUI:
                 else:
                     yt_line = f"🎬 YouTube Engine (yt-dlp): v{yt_ver} (Up to Date ✅)"
 
-                self.show_safe_info(
+                g.show_safe_info(
                     "Up to Date ✅",
                     f"You are running the latest version of Smart Download (SD)!\n\n"
                     f"🚀 Application Version: v{APP_VERSION}\n"
                     f"{yt_line}"
                 )
 
-            self.dispatch_to_main_thread(_on_done)
+            g = weak_self()
+            if g is not None and not getattr(g, "_closing", False):
+                g.dispatch_to_main_thread(_on_done)
+            del g
 
         t = threading.Thread(target=_worker, daemon=True, name="ManualUpdateCheckThread")
         t.start()

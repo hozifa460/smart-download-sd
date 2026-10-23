@@ -95,9 +95,21 @@ def parse_version(version_str: str) -> Tuple[int, ...]:
     if not version_str or not isinstance(version_str, str):
         return ()
     cleaned = version_str.strip().lstrip("vV").strip()
-    if not cleaned:
+    if not cleaned or cleaned.endswith("-") or cleaned.endswith("+"):
         return ()
-    main_part = re.split(r"[-+]", cleaned, maxsplit=1)[0].strip()
+    if "+" in cleaned:
+        base_and_pre, build_meta = cleaned.split("+", 1)
+        if not build_meta.strip():
+            return ()
+    else:
+        base_and_pre = cleaned
+    if "-" in base_and_pre:
+        main_part, pre_part = base_and_pre.split("-", 1)
+        if not pre_part.strip():
+            return ()
+    else:
+        main_part = base_and_pre
+    main_part = main_part.strip()
     if not main_part:
         return ()
     parts: List[int] = []
@@ -110,12 +122,52 @@ def parse_version(version_str: str) -> Tuple[int, ...]:
     return tuple(parts)
 
 
+def _compare_prerelease(pre_a: str, pre_b: str) -> int:
+    """
+    Compares two SemVer pre-release strings (e.g. 'alpha.10' vs 'alpha.2', 'rc10' vs 'rc2').
+    Returns 1 if pre_a > pre_b, -1 if pre_a < pre_b, 0 if equal.
+    """
+    if pre_a == pre_b:
+        return 0
+    ids_a = [p.strip() for p in pre_a.split(".")]
+    ids_b = [p.strip() for p in pre_b.split(".")]
+    for tok_a, tok_b in zip(ids_a, ids_b):
+        if tok_a == tok_b:
+            continue
+        a_is_num = tok_a.isdigit()
+        b_is_num = tok_b.isdigit()
+        if a_is_num and b_is_num:
+            na, nb = int(tok_a), int(tok_b)
+            if na != nb:
+                return 1 if na > nb else -1
+        elif a_is_num != b_is_num:
+            # Per SemVer 2.0.0 section 11: numeric identifiers have lower precedence than non-numeric
+            return -1 if a_is_num else 1
+        else:
+            # Natural comparison for combined alphanumeric tokens like 'rc10' vs 'rc2'
+            chunks_a = [int(x) if x.isdigit() else x for x in re.findall(r"\d+|\D+", tok_a)]
+            chunks_b = [int(x) if x.isdigit() else x for x in re.findall(r"\d+|\D+", tok_b)]
+            for ca, cb in zip(chunks_a, chunks_b):
+                if ca == cb:
+                    continue
+                if isinstance(ca, int) and isinstance(cb, int):
+                    return 1 if ca > cb else -1
+                sa, sb = str(ca), str(cb)
+                if sa != sb:
+                    return 1 if sa > sb else -1
+            if len(chunks_a) != len(chunks_b):
+                return 1 if len(chunks_a) > len(chunks_b) else -1
+    if len(ids_a) != len(ids_b):
+        return 1 if len(ids_a) > len(ids_b) else -1
+    return 0
+
+
 def is_newer_version(remote_ver: str, current_ver: str) -> bool:
     """
     Compares remote_ver against current_ver and returns True if remote_ver is strictly newer.
     Supports:
     - Semantic versions: 'v2.1.0' > '2.0.0', '2.0.1' > '2.0', '2.0.0' == 'v2.0.0'
-    - Pre-release tags: '2.0.0' > '2.0.0-beta.1'
+    - Pre-release tags: '2.0.0' > '2.0.0-beta.1', '2.0.0-alpha.10' > '2.0.0-alpha.2'
     - Date-based versions (yt-dlp): '2026.03.17' > '2025.11.12'
     Returns False on empty, malformed, or equal versions.
     """
@@ -135,8 +187,10 @@ def is_newer_version(remote_ver: str, current_ver: str) -> bool:
     # Numeric components are equal; compare pre-release suffix (e.g. '2.0.0' vs '2.0.0-beta.1')
     r_clean = remote_ver.strip().lstrip("vV").strip().split("+", 1)[0]
     c_clean = current_ver.strip().lstrip("vV").strip().split("+", 1)[0]
-    r_has_pre = "-" in r_clean
-    c_has_pre = "-" in c_clean
+    r_pre = r_clean.split("-", 1)[1].strip() if "-" in r_clean else ""
+    c_pre = c_clean.split("-", 1)[1].strip() if "-" in c_clean else ""
+    r_has_pre = bool(r_pre)
+    c_has_pre = bool(c_pre)
     if c_has_pre and not r_has_pre:
         # Stable release is newer than pre-release of the same number
         return True
@@ -144,9 +198,7 @@ def is_newer_version(remote_ver: str, current_ver: str) -> bool:
         # Pre-release is older than stable release of the same number
         return False
     if r_has_pre and c_has_pre:
-        r_pre = r_clean.split("-", 1)[1]
-        c_pre = c_clean.split("-", 1)[1]
-        return r_pre > c_pre
+        return _compare_prerelease(r_pre, c_pre) > 0
     return False
 
 
@@ -184,7 +236,7 @@ class YtDlpAutoUpdater:
     the latest yt-dlp Python package inside %APPDATA%\\SmartDownload\\yt_dlp_plugin.
     """
 
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(
         self,
@@ -416,6 +468,31 @@ class YtDlpAutoUpdater:
                 "error": str(gh_err)
             }
 
+    @staticmethod
+    def _safe_replace_dir(src: str, dst: str, retries: int = 5, delay: float = 0.06) -> None:
+        """
+        Replaces directory dst with src, retrying transient Windows PermissionError/OSError
+        (e.g., antivirus/indexer read handles) and falling back to copytree+rmtree if needed.
+        """
+        last_err: Optional[Exception] = None
+        for attempt in range(max(1, retries)):
+            try:
+                if os.path.exists(dst):
+                    shutil.rmtree(dst, ignore_errors=True)
+                os.replace(src, dst)
+                return
+            except OSError as e:
+                last_err = e
+                if attempt < retries - 1:
+                    time.sleep(delay * (attempt + 1))
+        # Fallback if os.replace failed due to a transient open handle on Windows
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+            shutil.rmtree(src, ignore_errors=True)
+            return
+        if last_err:
+            raise last_err
+
     def download_and_extract_archive(
         self,
         download_url: str,
@@ -428,9 +505,10 @@ class YtDlpAutoUpdater:
         """
         parent_dir = os.path.dirname(self.plugin_dir)
         os.makedirs(parent_dir, exist_ok=True)
-        staging_dir = os.path.join(parent_dir, f"yt_dlp_staging_{os.getpid()}_{int(time.time() * 1000)}")
-        backup_dir = f"{self.plugin_dir}_backup"
-        archive_path = os.path.join(parent_dir, f"yt_dlp_download_{os.getpid()}.zip")
+        uid = f"{os.getpid()}_{threading.get_ident()}_{int(time.time() * 1000)}"
+        staging_dir = os.path.join(parent_dir, f"yt_dlp_staging_{uid}")
+        backup_dir = f"{self.plugin_dir}_backup_{uid}"
+        archive_path = os.path.join(parent_dir, f"yt_dlp_download_{uid}.zip")
 
         try:
             if os.path.exists(staging_dir):
@@ -495,36 +573,54 @@ class YtDlpAutoUpdater:
                     "download_url": download_url
                 }, mf, indent=2)
 
-            # Atomic swap with backup recovery
-            if os.path.exists(backup_dir):
-                shutil.rmtree(backup_dir, ignore_errors=True)
-            if os.path.exists(self.plugin_dir):
-                os.replace(self.plugin_dir, backup_dir)
-
-            os.replace(staging_dir, self.plugin_dir)
-
-            if not self.activate_plugin(force=True):
-                # Rollback to backup if activation failed
-                if os.path.exists(self.plugin_dir):
-                    shutil.rmtree(self.plugin_dir, ignore_errors=True)
+            # Thread-safe atomic swap with backup recovery
+            with self._lock:
                 if os.path.exists(backup_dir):
-                    os.replace(backup_dir, self.plugin_dir)
-                    self.activate_plugin(force=True)
-                raise RuntimeError("Failed to activate newly extracted yt-dlp plugin.")
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+                moved_to_backup = False
+                if os.path.exists(self.plugin_dir):
+                    self._safe_replace_dir(self.plugin_dir, backup_dir)
+                    moved_to_backup = True
 
-            if os.path.exists(backup_dir):
-                shutil.rmtree(backup_dir, ignore_errors=True)
+                try:
+                    self._safe_replace_dir(staging_dir, self.plugin_dir)
+                except Exception:
+                    if moved_to_backup and os.path.exists(backup_dir):
+                        try:
+                            self._safe_replace_dir(backup_dir, self.plugin_dir)
+                        except Exception:
+                            pass
+                    raise
 
-            active_ver = self.get_current_version()
-            self.log(f"[YTDLP] Successfully updated and activated yt-dlp v{active_ver}!")
-            return {
-                "success": True,
-                "updated": True,
-                "version": active_ver,
-                "plugin_dir": self.plugin_dir
-            }
+                if not self.activate_plugin(force=True):
+                    # Rollback to backup if activation failed
+                    if os.path.exists(self.plugin_dir):
+                        shutil.rmtree(self.plugin_dir, ignore_errors=True)
+                    if os.path.exists(backup_dir):
+                        self._safe_replace_dir(backup_dir, self.plugin_dir)
+                        self.activate_plugin(force=True)
+                    raise RuntimeError("Failed to activate newly extracted yt-dlp plugin.")
+
+                if os.path.exists(backup_dir):
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+
+                active_ver = self.get_current_version()
+                self.log(f"[YTDLP] Successfully updated and activated yt-dlp v{active_ver}!")
+                return {
+                    "success": True,
+                    "updated": True,
+                    "version": active_ver,
+                    "plugin_dir": self.plugin_dir
+                }
 
         except Exception as e:
+            with self._lock:
+                if not self.is_plugin_valid(self.plugin_dir) and os.path.exists(backup_dir):
+                    try:
+                        self._safe_replace_dir(backup_dir, self.plugin_dir)
+                        self.activate_plugin(force=True)
+                    except Exception:
+                        pass
             self.log(f"[YTDLP ERROR] Update failed: {e}")
             return {
                 "success": False,
@@ -541,6 +637,11 @@ class YtDlpAutoUpdater:
             if os.path.exists(staging_dir):
                 try:
                     shutil.rmtree(staging_dir, ignore_errors=True)
+                except Exception:
+                    pass
+            if os.path.exists(backup_dir):
+                try:
+                    shutil.rmtree(backup_dir, ignore_errors=True)
                 except Exception:
                     pass
 
@@ -715,11 +816,12 @@ class AppAutoUpdater:
         if not download_url or not isinstance(download_url, str):
             raise ValueError("A valid download_url is required to download update.")
 
+        auto_dest = dest_path is None
         if not dest_path:
             dest_path = os.path.join(tempfile.gettempdir(), "SmartDownload-Setup.exe")
         dest_path = os.path.abspath(dest_path)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        part_path = f"{dest_path}.part_{os.getpid()}"
+        part_path = f"{dest_path}.part_{os.getpid()}_{threading.get_ident()}"
 
         headers = {"User-Agent": f"SmartDownload-AutoUpdater/{self.current_version}"}
         ctx = _get_ssl_context()
@@ -746,7 +848,18 @@ class AppAutoUpdater:
             if not os.path.isfile(part_path) or os.path.getsize(part_path) == 0:
                 raise RuntimeError("Downloaded update file is missing or empty.")
 
-            os.replace(part_path, dest_path)
+            try:
+                os.replace(part_path, dest_path)
+            except PermissionError:
+                if auto_dest:
+                    alt_dest = os.path.join(
+                        tempfile.gettempdir(),
+                        f"SmartDownload-Setup-{os.getpid()}-{int(time.time())}.exe"
+                    )
+                    os.replace(part_path, alt_dest)
+                    dest_path = os.path.abspath(alt_dest)
+                else:
+                    raise
             self.log(f"[APP UPDATER] Downloaded update installer to {dest_path} ({os.path.getsize(dest_path):,} bytes).")
             return dest_path
         except Exception:

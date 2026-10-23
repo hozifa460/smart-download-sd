@@ -248,12 +248,12 @@ def register_browser_extensions(
         if clean_ext_id not in ids_to_register:
             ids_to_register.append(clean_ext_id)
 
-    ext_version = "1.0.0"
+    ext_version = APP_VERSION
     if extension_dir and os.path.isfile(os.path.join(extension_dir, "manifest.json")):
         try:
             with open(os.path.join(extension_dir, "manifest.json"), "r", encoding="utf-8") as f:
                 data = json.load(f)
-                ext_version = data.get("version", "1.0.0")
+                ext_version = data.get("version", APP_VERSION)
         except Exception:
             pass
 

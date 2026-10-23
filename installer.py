@@ -807,7 +807,18 @@ class InstallerGUI:
         self.is_running = False
         self._closing = False
         self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        try:
+            self.root.bind("<Destroy>", self._on_root_destroyed, add="+")
+        except Exception:
+            pass
         self._build_ui()
+
+    def _on_root_destroyed(self, event=None):
+        if event is None or getattr(event, "widget", None) == self.root:
+            for attr in ("var_dir", "var_desktop", "var_startmenu", "var_startup", "var_browser", "var_launch"):
+                v = getattr(self, attr, None)
+                if v is not None and hasattr(v, "_tk"):
+                    v._tk = None
 
     def _on_window_close(self):
         if getattr(self, "is_running", False):
@@ -1004,46 +1015,62 @@ class InstallerGUI:
         self.is_running = True
         self.btn_action.config(state="disabled")
         self.btn_cancel.config(state="disabled")
+        target = self.var_dir.get().strip() if self.mode == "install" else self.target_dir
+        create_desktop = bool(self.var_desktop.get()) if self.mode == "install" else False
+        create_start_menu = bool(self.var_startmenu.get()) if self.mode == "install" else False
+        register_browser = bool(self.var_browser.get()) if self.mode == "install" else False
+        register_startup = bool(self.var_startup.get()) if self.mode == "install" else False
+        if self.mode == "install":
+            self.launch_after = bool(self.var_launch.get())
         self._render_progress_screen()
+
+        import weakref
+        weak_self = weakref.ref(self)
 
         def _bg_worker():
             def _cb(pct, msg):
-                if not getattr(self, "_closing", False):
+                g = weak_self()
+                if g is not None and not getattr(g, "_closing", False):
                     try:
-                        self.root.after(0, lambda: self._update_progress(pct, msg))
+                        g.root.after(0, lambda: (weak_self() and weak_self()._update_progress(pct, msg)))
                     except Exception:
                         pass
 
             try:
                 if self.mode == "install":
-                    target = self.var_dir.get().strip()
                     res = install_application(
                         target_dir=target,
-                        create_desktop=self.var_desktop.get(),
-                        create_start_menu=self.var_startmenu.get(),
-                        register_browser=self.var_browser.get(),
-                        register_startup=self.var_startup.get(),
+                        create_desktop=create_desktop,
+                        create_start_menu=create_start_menu,
+                        register_browser=register_browser,
+                        register_startup=register_startup,
                         progress_cb=_cb
                     )
-                    self.launch_after = self.var_launch.get()
-                    if not getattr(self, "_closing", False):
-                        self.root.after(0, lambda: self._render_completed_screen(
+                    g = weak_self()
+                    if g is not None and not getattr(g, "_closing", False):
+                        g.root.after(0, lambda: (weak_self() and weak_self()._render_completed_screen(
                             res.get("success", False),
                             f"{APP_NAME} has been successfully installed on your computer.",
                             res.get("exe_path", "")
-                        ))
+                        )))
+                    del g
                 else:
                     res = uninstall_application(
-                        target_dir=self.target_dir,
+                        target_dir=target,
                         progress_cb=_cb
                     )
-                    if not getattr(self, "_closing", False):
-                        self.root.after(0, lambda: self._render_completed_screen(
+                    g = weak_self()
+                    if g is not None and not getattr(g, "_closing", False):
+                        g.root.after(0, lambda: (weak_self() and weak_self()._render_completed_screen(
                             res.get("success", False),
                             f"{APP_NAME} has been completely removed from your computer."
-                        ))
+                        )))
+                    del g
             finally:
-                self.is_running = False
+                g = weak_self()
+                if g is not None:
+                    g.is_running = False
+                del g
 
         threading.Thread(target=_bg_worker, daemon=True).start()
 

@@ -2424,7 +2424,7 @@ class TestYouTubeSafeConcurrencyAndErrorHandling(unittest.TestCase):
         self.assertEqual(str(gui.btn_start["state"]), "normal")
         self.assertEqual(str(gui.btn_cancel["state"]), "disabled")
         self.assertEqual(gui.card_size.cget("text"), "Ready")
-        gui._on_close()
+        gui.exit_completely()
 
     def test_youtube_aspect_ratio_height_labels(self):
         """Verifies that non-standard aspect-ratio cropped heights map to appropriate labels."""
@@ -2541,7 +2541,7 @@ class TestYouTubeSafeConcurrencyAndErrorHandling(unittest.TestCase):
         root.update()
         handler = root.protocol("WM_DELETE_WINDOW")
         self.assertTrue(bool(handler), "WM_DELETE_WINDOW protocol must be registered")
-        gui._on_close()
+        gui.exit_completely()
 
 
 class TestClipboardSnifferAndUrlValidation(unittest.TestCase):
@@ -3501,7 +3501,9 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             self.assertEqual(gui.entry_url.get().strip(), target_url)
 
             # User chooses 'Open in Main App': restores window
-            gui._confirm_modal._on_open_in_main()
+            with patch.object(gui, "_on_start_download") as mock_start:
+                gui._confirm_modal._on_open_in_main()
+                mock_start.assert_called_once()
             self.assertFalse(gui._start_hidden)
             self.assertEqual(self.root.state(), "normal")
         finally:
@@ -3533,7 +3535,9 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             self.assertEqual(gui.entry_url.get().strip(), target_url)
 
             # User chooses 'Open in Main App': restores window
-            gui._confirm_modal._on_open_in_main()
+            with patch.object(gui, "_on_start_download") as mock_start:
+                gui._confirm_modal._on_open_in_main()
+                mock_start.assert_called_once()
             self.assertFalse(gui._start_hidden)
             self.assertEqual(self.root.state(), "normal")
         finally:
@@ -5388,22 +5392,29 @@ class TestVersionComparisonAndUnification(unittest.TestCase):
         self.assertFalse(is_newer_version("2026.03.13", "2026.03.13"))
         self.assertFalse(is_newer_version("2025.12.31", "2026.01.01"))
 
-        # Pre-release vs final release
+        # Pre-release vs final release and multi-digit SemVer pre-release ordering
         self.assertTrue(is_newer_version("2.0.0", "2.0.0-beta.1"))
         self.assertFalse(is_newer_version("2.0.0-alpha.1", "2.0.0"))
         self.assertTrue(is_newer_version("2.1.0-rc1", "2.0.0"))
+        self.assertTrue(is_newer_version("2.0.0-alpha.10", "2.0.0-alpha.2"))
+        self.assertFalse(is_newer_version("2.0.0-alpha.2", "2.0.0-alpha.10"))
+        self.assertTrue(is_newer_version("2.0.0-rc10", "2.0.0-rc2"))
+        self.assertFalse(is_newer_version("2.0.0-rc2", "2.0.0-rc10"))
 
-        # Edge cases: empty, None, malformed, non-string -> always False
+        # Edge cases: empty, None, malformed, trailing hyphen/plus, non-string -> always False
         self.assertEqual(parse_version(""), ())
         self.assertEqual(parse_version(None), ())
         self.assertEqual(parse_version("   "), ())
         self.assertEqual(parse_version("not_a_version"), ())
+        self.assertEqual(parse_version("2.0.0-"), ())
+        self.assertEqual(parse_version("2.0.0+"), ())
         self.assertFalse(is_newer_version("", "2.0.0"))
         self.assertFalse(is_newer_version(None, "2.0.0"))
         self.assertFalse(is_newer_version("invalid", "2.0.0"))
         self.assertFalse(is_newer_version("", ""))
         self.assertFalse(is_newer_version("2.0.0", ""))
         self.assertFalse(is_newer_version("2.0.0", None))
+        self.assertFalse(is_newer_version("2.0.0", "2.0.0-"))
 
     def test_unified_app_version_across_all_modules(self):
         import updater
@@ -5422,6 +5433,11 @@ class TestVersionComparisonAndUnification(unittest.TestCase):
         self.assertEqual(installer.APP_VERSION, expected)
         self.assertEqual(register_browser.APP_VERSION, expected)
         self.assertEqual(native_messaging_host.APP_VERSION, expected)
+
+        ext_manifest = os.path.join(os.path.dirname(os.path.abspath(__file__)), "extension", "manifest.json")
+        with open(ext_manifest, "r", encoding="utf-8") as f:
+            manifest_data = json.load(f)
+        self.assertEqual(manifest_data.get("version"), expected)
 
     def test_browser_bridge_ping_and_status_return_unified_version(self):
         import urllib.request
@@ -5449,6 +5465,12 @@ class TestVersionComparisonAndUnification(unittest.TestCase):
                 "turbo_host.bat",
             ):
                 self.assertNotIn(stale, files, f"Stale artifact {stale} must not exist in dist/")
+            dist_ext_manifest = os.path.join(dist_dir, "extension", "manifest.json")
+            if os.path.isfile(dist_ext_manifest):
+                with open(dist_ext_manifest, "r", encoding="utf-8") as f:
+                    ext_data = json.load(f)
+                self.assertEqual(ext_data.get("version"), "2.0.0")
+                self.assertEqual(ext_data.get("name"), "Smart Download (SD) Integration")
 
 
 class TestYtDlpAutoUpdater(unittest.TestCase):
@@ -5698,6 +5720,79 @@ class TestYtDlpAutoUpdater(unittest.TestCase):
             self.assertEqual(attempt_count["n"], 2)
             self.assertGreaterEqual(len(options), 1)
             mock_update.assert_called_once()
+
+    def test_swap_failure_restores_backup_and_concurrent_updates(self):
+        import tempfile
+        from updater import YtDlpAutoUpdater
+
+        orig_sys_path = list(sys.path)
+        orig_meta_path = list(sys.meta_path)
+        orig_modules = {k: v for k, v in sys.modules.items() if k == "yt_dlp" or k.startswith("yt_dlp.")}
+
+        class _MockStreamResp:
+            def __init__(self, data: bytes):
+                import io
+                self._buf = io.BytesIO(data)
+                self.headers = {"Content-Length": str(len(data))}
+            def read(self, sz: int = -1):
+                return self._buf.read(sz)
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp_root:
+                plugin_dir = os.path.join(tmp_root, "yt_dlp_plugin")
+                updater = YtDlpAutoUpdater(plugin_dir=plugin_dir)
+                wheel_v1 = self._create_mock_ytdlp_wheel_bytes("2099.10.01")
+                wheel_v2 = self._create_mock_ytdlp_wheel_bytes("2099.11.01")
+
+                # Install initial v1 plugin
+                with patch("urllib.request.urlopen", return_value=_MockStreamResp(wheel_v1)):
+                    res1 = updater.download_and_extract_archive("https://example.com/v1.whl", target_version="2099.10.01")
+                    self.assertTrue(res1["updated"])
+                    self.assertEqual(updater.get_plugin_version(), "2099.10.01")
+
+                # Simulate failure on second _safe_replace_dir call (moving staging_dir -> plugin_dir)
+                real_replace = YtDlpAutoUpdater._safe_replace_dir
+                call_idx = {"n": 0}
+                def _failing_second_replace(src, dst, retries=5, delay=0.06):
+                    call_idx["n"] += 1
+                    if call_idx["n"] == 2:
+                        raise PermissionError("Simulated Windows file lock during staging->plugin swap")
+                    return real_replace(src, dst, retries=retries, delay=delay)
+
+                with patch("urllib.request.urlopen", return_value=_MockStreamResp(wheel_v2)), \
+                     patch.object(YtDlpAutoUpdater, "_safe_replace_dir", side_effect=_failing_second_replace):
+                    res_fail = updater.download_and_extract_archive("https://example.com/v2.whl", target_version="2099.11.01")
+                    self.assertFalse(res_fail["updated"])
+                    # Previous v1 plugin MUST have been restored from backup!
+                    self.assertTrue(updater.is_plugin_valid(plugin_dir))
+                    self.assertEqual(updater.get_plugin_version(), "2099.10.01")
+
+                # Verify concurrent threads updating simultaneously do not collide on temp files
+                results = []
+                def _thread_worker():
+                    results.append(updater.download_and_extract_archive("https://example.com/v2.whl", target_version="2099.11.01"))
+
+                with patch("urllib.request.urlopen", side_effect=lambda *a, **kw: _MockStreamResp(wheel_v2)):
+                    t1 = threading.Thread(target=_thread_worker)
+                    t2 = threading.Thread(target=_thread_worker)
+                    t1.start()
+                    t2.start()
+                    t1.join(timeout=10)
+                    t2.join(timeout=10)
+                self.assertEqual(len(results), 2)
+                self.assertTrue(all(r.get("updated") for r in results), f"Expected both threads to succeed, got: {results}")
+                self.assertEqual(updater.get_plugin_version(), "2099.11.01")
+        finally:
+            sys.path[:] = orig_sys_path
+            sys.meta_path[:] = orig_meta_path
+            for k in list(sys.modules.keys()):
+                if k == "yt_dlp" or k.startswith("yt_dlp."):
+                    sys.modules.pop(k, None)
+            sys.modules.update(orig_modules)
 
 
 class TestAppAutoUpdaterAndModal(unittest.TestCase):

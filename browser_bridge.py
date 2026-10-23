@@ -297,12 +297,16 @@ class BrowserBridgeServer:
     def stop(self):
         """Stops the loopback server cleanly."""
         with self._lock:
+            self.on_download = None
+            self.on_show = None
             if not self._is_running:
+                self.on_log = None
                 return
 
             self._is_running = False
             if self.httpd:
                 try:
+                    setattr(self.httpd, "bridge_server_instance", None)
                     self.httpd.shutdown()
                     self.httpd.server_close()
                 except Exception:
@@ -317,6 +321,7 @@ class BrowserBridgeServer:
                 self._thread = None
 
         self.log("[BROWSER BRIDGE] Loopback IPC server stopped.")
+        self.on_log = None
 
     @property
     def is_running(self) -> bool:

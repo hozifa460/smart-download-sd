@@ -144,10 +144,12 @@ def is_ytdlp_extractor_supported(url: str) -> bool:
     if not is_ytdlp_available() or not url:
         return False
     try:
-        import yt_dlp
-        if _YTDLP_EXTRACTORS_CACHE is None:
-            _YTDLP_EXTRACTORS_CACHE = yt_dlp.extractor.gen_extractors()
-        for ie in _YTDLP_EXTRACTORS_CACHE:
+        with YtDlpAutoUpdater._lock:
+            import yt_dlp
+            if _YTDLP_EXTRACTORS_CACHE is None:
+                _YTDLP_EXTRACTORS_CACHE = yt_dlp.extractor.gen_extractors()
+            extractors = _YTDLP_EXTRACTORS_CACHE
+        for ie in extractors:
             if ie.suitable(url) and ie.IE_NAME != 'generic':
                 return True
     except Exception:

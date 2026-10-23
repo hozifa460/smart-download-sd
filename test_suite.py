@@ -476,7 +476,7 @@ class TestTurboDownloader(unittest.TestCase):
         app._refresh_chunk_displays()
         self.assertEqual(len(app.tree_chunks.get_children()), 2)
 
-        app._on_close()
+        app.exit_completely()
 
     def test_permissive_ssl_context_properties(self):
         """Verify get_permissive_ssl_context provides an unverified, reusable SSL context."""

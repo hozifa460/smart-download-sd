@@ -27,7 +27,7 @@ STALE_DIST_ARTIFACTS = (
 
 
 def clean_stale_dist_artifacts():
-    """Removes legacy TurboDownloader artifacts from dist/ so only clean SmartDownload files remain."""
+    """Removes legacy TurboDownloader artifacts from dist/ and syncs the Smart Download extension folder."""
     if not os.path.isdir(DIST_DIR):
         return
     for name in STALE_DIST_ARTIFACTS:
@@ -38,6 +38,13 @@ def clean_stale_dist_artifacts():
                 os.remove(p)
             except Exception:
                 pass
+    src_ext = os.path.join(BASE_DIR, "extension")
+    dist_ext = os.path.join(DIST_DIR, "extension")
+    if os.path.isdir(src_ext):
+        try:
+            shutil.copytree(src_ext, dist_ext, dirs_exist_ok=True)
+        except Exception:
+            pass
 
 
 def build_app(rebuild: bool = False):
