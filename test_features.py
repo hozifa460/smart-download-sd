@@ -6822,6 +6822,156 @@ class TestDownloadHistoryAndCategorization(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_windows_path_case_insensitivity_deduplication(self):
+        """Verify Windows path case differences deduplicate rather than creating duplicate entries."""
+        hist_file = os.path.join(self.temp_dir, "case_test.json")
+        mgr = DownloadHistoryManager(history_file=hist_file)
+
+        path_upper = os.path.join(self.temp_dir, "Clip.mp4")
+        path_lower = os.path.join(self.temp_dir, "clip.mp4")
+
+        mgr.add_or_update_entry(url="https://example.com/Clip.mp4", file_path=path_upper, size_bytes=1000)
+        mgr.add_or_update_entry(url="https://example.com/Clip.mp4", file_path=path_lower, size_bytes=2000)
+
+        entries = mgr.get_entries()
+        self.assertEqual(len(entries), 1, "Differing path case must deduplicate on Windows")
+        self.assertEqual(entries[0]["size_bytes"], 2000)
+
+    def test_open_containing_folder_missing_file_opens_parent_folder(self):
+        """Verify open_containing_folder opens existing parent directory if the file itself is missing."""
+        from turbo_downloader import open_containing_folder
+        missing_file = os.path.join(self.temp_dir, "missing_movie.mp4")
+        self.assertFalse(os.path.exists(missing_file))
+        self.assertTrue(os.path.isdir(self.temp_dir))
+
+        with patch("os.startfile", create=True) as mock_startfile, \
+             patch("subprocess.Popen") as mock_popen:
+            open_containing_folder(missing_file)
+            # Either startfile(self.temp_dir) or Popen(["explorer", self.temp_dir])
+            called_with_temp_dir = False
+            for call in mock_startfile.call_args_list:
+                if call[0] and os.path.normpath(call[0][0]) == os.path.normpath(self.temp_dir):
+                    called_with_temp_dir = True
+            for call in mock_popen.call_args_list:
+                args = call[0][0] if call[0] else []
+                if isinstance(args, list) and len(args) >= 2 and os.path.normpath(str(args[1])) == os.path.normpath(self.temp_dir):
+                    called_with_temp_dir = True
+            self.assertTrue(called_with_temp_dir, "Must open parent directory, not home directory")
+
+    def test_get_entries_aliases_and_plurals(self):
+        """Verify get_entries supports 'Music' for 'Audio' and plural aliases like 'Videos'."""
+        hist_file = os.path.join(self.temp_dir, "alias_test.json")
+        mgr = DownloadHistoryManager(history_file=hist_file)
+        mgr.add_or_update_entry("https://example.com/song.mp3", "C:/song.mp3")
+        mgr.add_or_update_entry("https://example.com/movie.mp4", "C:/movie.mp4")
+
+        # "Music" alias for "Audio"
+        music_entries = mgr.get_entries("Music")
+        self.assertEqual(len(music_entries), 1)
+        self.assertEqual(music_entries[0]["category"], "Audio")
+
+        # "Videos" plural alias for "Video"
+        video_entries = mgr.get_entries("Videos")
+        self.assertEqual(len(video_entries), 1)
+        self.assertEqual(video_entries[0]["category"], "Video")
+
+    def test_add_or_update_entry_none_inputs(self):
+        """Verify add_or_update_entry gracefully accepts None for size_bytes and elapsed_sec."""
+        hist_file = os.path.join(self.temp_dir, "none_test.json")
+        mgr = DownloadHistoryManager(history_file=hist_file)
+        entry = mgr.add_or_update_entry(
+            url="https://example.com/file.bin",
+            file_path="",
+            size_bytes=None,
+            elapsed_sec=None
+        )
+        self.assertEqual(entry["size_bytes"], 0)
+        self.assertEqual(entry["elapsed_sec"], 0.0)
+
+    def test_resolve_categorized_path_url_query_and_fragments(self):
+        """Verify resolve_categorized_path cleans query parameters and hash fragments."""
+        base = os.path.join(self.temp_dir, "Downloads")
+        res = resolve_categorized_path(base, "video.mp4?token=123#frag", auto_categorize=True, create_dir=False)
+        self.assertTrue(res.endswith("video.mp4"))
+        self.assertNotIn("?", res)
+        self.assertNotIn("#", res)
+        self.assertIn("Video", res)
+
+    def test_multi_selection_remove_in_gui(self):
+        """Verify GUI _history_remove_selected removes all selected entries when multiple rows are selected."""
+        root = tk.Tk()
+        hist_file = os.path.join(self.temp_dir, "multi_rem.json")
+        try:
+            gui = ModernFramelessGUI(root, start_hidden=True)
+            gui.history_manager = DownloadHistoryManager(history_file=hist_file)
+
+            e1 = gui.history_manager.add_or_update_entry("https://example.com/1.mp4", "C:/1.mp4")
+            e2 = gui.history_manager.add_or_update_entry("https://example.com/2.mp4", "C:/2.mp4")
+            gui._refresh_history_table()
+
+            # Select both items
+            gui.tree_history.selection_set([e1["id"], e2["id"]])
+            self.assertEqual(len(gui.tree_history.selection()), 2)
+
+            gui._history_remove_selected(delete_file=False)
+            self.assertEqual(len(gui.history_manager.get_entries()), 0)
+            self.assertEqual(len(gui.tree_history.get_children()), 0)
+        finally:
+            gui._cleanup_resources()
+            root.update_idletasks()
+            root.destroy()
+
+    def test_tree_history_corrupt_ids_graceful(self):
+        """Verify _refresh_history_table handles missing or empty entry IDs without TclError."""
+        root = tk.Tk()
+        hist_file = os.path.join(self.temp_dir, "empty_id.json")
+        try:
+            gui = ModernFramelessGUI(root, start_hidden=True)
+            gui.history_manager = DownloadHistoryManager(history_file=hist_file)
+            # Inject entry with empty id
+            gui.history_manager._entries.append({
+                "id": "",
+                "filename": "corrupt_id.bin",
+                "file_path": "C:/corrupt_id.bin",
+                "url": "https://example.com/corrupt_id.bin",
+                "size_bytes": 100,
+                "category": "General",
+                "status": "Completed"
+            })
+            gui._refresh_history_table()
+            self.assertEqual(len(gui.tree_history.get_children()), 1)
+        finally:
+            gui._cleanup_resources()
+            root.update_idletasks()
+            root.destroy()
+
+    def test_confirmation_dialog_completion_records_history(self):
+        """Verify DownloadConfirmationModal records completion into DownloadHistoryManager."""
+        root = tk.Tk()
+        hist_file = os.path.join(self.temp_dir, "modal_hist.json")
+        try:
+            with patch("turbo_downloader.get_config_dir", return_value=self.temp_dir):
+                mgr = DownloadHistoryManager(history_file=hist_file)
+                modal = DownloadConfirmationModal(
+                    parent=root,
+                    url="https://example.com/modal_file.zip",
+                    default_dest_path=os.path.join(self.temp_dir, "modal_file.zip"),
+                    theme={"c_bg": "#121212", "c_panel": "#1e1e1e"},
+                    history_manager=mgr
+                )
+                modal.show_progress_view()
+                modal.on_download_complete(os.path.join(self.temp_dir, "modal_file.zip"), 5000, 1.0)
+                root.update()
+
+                entries = mgr.get_entries()
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0]["filename"], "modal_file.zip")
+                self.assertEqual(entries[0]["status"], "Completed")
+                modal.destroy()
+        finally:
+            root.update_idletasks()
+            root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3661,7 +3661,8 @@ class QualitySelectionModal(tk.Toplevel):
             parent_dir = os.path.dirname(target_path)
             parent_base = os.path.basename(os.path.normpath(parent_dir)) if parent_dir else ""
             new_ext = ".mp3"
-            if parent_base in CATEGORY_SUBFOLDERS.values():
+            subfolders_lower = {v.lower() for v in CATEGORY_SUBFOLDERS.values()}
+            if parent_base in CATEGORY_SUBFOLDERS.values() or parent_base.lower() in subfolders_lower:
                 updated_dest = resolve_categorized_path(
                     parent_dir,
                     os.path.basename(base) + new_ext,
@@ -3696,14 +3697,16 @@ class QualitySelectionModal(tk.Toplevel):
 
         # Dynamically adjust filename extension in the destination entry
         cur_path = self.entry_dest.get().strip()
-        if cur_path:
-            base, _ = os.path.splitext(cur_path)
+        target_path = cur_path or self.dest_path
+        if target_path:
+            base, _ = os.path.splitext(target_path)
             new_ext = opt.ext.lower()
             if not new_ext.startswith("."):
                 new_ext = "." + new_ext
-            parent_dir = os.path.dirname(cur_path)
+            parent_dir = os.path.dirname(target_path)
             parent_base = os.path.basename(os.path.normpath(parent_dir)) if parent_dir else ""
-            if parent_base in CATEGORY_SUBFOLDERS.values():
+            subfolders_lower = {v.lower() for v in CATEGORY_SUBFOLDERS.values()}
+            if parent_base in CATEGORY_SUBFOLDERS.values() or parent_base.lower() in subfolders_lower:
                 updated_dest = resolve_categorized_path(
                     parent_dir,
                     os.path.basename(base) + new_ext,
@@ -4129,7 +4132,8 @@ def resolve_categorized_path(base_dir: str, filename: str, auto_categorize: bool
     when auto_categorize is enabled. Prevents recursive/nested subfolders if base_dir already points
     to a category subfolder.
     """
-    clean_fn = os.path.basename(str(filename or "").strip()) or "download.bin"
+    raw_fn = str(filename or "").strip().split('?')[0].split('#')[0]
+    clean_fn = os.path.basename(raw_fn) or "download.bin"
     if not base_dir or not str(base_dir).strip():
         base_dir = os.path.join(os.path.expanduser("~"), "Downloads")
     if not auto_categorize:
@@ -4220,53 +4224,71 @@ class DownloadHistoryManager:
     ) -> Dict[str, Any]:
         with self._lock:
             norm_path = os.path.abspath(file_path) if file_path else ""
-            filename = os.path.basename(norm_path) if norm_path else derive_download_filename(url)
+            norm_path_case = os.path.normcase(norm_path) if norm_path else ""
+            raw_url = str(url or "").strip()
+            filename = os.path.basename(norm_path) if norm_path else derive_download_filename(raw_url)
             if not filename:
                 filename = "download.bin"
 
-            category, icon = get_file_category_and_icon(filename or url)
+            category, icon = get_file_category_and_icon(filename or raw_url)
             if filename.lower().endswith(".bin"):
                 category, icon = "General", "📥"
 
-            calc_size = int(size_bytes)
+            try:
+                calc_size = int(size_bytes or 0)
+            except Exception:
+                calc_size = 0
             if calc_size <= 0 and norm_path and os.path.isfile(norm_path):
                 try:
                     calc_size = os.path.getsize(norm_path)
                 except Exception:
                     calc_size = 0
 
+            try:
+                elapsed_val = float(elapsed_sec or 0.0)
+            except Exception:
+                elapsed_val = 0.0
+
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
             match_idx = -1
             matched_id = None
+            old_entry = None
             for idx, entry in enumerate(self._entries):
                 e_path = entry.get("file_path", "")
                 e_url = entry.get("url", "")
                 e_fn = entry.get("filename", "")
-                if norm_path and e_path and os.path.abspath(e_path) == norm_path:
+                e_path_norm = os.path.normcase(os.path.abspath(e_path)) if e_path else ""
+                if norm_path_case and e_path_norm and e_path_norm == norm_path_case:
                     match_idx = idx
                     matched_id = entry.get("id")
+                    old_entry = entry
                     break
-                if url and e_url == url and filename and e_fn == filename:
+                if raw_url and e_url == raw_url and filename and e_fn == filename:
                     match_idx = idx
                     matched_id = entry.get("id")
+                    old_entry = entry
                     break
 
-            if match_idx >= 0:
-                old_entry = self._entries.pop(match_idx)
+            if match_idx >= 0 and old_entry:
+                self._entries.pop(match_idx)
                 entry_id = matched_id or old_entry.get("id") or f"dl_{int(time.time() * 1000)}_{len(self._entries)}"
                 final_size = calc_size if calc_size > 0 else old_entry.get("size_bytes", 0)
-                final_elapsed = float(elapsed_sec) if elapsed_sec > 0 else float(old_entry.get("elapsed_sec", 0.0))
+                final_elapsed = elapsed_val if elapsed_val > 0 else float(old_entry.get("elapsed_sec", 0.0))
+                final_path = norm_path or old_entry.get("file_path", "")
+                final_url = raw_url or old_entry.get("url", "")
             else:
                 entry_id = f"dl_{int(time.time() * 1000)}_{len(self._entries)}"
                 final_size = calc_size
-                final_elapsed = float(elapsed_sec)
+                final_elapsed = elapsed_val
+                final_path = norm_path
+                final_url = raw_url
 
             record = {
                 "id": entry_id,
                 "filename": filename,
-                "file_path": norm_path,
-                "url": url,
+                "file_path": final_path,
+                "url": final_url,
                 "size_bytes": final_size,
                 "category": category,
                 "icon": icon,
@@ -4286,20 +4308,43 @@ class DownloadHistoryManager:
             if not category_filter or category_filter.strip().lower() in ("all", "all categories", ""):
                 return [dict(e) for e in self._entries]
             cat_clean = category_filter.strip().lower()
-            return [dict(e) for e in self._entries if str(e.get("category", "")).strip().lower() == cat_clean]
+            cat_aliases = {
+                "music": "audio",
+                "audio": "audio",
+                "video": "video",
+                "videos": "video",
+                "image": "images",
+                "images": "images",
+                "document": "documents",
+                "documents": "documents",
+                "program": "programs",
+                "programs": "programs",
+                "compressed": "compressed",
+                "general": "general",
+            }
+            target_cat = cat_aliases.get(cat_clean, cat_clean)
+            res = []
+            for e in self._entries:
+                item_cat = str(e.get("category", "")).strip().lower()
+                norm_item_cat = cat_aliases.get(item_cat, item_cat)
+                if item_cat == cat_clean or norm_item_cat == target_cat:
+                    res.append(dict(e))
+            return res
 
     def get_entry(self, entry_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
+            str_id = str(entry_id)
             for e in self._entries:
-                if e.get("id") == entry_id:
+                if str(e.get("id")) == str_id:
                     return dict(e)
             return None
 
     def remove_entry(self, entry_id: str, delete_file: bool = False) -> bool:
         with self._lock:
+            str_id = str(entry_id)
             target = None
             for e in self._entries:
-                if e.get("id") == entry_id:
+                if str(e.get("id")) == str_id:
                     target = e
                     break
             if not target:
@@ -4341,20 +4386,30 @@ def open_containing_folder(file_path: str):
     """Opens folder containing downloaded file and highlights it on Windows."""
     if not file_path:
         return
-    folder = os.path.dirname(file_path) if os.path.exists(file_path) else file_path
-    if not os.path.exists(folder):
+    folder = os.path.dirname(file_path) if file_path else ""
+    if not folder or not os.path.exists(folder):
         folder = os.path.expanduser("~")
     try:
         if IS_WINDOWS:
             norm_path = os.path.normpath(file_path)
-            if os.path.exists(norm_path):
+            if os.path.isfile(norm_path):
                 subprocess.Popen(["explorer", f"/select,{norm_path}"])
-            elif hasattr(os, "startfile"):
-                os.startfile(folder)
+            elif os.path.exists(folder):
+                if hasattr(os, "startfile"):
+                    os.startfile(folder)
+                else:
+                    subprocess.Popen(["explorer", folder])
             else:
-                subprocess.Popen(["explorer", folder])
+                home = os.path.expanduser("~")
+                if hasattr(os, "startfile"):
+                    os.startfile(home)
+                else:
+                    subprocess.Popen(["explorer", home])
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", file_path])
+            if os.path.exists(file_path):
+                subprocess.Popen(["open", "-R", file_path])
+            else:
+                subprocess.Popen(["open", folder])
         else:
             subprocess.Popen(["xdg-open", folder])
     except Exception:
@@ -4456,7 +4511,8 @@ class DownloadConfirmationModal(tk.Toplevel):
         parent_app: Optional[Any] = None,
         default_connections: int = 8,
         default_speed_limit: float = 0.0,
-        show_progress_immediately: bool = False
+        show_progress_immediately: bool = False,
+        history_manager: Optional[Any] = None
     ):
         super().__init__(parent)
         self.url = str(url or "").strip()
@@ -4466,6 +4522,7 @@ class DownloadConfirmationModal(tk.Toplevel):
         self.on_start_in_window = on_start_in_window
         self.on_open_in_main = on_open_in_main
         self.parent_app = parent_app
+        self.history_manager = history_manager or (getattr(parent_app, "history_manager", None) if parent_app else None)
         self.default_connections = default_connections
         self.default_speed_limit = default_speed_limit
         self._confirmed = False
@@ -5195,6 +5252,24 @@ class DownloadConfirmationModal(tk.Toplevel):
         except Exception:
             pass
 
+        try:
+            hm = getattr(self, "history_manager", None)
+            if not hm and self.parent_app:
+                hm = getattr(self.parent_app, "history_manager", None)
+            if not hm:
+                hm = DownloadHistoryManager()
+            hm.add_or_update_entry(
+                url=self.url,
+                file_path=dest_path,
+                size_bytes=total_bytes,
+                status="Completed",
+                elapsed_sec=elapsed
+            )
+            if self.parent_app and hasattr(self.parent_app, "_refresh_history_table"):
+                self.parent_app._refresh_history_table()
+        except Exception:
+            pass
+
     def on_download_error(self, err_msg: str):
         """Thread-safe display of download failure message."""
         if threading.current_thread() != threading.main_thread():
@@ -5207,6 +5282,24 @@ class DownloadConfirmationModal(tk.Toplevel):
         try:
             self.lbl_status.configure(text=f"❌ Error: {err_msg}", fg=self.c_danger)
             self.btn_pause_resume.configure(state="disabled")
+        except Exception:
+            pass
+
+        try:
+            hm = getattr(self, "history_manager", None)
+            if not hm and self.parent_app:
+                hm = getattr(self.parent_app, "history_manager", None)
+            if not hm:
+                hm = DownloadHistoryManager()
+            hm.add_or_update_entry(
+                url=self.url,
+                file_path=self.dest_path or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""),
+                size_bytes=0,
+                status="Failed",
+                elapsed_sec=0.0
+            )
+            if self.parent_app and hasattr(self.parent_app, "_refresh_history_table"):
+                self.parent_app._refresh_history_table()
         except Exception:
             pass
 
@@ -8399,8 +8492,10 @@ class ModernFramelessGUI:
         for item in self.tree_history.get_children():
             self.tree_history.delete(item)
 
-        for e in entries:
-            eid = e.get("id", "")
+        for idx, e in enumerate(entries):
+            eid = str(e.get("id") or f"dl_{idx}_{int(time.time() * 1000)}")
+            if self.tree_history.exists(eid):
+                eid = f"{eid}_{idx}"
             cat_display = f"{e.get('icon', '')} {e.get('category', 'General')}".strip()
             fn = e.get("filename", "")
             size_bytes = e.get("size_bytes", 0)
@@ -8425,6 +8520,8 @@ class ModernFramelessGUI:
                 open_downloaded_file(fp)
             else:
                 self.log(f"[HISTORY] File not found on disk: {fp}")
+                if hasattr(self, "show_safe_warning"):
+                    self.show_safe_warning("File Not Found", f"The downloaded file does not exist at:\n{fp}")
 
     def _history_open_selected_folder(self):
         sel = self.tree_history.selection()
@@ -8466,6 +8563,8 @@ class ModernFramelessGUI:
         if file_path and hasattr(self, "entry_dest"):
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, file_path)
+        elif hasattr(self, "_on_url_change"):
+            self._on_url_change()
         if hasattr(self, "notebook"):
             try:
                 self.notebook.select(0)
@@ -8477,8 +8576,8 @@ class ModernFramelessGUI:
         sel = self.tree_history.selection()
         if not sel:
             return
-        entry_id = sel[0]
-        self.history_manager.remove_entry(entry_id, delete_file=delete_file)
+        for entry_id in sel:
+            self.history_manager.remove_entry(entry_id, delete_file=delete_file)
         self._refresh_history_table()
 
     def _history_clear_all(self):
