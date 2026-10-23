@@ -6285,6 +6285,217 @@ class TestBrowserCookiesAndMP3Extraction(unittest.TestCase):
             except Exception:
                 pass
 
+    def test_extract_format_options_explicit_browser_failure_falls_back_to_next_detected(self):
+        """Verifies that if an explicit browser fails, unauthenticated is tried, and then next installed browser succeeds."""
+        import yt_dlp
+        from http.cookiejar import Cookie
+
+        fake_info = {
+            "id": "restricted_vid_explicit",
+            "title": "Private Media",
+            "formats": [
+                {
+                    "format_id": "18",
+                    "ext": "mp4",
+                    "height": 360,
+                    "url": "https://example.com/restricted.mp4",
+                    "protocol": "https",
+                    "vcodec": "avc1",
+                    "acodec": "mp4a",
+                    "http_headers": {},
+                }
+            ]
+        }
+
+        call_trace = []
+
+        class FakeYDLMultiBrowser:
+            def __init__(self, opts):
+                self.opts = opts
+                self.cookiejar = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+            def extract_info(self, url, download=False):
+                cb = self.opts.get("cookiesfrombrowser")
+                browser_name = cb[0] if cb else "none"
+                call_trace.append(browser_name)
+                if browser_name == "chrome":
+                    # Simulate locked database error
+                    raise Exception("sqlite3.OperationalError: database is locked")
+                elif browser_name == "none":
+                    # Unauthenticated fails because it's age-restricted
+                    raise Exception("Sign in to confirm your age")
+                elif browser_name == "edge":
+                    return fake_info
+                raise Exception(f"Browser {browser_name} failed")
+
+        resolver = YouTubeResolver(cookies_from_browser="chrome")
+        with patch("yt_dlp.YoutubeDL", side_effect=FakeYDLMultiBrowser):
+            with patch("youtube_resolver.detect_installed_cookie_browsers", return_value=["chrome", "edge"]):
+                info, options = resolver.extract_format_options("https://www.youtube.com/watch?v=GTNypvv2Nbg")
+
+                self.assertEqual(call_trace, ["chrome", "none", "edge"])
+                self.assertEqual(info["id"], "restricted_vid_explicit")
+                self.assertGreater(len(options), 0)
+
+    def test_stream_coordinator_mp3_cleanup_on_cancel(self):
+        """Verifies StreamDownloadCoordinator cleans up .audio.tmp when download is cancelled."""
+        from turbo_downloader import StreamDownloadCoordinator, YouTubeStreamInfo
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest_mp3 = os.path.join(tmp_dir, "cancel_test.mp3")
+            tmp_audio = dest_mp3 + ".audio.tmp"
+
+            stream_info = YouTubeStreamInfo(
+                video_id="cancel_id",
+                title="Cancel Test",
+                clean_filename="cancel_test.mp3",
+                is_progressive=True,
+                video_url="https://example.com/stream.m4a",
+                video_ext="mp3",
+                audio_ext="m4a",
+                video_resolution="Audio Only",
+                is_audio_only=True
+            )
+
+            coord = StreamDownloadCoordinator(
+                stream_info=stream_info,
+                destination_path=dest_mp3
+            )
+
+            # Engine that writes dummy bytes and gets cancelled
+            class FakeCancellingEngine:
+                def __init__(self, **kwargs):
+                    self.dest = kwargs["destination_path"]
+                    self.is_running = True
+
+                def start(self):
+                    with open(self.dest, "wb") as f:
+                        f.write(b"PARTIAL_DATA")
+                    # Trigger cancel
+                    coord.cancel()
+                    self.is_running = False
+
+                def pause(self):
+                    pass
+
+            with patch("turbo_downloader.TurboDownloadEngine", FakeCancellingEngine):
+                with patch("turbo_downloader.has_ffmpeg", return_value=True):
+                    coord._run_coordinator()
+
+                    # Both the tmp_audio and dest_mp3 should be absent/cleaned up
+                    self.assertFalse(os.path.isfile(tmp_audio))
+                    self.assertFalse(os.path.isfile(dest_mp3))
+
+    def test_stream_coordinator_mp3_destination_auto_extension(self):
+        """Verifies StreamDownloadCoordinator auto-appends .mp3 extension if passed .m4a destination for MP3 option."""
+        from turbo_downloader import StreamDownloadCoordinator, YouTubeStreamInfo
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest_wrong_ext = os.path.join(tmp_dir, "song.m4a")
+
+            stream_info = YouTubeStreamInfo(
+                video_id="id123",
+                title="Song",
+                clean_filename="song.mp3",
+                is_progressive=True,
+                video_url="https://example.com/audio.m4a",
+                video_ext="mp3",
+                audio_ext="m4a",
+                video_resolution="Audio Only",
+                is_audio_only=True
+            )
+
+            coord = StreamDownloadCoordinator(
+                stream_info=stream_info,
+                destination_path=dest_wrong_ext
+            )
+
+            class FakeEngine:
+                def __init__(self, **kwargs):
+                    self.dest = kwargs["destination_path"]
+                    self.on_complete = kwargs["on_complete"]
+                    self.is_running = False
+
+                def start(self):
+                    with open(self.dest, "wb") as f:
+                        f.write(b"AUDIO")
+                    self.on_complete(self.dest, 5, 0.1)
+
+                def pause(self):
+                    pass
+
+            def fake_run(cmd, **kwargs):
+                out = cmd[-1]
+                with open(out, "wb") as f:
+                    f.write(b"MP3")
+                res = MagicMock()
+                res.returncode = 0
+                return res
+
+            with patch("turbo_downloader.TurboDownloadEngine", FakeEngine):
+                with patch("turbo_downloader.has_ffmpeg", return_value=True):
+                    with patch("turbo_downloader.find_ffmpeg_bin", return_value="ffmpeg"):
+                        with patch("subprocess.run", side_effect=fake_run):
+                            coord._run_coordinator()
+
+                            expected_dest = os.path.join(tmp_dir, "song.mp3")
+                            self.assertEqual(coord.destination_path, expected_dest)
+                            self.assertTrue(os.path.isfile(expected_dest))
+
+    def test_url_specific_cookie_header_propagation(self):
+        """Verifies that format options receive URL-specific cookies from cookiejar.get_cookie_header."""
+        from youtube_resolver import YouTubeResolver
+
+        fake_info = {
+            "id": "reel123",
+            "title": "Instagram Reel",
+            "webpage_url": "https://www.instagram.com/reel/123",
+            "formats": [
+                {
+                    "format_id": "direct_cdn",
+                    "ext": "mp4",
+                    "height": 720,
+                    "url": "https://scontent.cdninstagram.com/v/t50/video.mp4",
+                    "protocol": "https",
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "http_headers": {},
+                }
+            ]
+        }
+
+        class MockCookieJarWithHeaders:
+            def get_cookie_header(self, url):
+                if "cdninstagram.com" in url:
+                    return "cdn_token=secure_cdn_token_xyz"
+                return "session_id=ig_session_abc"
+
+        class MockYDL:
+            def __init__(self, opts):
+                self.cookiejar = MockCookieJarWithHeaders()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def extract_info(self, url, download=False):
+                return fake_info
+
+        resolver = YouTubeResolver(cookies_from_browser="none")
+        with patch("yt_dlp.YoutubeDL", MockYDL):
+            info, options = resolver.extract_format_options("https://www.instagram.com/reel/123")
+            self.assertEqual(options[0].video_headers.get("Cookie"), "cdn_token=secure_cdn_token_xyz")
+
 
 if __name__ == "__main__":
     unittest.main()

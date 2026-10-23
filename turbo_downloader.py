@@ -2575,6 +2575,8 @@ class StreamDownloadCoordinator:
     def _run_coordinator(self):
         video_tmp = ""
         audio_tmp = ""
+        actual_dest = ""
+        is_mp3_request = False
         v_error: List[str] = []
         a_error: List[str] = []
         has_error = False
@@ -2589,6 +2591,9 @@ class StreamDownloadCoordinator:
                     and src_audio_ext != "mp3"
                     and has_ffmpeg()
                 )
+                if is_mp3_request and not self.destination_path.lower().endswith(".mp3"):
+                    base, _ = os.path.splitext(self.destination_path)
+                    self.destination_path = base + ".mp3"
                 actual_dest = self.destination_path + ".audio.tmp" if is_mp3_request else self.destination_path
                 plat = getattr(self.stream_info, "platform", "Media")
                 tag = plat.upper().replace(" / X", "")
@@ -2624,6 +2629,16 @@ class StreamDownloadCoordinator:
                             if self.on_complete:
                                 self.on_complete(self.destination_path, final_sz, elapsed)
                         except Exception as ex:
+                            if os.path.exists(actual_dest):
+                                try:
+                                    os.remove(actual_dest)
+                                except Exception:
+                                    pass
+                            if os.path.exists(self.destination_path):
+                                try:
+                                    os.remove(self.destination_path)
+                                except Exception:
+                                    pass
                             if self.on_error:
                                 self.on_error(f"MP3 transcoding error: {ex}")
                     else:
@@ -2803,7 +2818,10 @@ class StreamDownloadCoordinator:
                 self._is_running = False
             # Cleanly remove temporary part files on cancel or error
             if self._cancel_event.is_set() or has_error or v_error or a_error:
-                for p in (video_tmp, audio_tmp):
+                clean_targets = [video_tmp, audio_tmp]
+                if is_mp3_request and actual_dest:
+                    clean_targets.append(actual_dest)
+                for p in clean_targets:
                     if p:
                         if os.path.exists(p):
                             try:
@@ -3570,6 +3588,7 @@ class QualitySelectionModal(tk.Toplevel):
         )
         self.btn_download.pack(side=tk.LEFT)
 
+        self.btn_download_mp3: Optional[tk.Button] = None
         has_audio = any(opt.is_audio_only for opt in self.options)
         if has_audio:
             self.btn_download_mp3 = tk.Button(
@@ -3637,10 +3656,13 @@ class QualitySelectionModal(tk.Toplevel):
             base, _ = os.path.splitext(cur_path)
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, base + ".mp3")
+            if self.dest_path:
+                self.dest_path = base + ".mp3"
         elif self.dest_path:
             base, _ = os.path.splitext(self.dest_path)
+            self.dest_path = base + ".mp3"
             self.entry_dest.delete(0, tk.END)
-            self.entry_dest.insert(0, base + ".mp3")
+            self.entry_dest.insert(0, self.dest_path)
 
         self._on_download()
 

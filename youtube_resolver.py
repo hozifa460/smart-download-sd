@@ -520,8 +520,16 @@ class YouTubeResolver:
                 info = active_ydl.extract_info(url, download=False)
                 ydl = active_ydl
         except Exception as e:
-            # Fallback 1: If explicit browser failed (e.g. locked DB / DPAPI error),
-            # log and fallback to trying without cookies or next detected browser
+            err_str = str(e).lower()
+            is_auth_error = any(kw in err_str for kw in (
+                "sign in", "confirm your age", "private", "login", "log in",
+                "account", "permission", "403", "401", "forbidden", "cookie",
+                "restricted", "member", "bot", "authenticate", "unauthorized",
+                "unavailable", "checkpoint", "not available"
+            ))
+
+            # Fallback 1: If explicit browser was specified and failed (e.g. locked DB / DPAPI error),
+            # log and fallback to trying without cookies, then try other detected browsers
             if self.cookies_from_browser and self.cookies_from_browser.lower() not in ("none", "auto", "off", "") and not (self.cookies_file and os.path.isfile(self.cookies_file)):
                 self.log(f"[{tag}] Cookie extraction from browser '{self.cookies_from_browser}' failed ({e}). Falling back without cookies...")
                 try:
@@ -533,6 +541,26 @@ class YouTubeResolver:
                     self.log(f"[{tag}] Unauthenticated fallback also failed: {fb_err}")
                     info = None
 
+                # If unauthenticated also failed and it was an auth error (or general failure),
+                # try the other detected browsers!
+                if not info:
+                    self.log(f"[{tag}] Attempting fallback to other installed browsers...")
+                    for b in detect_installed_cookie_browsers():
+                        if b.lower() == self.cookies_from_browser.lower():
+                            continue
+                        try:
+                            self.log(f"[{tag}] Retrying extraction with cookies from '{b}'...")
+                            cookie_opts = self._build_ydl_opts(browser=b)
+                            with yt_dlp.YoutubeDL(cookie_opts) as cookie_ydl:
+                                info = cookie_ydl.extract_info(url, download=False)
+                                if info:
+                                    ydl = cookie_ydl
+                                    self.log(f"[{tag}] Successfully extracted stream info using '{b}' cookies.")
+                                    break
+                        except Exception as cookie_err:
+                            self.log(f"[{tag}] Cookies from '{b}' failed: {cookie_err}")
+                            continue
+
             # Fallback 2: If cookies_from_browser == 'auto' (or public unauthenticated failed),
             # iterate over detect_installed_cookie_browsers() and retry
             is_ydl_mocked = bool(getattr(yt_dlp.YoutubeDL, "_mock_name", None))
@@ -540,12 +568,6 @@ class YouTubeResolver:
                 getattr(YtDlpAutoUpdater, "_mock_name", None)
                 or getattr(YtDlpAutoUpdater.update, "_mock_name", None)
             )
-            err_str = str(e).lower()
-            is_auth_error = any(kw in err_str for kw in (
-                "sign in", "confirm your age", "private", "login", "log in",
-                "account", "permission", "403", "forbidden", "cookie",
-                "restricted", "member", "bot", "authenticate", "unauthorized"
-            ))
 
             if not info and (self.cookies_from_browser == "auto" or self.cookies_from_browser is None):
                 if is_auth_error or not is_updater_mocked:
@@ -594,32 +616,47 @@ class YouTubeResolver:
 
         # Propagate Cookie Headers to format http_headers if present in cookiejar or info
         cookiejar = getattr(ydl, "cookiejar", None) if ydl else None
-        jar_cookies: Dict[str, str] = {}
-        if cookiejar:
-            try:
-                for cookie in cookiejar:
-                    jar_cookies[cookie.name] = cookie.value
-            except Exception:
-                pass
+        formats_to_patch = info.get("formats", [])
+        if not formats_to_patch and info.get("url"):
+            formats_to_patch = [info]
 
-        cookie_header_val = ""
-        if jar_cookies:
-            cookie_header_val = "; ".join(f"{k}={v}" for k, v in jar_cookies.items())
-        elif isinstance(info.get("cookies"), str):
-            cookie_header_val = info["cookies"]
+        fallback_cookie_str = ""
+        if isinstance(info.get("cookies"), str):
+            fallback_cookie_str = info["cookies"]
         elif isinstance(info.get("cookies"), dict):
-            cookie_header_val = "; ".join(f"{k}={v}" for k, v in info["cookies"].items())
+            fallback_cookie_str = "; ".join(f"{k}={v}" for k, v in info["cookies"].items())
         elif isinstance(info.get("http_headers"), dict):
-            cookie_header_val = info["http_headers"].get("Cookie") or info["http_headers"].get("cookie") or ""
+            fallback_cookie_str = info["http_headers"].get("Cookie") or info["http_headers"].get("cookie") or ""
 
-        if cookie_header_val:
-            formats_to_patch = info.get("formats", [])
-            if not formats_to_patch and info.get("url"):
-                formats_to_patch = [info]
-            for f in formats_to_patch:
-                headers = f.setdefault("http_headers", {})
-                if "Cookie" not in headers and "cookie" not in headers:
-                    headers["Cookie"] = cookie_header_val
+        if not fallback_cookie_str and cookiejar:
+            if hasattr(cookiejar, "get_cookie_header"):
+                try:
+                    fallback_cookie_str = cookiejar.get_cookie_header(url) or ""
+                except Exception:
+                    pass
+            if not fallback_cookie_str:
+                try:
+                    jar_cookies = {c.name: c.value for c in cookiejar}
+                    if jar_cookies:
+                        fallback_cookie_str = "; ".join(f"{k}={v}" for k, v in jar_cookies.items())
+                except Exception:
+                    pass
+
+        for f in formats_to_patch:
+            headers = f.setdefault("http_headers", {})
+            if "Cookie" in headers or "cookie" in headers:
+                continue
+            fmt_url = f.get("url") or ""
+            cookie_val = ""
+            if cookiejar and fmt_url and hasattr(cookiejar, "get_cookie_header"):
+                try:
+                    cookie_val = cookiejar.get_cookie_header(fmt_url) or ""
+                except Exception:
+                    pass
+            if not cookie_val:
+                cookie_val = fallback_cookie_str
+            if cookie_val:
+                headers["Cookie"] = cookie_val
 
         options = self.build_format_options(info)
         return info, options
@@ -915,7 +952,17 @@ class YouTubeResolver:
                     note=f"Universal MP3 Audio (~{best_audio_abr} kbps • FFmpeg)"
                 ))
         elif ffmpeg_available and (progressive_formats or formats):
-            best_prog_for_audio = progressive_formats[0] if progressive_formats else formats[0]
+            candidates = progressive_formats or formats
+            audio_capable = [f for f in candidates if _has_audio(f)]
+            best_pool = audio_capable if audio_capable else candidates
+
+            def _prog_audio_rank(f):
+                abr = float(f.get("abr") or 0.0)
+                tbr = float(f.get("tbr") or 0.0)
+                is_mp4 = 1 if (f.get("ext") or "").lower() == "mp4" else 0
+                return (abr, tbr, is_mp4, _estimate_size(f))
+
+            best_prog_for_audio = sorted(best_pool, key=_prog_audio_rank, reverse=True)[0]
             prog_size = _estimate_size(best_prog_for_audio)
             est_mp3_size = max(1, int(prog_size * 0.25)) if prog_size > 0 else 0
             options.append(VideoFormatOption(
