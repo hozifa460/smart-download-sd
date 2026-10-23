@@ -50,7 +50,9 @@ from youtube_resolver import (
     YouTubeStreamInfo,
     MediaStreamInfo,
     VideoFormatOption,
-    format_filesize
+    format_filesize,
+    SUPPORTED_COOKIE_BROWSERS,
+    detect_installed_cookie_browsers
 )
 from browser_bridge import BrowserBridgeServer, BrowserBridgeHandler
 from native_messaging_host import read_message, send_message, handle_payload
@@ -5945,8 +5947,348 @@ class TestAppAutoUpdaterAndModal(unittest.TestCase):
                 pass
 
 
+class TestBrowserCookiesAndMP3Extraction(unittest.TestCase):
+    """
+    Unit tests for Browser Cookies detection & extraction, auto-retry on age/login restrictions,
+    progressive social media MP3 transcoding, and QualitySelectionModal one-click MP3 button.
+    """
+
+    def test_detect_installed_cookie_browsers(self):
+        """Verifies detect_installed_cookie_browsers detects browsers or returns standard fallback."""
+        detected = detect_installed_cookie_browsers()
+        self.assertIsInstance(detected, list)
+        self.assertGreater(len(detected), 0)
+        for b in detected:
+            self.assertIn(b, SUPPORTED_COOKIE_BROWSERS)
+
+        # Test fallback when no paths exist
+        with patch("os.path.isdir", return_value=False):
+            fallback = detect_installed_cookie_browsers()
+            self.assertEqual(fallback, ["edge", "chrome", "firefox"])
+
+    def test_build_ydl_opts(self):
+        """Verifies _build_ydl_opts correctly sets cookiefile and cookiesfrombrowser."""
+        resolver = YouTubeResolver()
+
+        # Browser options
+        opts_chrome = resolver._build_ydl_opts(browser="chrome")
+        self.assertEqual(opts_chrome.get("cookiesfrombrowser"), ("chrome",))
+
+        opts_edge = resolver._build_ydl_opts(browser="edge")
+        self.assertEqual(opts_edge.get("cookiesfrombrowser"), ("edge",))
+
+        opts_none = resolver._build_ydl_opts(browser="none")
+        self.assertNotIn("cookiesfrombrowser", opts_none)
+
+        opts_auto = resolver._build_ydl_opts(browser="auto")
+        self.assertNotIn("cookiesfrombrowser", opts_auto)
+
+        # Cookie file options with real temp file
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tf:
+            tf.write(b"# Netscape HTTP Cookie File\n")
+            temp_path = tf.name
+
+        try:
+            opts_file = resolver._build_ydl_opts(cookiefile=temp_path)
+            self.assertEqual(opts_file.get("cookiefile"), temp_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_extract_format_options_auto_cookie_retry_on_login_required(self):
+        """Verifies extract_format_options retries with browser cookies when unauthenticated extraction fails."""
+        import yt_dlp
+        from http.cookiejar import Cookie
+
+        fake_info = {
+            "id": "restricted_vid",
+            "title": "Private / Restricted Video",
+            "formats": [
+                {
+                    "format_id": "18",
+                    "ext": "mp4",
+                    "height": 360,
+                    "url": "https://example.com/restricted.mp4",
+                    "protocol": "https",
+                    "vcodec": "avc1",
+                    "acodec": "mp4a",
+                    "http_headers": {},
+                }
+            ]
+        }
+
+        call_count = [0]
+
+        class FakeYDLContext:
+            def __init__(self, opts):
+                self.opts = opts
+                self.cookiejar = []
+                if "cookiesfrombrowser" in opts:
+                    c = Cookie(
+                        version=0, name="session_id", value="secret123", port=None,
+                        port_specified=False, domain=".example.com", domain_specified=True,
+                        domain_initial_dot=True, path="/", path_specified=True, secure=True,
+                        expires=None, discard=True, comment=None, comment_url=None,
+                        rest={}, rfc2109=False
+                    )
+                    self.cookiejar = [c]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+            def extract_info(self, url, download=False):
+                call_count[0] += 1
+                if "cookiesfrombrowser" not in self.opts:
+                    raise Exception("Sign in to confirm your age or video is private")
+                return fake_info
+
+        resolver = YouTubeResolver(cookies_from_browser="auto")
+        with patch("yt_dlp.YoutubeDL", side_effect=FakeYDLContext):
+            with patch("youtube_resolver.detect_installed_cookie_browsers", return_value=["chrome"]):
+                info, options = resolver.extract_format_options("https://www.youtube.com/watch?v=GTNypvv2Nbg")
+
+                self.assertGreaterEqual(call_count[0], 2)
+                self.assertEqual(info["id"], "restricted_vid")
+                self.assertGreater(len(options), 0)
+                # Verify cookie propagation into format headers
+                self.assertIn("Cookie", options[0].video_headers)
+                self.assertIn("session_id=secret123", options[0].video_headers["Cookie"])
+
+    def test_build_format_options_progressive_mp3(self):
+        """Verifies build_format_options generates Audio Only (MP3) for progressive-only social media streams."""
+        resolver = YouTubeResolver()
+        fake_progressive_info = {
+            "id": "tiktok_123",
+            "title": "TikTok Progressive Video",
+            "webpage_url": "https://www.tiktok.com/@user/video/1234567890",
+            "duration": 60,
+            "formats": [
+                {
+                    "format_id": "prog_720",
+                    "ext": "mp4",
+                    "height": 1280,
+                    "width": 720,
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "protocol": "https",
+                    "url": "https://example.com/tiktok_prog.mp4",
+                    "filesize": 10000000,
+                    "http_headers": {"User-Agent": "SD/2.0"},
+                }
+            ]
+        }
+
+        with patch("youtube_resolver.has_ffmpeg", return_value=True):
+            options = resolver.build_format_options(fake_progressive_info)
+            mp3_opts = [o for o in options if o.is_audio_only and o.ext.lower() == "mp3"]
+            self.assertEqual(len(mp3_opts), 1)
+            mp3_opt = mp3_opts[0]
+            self.assertEqual(mp3_opt.resolution_label, "Audio Only (MP3)")
+            self.assertEqual(mp3_opt.audio_ext, "mp4")
+            self.assertTrue(mp3_opt.is_progressive)
+            self.assertTrue(mp3_opt.is_audio_only)
+
+            # Test build_stream_info preserves audio_ext
+            stream_info = resolver.build_stream_info(fake_progressive_info, mp3_opt)
+            self.assertEqual(stream_info.audio_ext, "mp4")
+            self.assertEqual(stream_info.video_ext, "mp3")
+            self.assertTrue(stream_info.is_audio_only)
+
+    def test_stream_coordinator_mp3_transcoding_execution(self):
+        """Verifies StreamDownloadCoordinator triggers FFmpeg MP3 transcoding when MP3 option is selected."""
+        from turbo_downloader import StreamDownloadCoordinator, YouTubeStreamInfo
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest_mp3 = os.path.join(tmp_dir, "test_output.mp3")
+            tmp_audio = dest_mp3 + ".audio.tmp"
+
+            stream_info = YouTubeStreamInfo(
+                video_id="test_id",
+                title="Test Audio",
+                clean_filename="test_output.mp3",
+                is_progressive=True,
+                video_url="https://example.com/stream.m4a",
+                video_ext="mp3",
+                audio_ext="m4a",
+                video_resolution="Audio Only",
+                is_audio_only=True
+            )
+
+            completed = [False]
+            def on_complete_cb(p, sz, elapsed):
+                completed[0] = True
+
+            coord = StreamDownloadCoordinator(
+                stream_info=stream_info,
+                destination_path=dest_mp3,
+                on_complete=on_complete_cb
+            )
+
+            # Fake TurboDownloadEngine that creates actual_dest file and fires on_complete
+            class FakeEngine:
+                def __init__(self, **kwargs):
+                    self.dest = kwargs["destination_path"]
+                    self.on_complete = kwargs["on_complete"]
+                    self.is_running = False
+
+                def start(self):
+                    with open(self.dest, "wb") as f:
+                        f.write(b"FAKEAACDATA")
+                    self.on_complete(self.dest, 10, 0.1)
+
+                def pause(self):
+                    pass
+
+            def fake_subprocess_run(cmd, **kwargs):
+                # Simulate FFmpeg output creation
+                out_path = cmd[-1]
+                with open(out_path, "wb") as f:
+                    f.write(b"ID3FAKEMP3DATA")
+                res = MagicMock()
+                res.returncode = 0
+                return res
+
+            with patch("turbo_downloader.TurboDownloadEngine", FakeEngine):
+                with patch("turbo_downloader.has_ffmpeg", return_value=True):
+                    with patch("turbo_downloader.find_ffmpeg_bin", return_value="ffmpeg"):
+                        with patch("subprocess.run", side_effect=fake_subprocess_run) as mock_subproc:
+                            coord._run_coordinator()
+
+                            self.assertTrue(completed[0])
+                            self.assertTrue(os.path.isfile(dest_mp3))
+                            self.assertFalse(os.path.isfile(tmp_audio))
+
+                            # Verify FFmpeg command
+                            mock_subproc.assert_called_once()
+                            cmd_called = mock_subproc.call_args[0][0]
+                            self.assertIn("-c:a", cmd_called)
+                            self.assertIn("libmp3lame", cmd_called)
+                            self.assertEqual(cmd_called[-1], dest_mp3)
+
+    def test_quality_selection_modal_download_mp3_button(self):
+        """Verifies QualitySelectionModal includes Download MP3 button and correctly selects MP3 option."""
+        from turbo_downloader import QualitySelectionModal
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            options = [
+                VideoFormatOption(
+                    format_id="137+140",
+                    resolution_label="1080p (Full HD)",
+                    height=1080,
+                    ext="mp4",
+                    filesize_approx=50000000,
+                    fps=30,
+                    is_progressive=False,
+                    is_audio_only=False,
+                    video_url="https://example.com/v.mp4"
+                ),
+                VideoFormatOption(
+                    format_id="140+mp3",
+                    resolution_label="Audio Only (MP3)",
+                    height=0,
+                    ext="mp3",
+                    filesize_approx=5000000,
+                    fps=0,
+                    is_progressive=True,
+                    is_audio_only=True,
+                    audio_ext="m4a",
+                    video_url="https://example.com/a.m4a"
+                ),
+            ]
+
+            confirmed_records = []
+            def on_download_cb(opt, path):
+                confirmed_records.append((opt, path))
+
+            theme = {
+                "c_bg": "#0f172a",
+                "c_panel": "#1e293b",
+                "c_panel_light": "#334155",
+                "c_border": "#475569",
+                "c_accent": "#38bdf8",
+                "c_accent_dark": "#0284c7",
+                "c_success": "#10b981",
+                "c_warning": "#f59e0b",
+                "c_error": "#ef4444",
+                "c_text_bright": "#ffffff",
+                "c_text_muted": "#94a3b8",
+                "c_input_bg": "#0f172a"
+            }
+
+            modal = QualitySelectionModal(
+                parent=root,
+                video_title="Test Video Title",
+                duration=120,
+                options=options,
+                default_dest_path=os.path.join(os.path.expanduser("~"), "Downloads", "Test Video Title.mp4"),
+                theme=theme,
+                on_confirm=on_download_cb
+            )
+
+            self.assertTrue(hasattr(modal, "btn_download_mp3"))
+            self.assertEqual(modal.btn_download_mp3.cget("text"), "🎵 Download MP3")
+
+            modal._on_download_mp3()
+
+            self.assertEqual(len(confirmed_records), 1)
+            sel_opt, sel_path = confirmed_records[0]
+            self.assertEqual(sel_opt.ext, "mp3")
+            self.assertTrue(sel_path.endswith(".mp3"))
+        finally:
+            try:
+                root.update_idletasks()
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_modern_frameless_gui_cookies_button_cycle(self):
+        """Verifies ModernFramelessGUI includes cookies button and cycles through settings."""
+        from turbo_downloader import ModernFramelessGUI, get_setting, set_setting
+
+        root = tk.Tk()
+        root.withdraw()
+        gui = ModernFramelessGUI(root)
+        try:
+            self.assertTrue(hasattr(gui, "btn_cookies"))
+            orig_browser = gui.cookies_browser
+
+            gui.cookies_browser = "auto"
+            gui.cookies_file = ""
+            gui._update_cookies_btn()
+            self.assertIn("Auto", gui.btn_cookies.cget("text"))
+
+            # Test cycle: auto -> edge
+            gui.cycle_cookies_setting()
+            self.assertEqual(gui.cookies_browser, "edge")
+            self.assertIn("Edge", gui.btn_cookies.cget("text"))
+
+            # Test cycling to none
+            gui.cookies_browser = "brave"
+            gui.cookies_file = ""
+            # brave -> file... (with mock cancel) -> none
+            with patch("tkinter.filedialog.askopenfilename", return_value=""):
+                gui.cycle_cookies_setting()
+                self.assertEqual(gui.cookies_browser, "none")
+                self.assertIn("Off", gui.btn_cookies.cget("text"))
+        finally:
+            gui._cleanup_resources()
+            try:
+                root.update_idletasks()
+                root.destroy()
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

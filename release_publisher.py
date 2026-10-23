@@ -133,12 +133,18 @@ def upload_asset_with_curl(upload_url, token, file_path):
 
 
 def main():
+    global TAG, RELEASE_NAME
+    for idx, arg in enumerate(sys.argv):
+        if arg == "--tag" and idx + 1 < len(sys.argv):
+            TAG = sys.argv[idx + 1]
+            RELEASE_NAME = f"Smart Download (SD) {TAG} — Multi-Platform Social Media Downloader"
+
     username, token = get_git_credentials()
     log(f"[+] Retrieved git credentials for user: {username}")
 
     base_api = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
 
-    # 1. Inspect release v2.0.0
+    # 1. Inspect release
     log(f"[*] Checking release {TAG}...")
     status, res = api_request(f"{base_api}/releases/tags/{TAG}", token)
     release_data = None

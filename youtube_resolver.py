@@ -110,6 +110,69 @@ SOCIAL_MEDIA_PATTERNS = {
 # Reserved filename characters for Windows / Linux cross-compatibility
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
+# Supported browser sources for session cookies extraction
+SUPPORTED_COOKIE_BROWSERS = ("auto", "none", "edge", "chrome", "firefox", "brave", "opera", "vivaldi")
+
+
+def detect_installed_cookie_browsers() -> List[str]:
+    """
+    Detects installed web browsers capable of supplying session cookies to yt-dlp.
+    Checks standard Windows user data paths under %LOCALAPPDATA% and %APPDATA%:
+    - 'firefox': %APPDATA%\\Mozilla\\Firefox\\Profiles
+    - 'edge': %LOCALAPPDATA%\\Microsoft\\Edge\\User Data
+    - 'chrome': %LOCALAPPDATA%\\Google\\Chrome\\User Data
+    - 'brave': %LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data
+    - 'opera': %APPDATA%\\Opera Software\\Opera Stable
+    - 'vivaldi': %LOCALAPPDATA%\\Vivaldi\\User Data
+    Returns list of detected browser names; falls back to ['edge', 'chrome', 'firefox'] if none found on disk.
+    """
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    appdata = os.environ.get("APPDATA", "")
+    userprofile = os.environ.get("USERPROFILE", "")
+    home = os.path.expanduser("~")
+
+    browser_checks = [
+        ("firefox", [
+            os.path.join(appdata, "Mozilla", "Firefox", "Profiles") if appdata else "",
+            os.path.join(userprofile, "AppData", "Roaming", "Mozilla", "Firefox", "Profiles") if userprofile else "",
+            os.path.join(home, ".mozilla", "firefox"),
+        ]),
+        ("edge", [
+            os.path.join(local_appdata, "Microsoft", "Edge", "User Data") if local_appdata else "",
+            os.path.join(userprofile, "AppData", "Local", "Microsoft", "Edge", "User Data") if userprofile else "",
+            os.path.join(home, ".config", "microsoft-edge"),
+        ]),
+        ("chrome", [
+            os.path.join(local_appdata, "Google", "Chrome", "User Data") if local_appdata else "",
+            os.path.join(userprofile, "AppData", "Local", "Google", "Chrome", "User Data") if userprofile else "",
+            os.path.join(home, ".config", "google-chrome"),
+        ]),
+        ("brave", [
+            os.path.join(local_appdata, "BraveSoftware", "Brave-Browser", "User Data") if local_appdata else "",
+            os.path.join(userprofile, "AppData", "Local", "BraveSoftware", "Brave-Browser", "User Data") if userprofile else "",
+            os.path.join(home, ".config", "BraveSoftware", "Brave-Browser"),
+        ]),
+        ("opera", [
+            os.path.join(appdata, "Opera Software", "Opera Stable") if appdata else "",
+            os.path.join(userprofile, "AppData", "Roaming", "Opera Software", "Opera Stable") if userprofile else "",
+            os.path.join(home, ".config", "opera"),
+        ]),
+        ("vivaldi", [
+            os.path.join(local_appdata, "Vivaldi", "User Data") if local_appdata else "",
+            os.path.join(userprofile, "AppData", "Local", "Vivaldi", "User Data") if userprofile else "",
+            os.path.join(home, ".config", "vivaldi"),
+        ]),
+    ]
+
+    detected: List[str] = []
+    for name, candidate_paths in browser_checks:
+        for p in candidate_paths:
+            if p and os.path.isdir(p):
+                detected.append(name)
+                break
+
+    return detected if detected else ["edge", "chrome", "firefox"]
+
 
 def is_youtube_url(url: str) -> bool:
     """Returns True if the given URL is a recognized YouTube video or shorts URL."""
@@ -378,11 +441,35 @@ class YouTubeResolver:
         self,
         on_log: Optional[Callable[[str], None]] = None,
         socket_timeout: int = 12,
-        auto_update_on_failure: bool = True
+        auto_update_on_failure: bool = True,
+        cookies_from_browser: Optional[str] = "auto",
+        cookies_file: Optional[str] = None
     ):
         self.on_log = on_log
         self.socket_timeout = max(1, int(socket_timeout))
         self.auto_update_on_failure = bool(auto_update_on_failure)
+        self.cookies_from_browser = cookies_from_browser
+        self.cookies_file = cookies_file
+
+    def _build_ydl_opts(self, browser: Optional[str] = None, cookiefile: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Builds standard yt-dlp extraction options dictionary, augmenting with cookiefile
+        or cookiesfrombrowser if specified.
+        """
+        opts: Dict[str, Any] = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "nocheckcertificate": True,
+            "noplaylist": True,
+            "socket_timeout": self.socket_timeout,
+            "remote_components": ["ejs:github"],
+        }
+        if cookiefile and os.path.isfile(cookiefile):
+            opts["cookiefile"] = cookiefile
+        if browser and browser.lower() not in ("none", "auto", "off", ""):
+            opts["cookiesfrombrowser"] = (browser.lower(),)
+        return opts
 
     def log(self, message: str):
         if self.on_log:
@@ -396,6 +483,7 @@ class YouTubeResolver:
         Extracts raw metadata and a structured, deduplicated list of available VideoFormatOption choices
         (e.g. 4K, 1440p, 1080p, 720p, 480p, 360p, and Audio-only) sorted by resolution descending.
         Supports YouTube as well as Instagram, Facebook, Twitter/X, TikTok, Reddit, Vimeo, Dailymotion, Pinterest, etc.
+        Automatically retries with browser session cookies for login-required, private, or age-restricted media.
         """
         if not is_media_url(url, check_ytdlp_extractors=True):
             raise ValueError(f"URL is not a recognized media or streaming URL: {url}")
@@ -416,40 +504,84 @@ class YouTubeResolver:
         except ImportError:
             raise RuntimeError("yt-dlp Python package is required. Install with 'pip install yt-dlp'.")
 
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "nocheckcertificate": True,
-            "noplaylist": True,
-            "socket_timeout": self.socket_timeout,
-            "remote_components": ["ejs:github"],
-        }
+        # Determine initial ydl_opts
+        if self.cookies_file and os.path.isfile(self.cookies_file):
+            ydl_opts = self._build_ydl_opts(cookiefile=self.cookies_file)
+        elif self.cookies_from_browser and self.cookies_from_browser.lower() not in ("none", "auto", "off", ""):
+            ydl_opts = self._build_ydl_opts(browser=self.cookies_from_browser)
+        else:
+            ydl_opts = self._build_ydl_opts()
+
+        info = None
+        ydl = None
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            with yt_dlp.YoutubeDL(ydl_opts) as active_ydl:
+                info = active_ydl.extract_info(url, download=False)
+                ydl = active_ydl
         except Exception as e:
+            # Fallback 1: If explicit browser failed (e.g. locked DB / DPAPI error),
+            # log and fallback to trying without cookies or next detected browser
+            if self.cookies_from_browser and self.cookies_from_browser.lower() not in ("none", "auto", "off", "") and not (self.cookies_file and os.path.isfile(self.cookies_file)):
+                self.log(f"[{tag}] Cookie extraction from browser '{self.cookies_from_browser}' failed ({e}). Falling back without cookies...")
+                try:
+                    fallback_opts = self._build_ydl_opts()
+                    with yt_dlp.YoutubeDL(fallback_opts) as fb_ydl:
+                        info = fb_ydl.extract_info(url, download=False)
+                        ydl = fb_ydl
+                except Exception as fb_err:
+                    self.log(f"[{tag}] Unauthenticated fallback also failed: {fb_err}")
+                    info = None
+
+            # Fallback 2: If cookies_from_browser == 'auto' (or public unauthenticated failed),
+            # iterate over detect_installed_cookie_browsers() and retry
             is_ydl_mocked = bool(getattr(yt_dlp.YoutubeDL, "_mock_name", None))
             is_updater_mocked = bool(
                 getattr(YtDlpAutoUpdater, "_mock_name", None)
                 or getattr(YtDlpAutoUpdater.update, "_mock_name", None)
             )
-            if self.auto_update_on_failure and (not is_ydl_mocked or is_updater_mocked):
-                self.log(f"[{tag}] Extraction failed ({e}). Checking for yt-dlp engine update...")
-                try:
-                    up_res = YtDlpAutoUpdater(on_log=self.log).update()
-                    if up_res.get("updated"):
-                        import yt_dlp as refreshed_yt_dlp
-                        self.log(f"[{tag}] Retrying extraction with updated yt-dlp v{up_res.get('version')}...")
-                        with refreshed_yt_dlp.YoutubeDL(ydl_opts) as ydl2:
-                            info = ydl2.extract_info(url, download=False)
-                    else:
-                        raise e
-                except Exception:
+            err_str = str(e).lower()
+            is_auth_error = any(kw in err_str for kw in (
+                "sign in", "confirm your age", "private", "login", "log in",
+                "account", "permission", "403", "forbidden", "cookie",
+                "restricted", "member", "bot", "authenticate", "unauthorized"
+            ))
+
+            if not info and (self.cookies_from_browser == "auto" or self.cookies_from_browser is None):
+                if is_auth_error or not is_updater_mocked:
+                    self.log(f"[{tag}] Public extraction failed ({e}). Attempting extraction with browser cookies...")
+                    for b in detect_installed_cookie_browsers():
+                        try:
+                            self.log(f"[{tag}] Retrying extraction with cookies from '{b}'...")
+                            cookie_opts = self._build_ydl_opts(browser=b)
+                            with yt_dlp.YoutubeDL(cookie_opts) as cookie_ydl:
+                                info = cookie_ydl.extract_info(url, download=False)
+                                if info:
+                                    ydl = cookie_ydl
+                                    self.log(f"[{tag}] Successfully extracted stream info using '{b}' cookies.")
+                                    break
+                        except Exception as cookie_err:
+                            self.log(f"[{tag}] Cookies from '{b}' failed: {cookie_err}")
+                            continue
+
+            # Fallback 3: If still no info, check auto-updater fallback
+            if not info:
+                if self.auto_update_on_failure and (not is_ydl_mocked or is_updater_mocked):
+                    self.log(f"[{tag}] Extraction failed ({e}). Checking for yt-dlp engine update...")
+                    try:
+                        up_res = YtDlpAutoUpdater(on_log=self.log).update()
+                        if up_res.get("updated"):
+                            import yt_dlp as refreshed_yt_dlp
+                            self.log(f"[{tag}] Retrying extraction with updated yt-dlp v{up_res.get('version')}...")
+                            with refreshed_yt_dlp.YoutubeDL(ydl_opts) as ydl2:
+                                info = ydl2.extract_info(url, download=False)
+                                ydl = ydl2
+                        else:
+                            raise e
+                    except Exception:
+                        raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
+                else:
                     raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
-            else:
-                raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
 
         if not info:
             raise RuntimeError("yt-dlp returned empty metadata for the provided URL.")
@@ -459,6 +591,35 @@ class YouTubeResolver:
 
         if not info:
             raise RuntimeError("yt-dlp returned empty metadata for the provided URL.")
+
+        # Propagate Cookie Headers to format http_headers if present in cookiejar or info
+        cookiejar = getattr(ydl, "cookiejar", None) if ydl else None
+        jar_cookies: Dict[str, str] = {}
+        if cookiejar:
+            try:
+                for cookie in cookiejar:
+                    jar_cookies[cookie.name] = cookie.value
+            except Exception:
+                pass
+
+        cookie_header_val = ""
+        if jar_cookies:
+            cookie_header_val = "; ".join(f"{k}={v}" for k, v in jar_cookies.items())
+        elif isinstance(info.get("cookies"), str):
+            cookie_header_val = info["cookies"]
+        elif isinstance(info.get("cookies"), dict):
+            cookie_header_val = "; ".join(f"{k}={v}" for k, v in info["cookies"].items())
+        elif isinstance(info.get("http_headers"), dict):
+            cookie_header_val = info["http_headers"].get("Cookie") or info["http_headers"].get("cookie") or ""
+
+        if cookie_header_val:
+            formats_to_patch = info.get("formats", [])
+            if not formats_to_patch and info.get("url"):
+                formats_to_patch = [info]
+            for f in formats_to_patch:
+                headers = f.setdefault("http_headers", {})
+                if "Cookie" not in headers and "cookie" not in headers:
+                    headers["Cookie"] = cookie_header_val
 
         options = self.build_format_options(info)
         return info, options
@@ -731,6 +892,7 @@ class YouTubeResolver:
                 is_audio_only=True,
                 video_url=best_audio["url"],
                 video_headers=best_audio.get("http_headers", {}),
+                audio_ext=best_audio_ext,
                 note=f"High Quality Audio (~{best_audio_abr} kbps)"
             ))
 
@@ -749,8 +911,29 @@ class YouTubeResolver:
                     is_audio_only=True,
                     video_url=best_audio["url"],
                     video_headers=best_audio.get("http_headers", {}),
+                    audio_ext=best_audio_ext,
                     note=f"Universal MP3 Audio (~{best_audio_abr} kbps • FFmpeg)"
                 ))
+        elif ffmpeg_available and (progressive_formats or formats):
+            best_prog_for_audio = progressive_formats[0] if progressive_formats else formats[0]
+            prog_size = _estimate_size(best_prog_for_audio)
+            est_mp3_size = max(1, int(prog_size * 0.25)) if prog_size > 0 else 0
+            options.append(VideoFormatOption(
+                format_id=f"{best_prog_for_audio.get('format_id', 'prog')}+mp3",
+                resolution_label="Audio Only (MP3)",
+                height=0,
+                ext="mp3",
+                filesize_approx=est_mp3_size,
+                fps=0,
+                vcodec="none",
+                acodec="mp3",
+                is_progressive=True,
+                is_audio_only=True,
+                video_url=best_prog_for_audio["url"],
+                video_headers=best_prog_for_audio.get("http_headers", {}),
+                audio_ext=(best_prog_for_audio.get("ext") or "mp4").lower(),
+                note="Universal MP3 Audio (Extracted via FFmpeg)"
+            ))
 
         # 5. Safety fallback if options is still empty but formats exist
         if not options and formats:
@@ -806,7 +989,7 @@ class YouTubeResolver:
                 video_size=option.filesize_approx,
                 audio_url=None,
                 audio_headers={},
-                audio_ext="",
+                audio_ext=option.audio_ext or option.ext,
                 audio_size=0,
                 duration=duration,
                 thumbnail_url=thumbnail,

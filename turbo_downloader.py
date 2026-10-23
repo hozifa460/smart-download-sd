@@ -48,6 +48,7 @@ import shutil
 import tempfile
 import hashlib
 import threading
+import subprocess
 import weakref
 import queue
 import ssl
@@ -137,7 +138,9 @@ from youtube_resolver import (
     YouTubeStreamInfo,
     MediaStreamInfo,
     VideoFormatOption,
-    format_filesize
+    format_filesize,
+    SUPPORTED_COOKIE_BROWSERS,
+    detect_installed_cookie_browsers
 )
 from browser_bridge import BrowserBridgeServer, DEFAULT_BRIDGE_PORT
 from register_browser import (
@@ -2579,10 +2582,11 @@ class StreamDownloadCoordinator:
             if self.stream_info.is_progressive or not self.stream_info.audio_url:
                 # Progressive single-stream download with dynamic chunking
                 # Check if this is an audio-only stream requesting MP3 conversion via FFmpeg
+                src_audio_ext = (getattr(self.stream_info, "audio_ext", "") or "").lower()
                 is_mp3_request = (
                     self.stream_info.is_audio_only
-                    and self.destination_path.lower().endswith(".mp3")
-                    and self.stream_info.video_ext != "mp3"
+                    and (self.destination_path.lower().endswith(".mp3") or self.stream_info.video_ext.lower() == "mp3")
+                    and src_audio_ext != "mp3"
                     and has_ffmpeg()
                 )
                 actual_dest = self.destination_path + ".audio.tmp" if is_mp3_request else self.destination_path
@@ -3566,6 +3570,23 @@ class QualitySelectionModal(tk.Toplevel):
         )
         self.btn_download.pack(side=tk.LEFT)
 
+        has_audio = any(opt.is_audio_only for opt in self.options)
+        if has_audio:
+            self.btn_download_mp3 = tk.Button(
+                btn_row,
+                text="🎵 Download MP3",
+                font=("Segoe UI", 9, "bold"),
+                bg=c_accent_dark,
+                fg="white",
+                relief="flat",
+                activebackground=c_accent,
+                cursor="hand2",
+                padx=16,
+                pady=6,
+                command=self._on_download_mp3
+            )
+            self.btn_download_mp3.pack(side=tk.LEFT, padx=(8, 0))
+
         self.btn_cancel = tk.Button(
             btn_row,
             text="✕ Cancel",
@@ -3595,6 +3616,33 @@ class QualitySelectionModal(tk.Toplevel):
             command=self._on_open_in_main
         )
         self.btn_open_app.pack(side=tk.RIGHT, padx=(0, 8))
+
+    def _on_download_mp3(self):
+        """One-click download as universal MP3 audio."""
+        mp3_opt = next((o for o in self.options if o.is_audio_only and o.ext.lower() == "mp3"), None)
+        if not mp3_opt:
+            mp3_opt = next((o for o in self.options if o.is_audio_only), None)
+        if not mp3_opt:
+            return
+
+        self.selected_option = mp3_opt
+        for iid, opt in self._row_to_opt.items():
+            if opt == mp3_opt:
+                self.tree.selection_set(iid)
+                self.tree.focus(iid)
+                break
+
+        cur_path = self.entry_dest.get().strip()
+        if cur_path:
+            base, _ = os.path.splitext(cur_path)
+            self.entry_dest.delete(0, tk.END)
+            self.entry_dest.insert(0, base + ".mp3")
+        elif self.dest_path:
+            base, _ = os.path.splitext(self.dest_path)
+            self.entry_dest.delete(0, tk.END)
+            self.entry_dest.insert(0, base + ".mp3")
+
+        self._on_download()
 
     def _on_tree_double_click(self, event):
         item = self.tree.identify_row(event.y)
@@ -6243,6 +6291,8 @@ class ModernFramelessGUI:
         self._was_started_hidden: bool = bool(start_hidden)
         self._startup_enabled: bool = is_startup_enabled()
         self.minimize_to_tray: bool = bool(get_setting("minimize_to_tray", True))
+        self.cookies_browser: str = str(get_setting("cookies_browser", "auto") or "auto")
+        self.cookies_file: str = str(get_setting("cookies_file", "") or "")
         self.engine: Optional[Union[TurboDownloadEngine, StreamDownloadCoordinator]] = None
         self._yt_cancel_event = threading.Event()
         self._quality_modal: Optional[tk.Toplevel] = None
@@ -7518,6 +7568,21 @@ class ModernFramelessGUI:
         self.btn_startup.pack(side=tk.RIGHT, padx=(0, 8))
         self._update_startup_btn()
 
+        self.btn_cookies = tk.Button(
+            row2,
+            text=self._get_cookies_btn_text(),
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            command=self.cycle_cookies_setting
+        )
+        self.btn_cookies.pack(side=tk.RIGHT, padx=(0, 8))
+        self._update_cookies_btn()
+
     def _on_slider_moved(self, val_str):
         """Dynamic slider movement throttles engine in real-time."""
         try:
@@ -8001,7 +8066,11 @@ class ModernFramelessGUI:
 
         def _resolve_and_prompt():
             try:
-                resolver = YouTubeResolver(on_log=self.log)
+                resolver = YouTubeResolver(
+                    on_log=self.log,
+                    cookies_from_browser=self.cookies_browser,
+                    cookies_file=self.cookies_file
+                )
                 info, options = resolver.extract_format_options(url)
 
                 if self._yt_cancel_event.is_set():
@@ -8498,6 +8567,91 @@ class ModernFramelessGUI:
                     fg=self.c_text_muted,
                     bg=self.c_panel
                 )
+
+    def _get_cookies_btn_text(self) -> str:
+        """Returns the display label for the cookies setting button."""
+        if self.cookies_file and os.path.isfile(self.cookies_file):
+            return "🍪 Cookies: File"
+        cb = (self.cookies_browser or "auto").lower()
+        if cb in ("none", "off"):
+            return "🍪 Cookies: Off"
+        display_names = {
+            "auto": "Auto",
+            "edge": "Edge",
+            "chrome": "Chrome",
+            "firefox": "Firefox",
+            "brave": "Brave",
+            "opera": "Opera",
+            "vivaldi": "Vivaldi",
+        }
+        return f"🍪 Cookies: {display_names.get(cb, cb.capitalize())}"
+
+    def _update_cookies_btn(self):
+        """Refreshes the visual text and theme colors of the cookies button."""
+        if not hasattr(self, "btn_cookies"):
+            return
+        try:
+            if not self.btn_cookies.winfo_exists():
+                return
+        except Exception:
+            return
+
+        btn_text = self._get_cookies_btn_text()
+        cb = (self.cookies_browser or "auto").lower()
+        has_cookies = not (cb in ("none", "off") and not (self.cookies_file and os.path.isfile(self.cookies_file)))
+
+        self.btn_cookies.configure(
+            text=btn_text,
+            fg=self.c_accent if has_cookies else self.c_text_muted,
+            bg=self.c_panel_light if has_cookies else self.c_panel
+        )
+
+    def cycle_cookies_setting(self):
+        """
+        Cycles through cookie options:
+        ('auto', 'edge', 'chrome', 'firefox', 'brave', 'file...', 'none')
+        Saves chosen setting to app configuration.
+        """
+        cycle_options = ["auto", "edge", "chrome", "firefox", "brave", "file...", "none"]
+        current = "file..." if (self.cookies_file and os.path.isfile(self.cookies_file)) else (self.cookies_browser or "auto").lower()
+        try:
+            cur_idx = cycle_options.index(current)
+        except ValueError:
+            cur_idx = 0
+
+        next_idx = (cur_idx + 1) % len(cycle_options)
+        next_val = cycle_options[next_idx]
+
+        if next_val == "file...":
+            chosen = filedialog.askopenfilename(
+                parent=self.root,
+                title="Select Netscape cookies.txt file",
+                filetypes=[("Text / Cookie files", "*.txt;*.cookies"), ("All files", "*.*")]
+            )
+            if chosen and os.path.isfile(chosen):
+                self.cookies_file = chosen
+                self.cookies_browser = "file"
+                set_setting("cookies_file", self.cookies_file)
+                set_setting("cookies_browser", "file")
+                self.log(f"[COOKIES] Loaded cookie file: {chosen}")
+            else:
+                # Cancelled file dialog -> skip to 'none'
+                self.cookies_file = ""
+                self.cookies_browser = "none"
+                set_setting("cookies_file", "")
+                set_setting("cookies_browser", "none")
+                self.log("[COOKIES] Browser cookies disabled.")
+        else:
+            self.cookies_file = ""
+            self.cookies_browser = next_val
+            set_setting("cookies_file", "")
+            set_setting("cookies_browser", next_val)
+            if next_val == "none":
+                self.log("[COOKIES] Browser cookies disabled.")
+            else:
+                self.log(f"[COOKIES] Cookie browser set to: {next_val.capitalize()}")
+
+        self._update_cookies_btn()
 
     def toggle_startup_setting(self) -> bool:
         """Toggles Windows startup on boot registry entry with live feedback."""
