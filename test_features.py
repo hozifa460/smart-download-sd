@@ -16,10 +16,15 @@ Comprehensive verification covering:
 """
 
 import os
+import tempfile
 os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
 os.environ["SD_DISABLE_AUTO_UPDATE"] = "1"
 os.environ["SD_DISABLE_STARTUP_TOAST"] = "1"
 os.environ["SD_LANGUAGE"] = "en"
+if not os.environ.get("SD_CONFIG_DIR"):
+    _sd_test_cfg = os.path.join(tempfile.gettempdir(), "sd_test_isolated_cfg")
+    os.makedirs(_sd_test_cfg, exist_ok=True)
+    os.environ["SD_CONFIG_DIR"] = _sd_test_cfg
 import sys
 import time
 import json
@@ -112,8 +117,25 @@ from turbo_downloader import (
     DownloadHistoryManager,
     get_app_config_dir,
     resolve_real_download_url,
-    StartupWelcomeToast
+    StartupWelcomeToast,
+    LocalizationManager
 )
+
+
+def setUpModule():
+    os.environ["SD_LANGUAGE"] = "en"
+    try:
+        set_setting("language", "en")
+        LocalizationManager.reset_instance("en")
+    except Exception:
+        pass
+
+
+def tearDownModule():
+    try:
+        LocalizationManager.reset_instance()
+    except Exception:
+        pass
 
 
 class TestYouTubeDetectionAndSanitization(unittest.TestCase):
@@ -7662,16 +7684,17 @@ class TestBilingualLocalization(unittest.TestCase):
     """Verifies LocalizationManager, translation dictionaries, persistence, dynamic switching, and widget updates."""
 
     def setUp(self):
-        from turbo_downloader import LocalizationManager, get_setting
+        from turbo_downloader import LocalizationManager
         self.loc = LocalizationManager.get_instance()
-        self.orig_lang = get_setting("language", "en")
+        self.orig_lang = "en"
+        self.loc.set_language("en")
         self.root = tk.Tk()
         self.root.withdraw()
 
     def tearDown(self):
         from turbo_downloader import set_setting
-        self.loc.set_language(self.orig_lang)
-        set_setting("language", self.orig_lang)
+        self.loc.set_language("en")
+        set_setting("language", "en")
         try:
             for child in self.root.winfo_children():
                 try:
@@ -7698,6 +7721,15 @@ class TestBilingualLocalization(unittest.TestCase):
         set_current_language("ar")
         self.assertEqual(get_current_language(), "ar")
         self.assertTrue(loc1.is_rtl())
+
+        # Verify explicit default_lang override via reset_instance
+        loc_ar = LocalizationManager.reset_instance("ar")
+        self.assertEqual(loc_ar.get_language(), "ar")
+        self.assertTrue(loc_ar.is_rtl())
+
+        loc_en = LocalizationManager.reset_instance("en")
+        self.assertEqual(loc_en.get_language(), "en")
+        self.assertFalse(loc_en.is_rtl())
 
     def test_translations_key_symmetry_and_required_coverage(self):
         """Verifies complete key symmetry between Arabic and English dictionaries and coverage of all required keys."""
@@ -7835,8 +7867,8 @@ class TestBilingualLocalization(unittest.TestCase):
         """Verifies startup button in Arabic mode displays clear text avoiding confusion with 'Bot'."""
         from turbo_downloader import ModernFramelessGUI
         self.loc.set_language("ar")
-        app = ModernFramelessGUI(self.root, start_hidden=True)
         try:
+            app = ModernFramelessGUI(self.root, start_hidden=True)
             btn_text = app.btn_startup.cget("text")
             self.assertIn("بدء التشغيل مع ويندوز", btn_text)
             self.assertNotIn("Boot:", btn_text)
@@ -7846,6 +7878,7 @@ class TestBilingualLocalization(unittest.TestCase):
                 app._cleanup_resources()
             except Exception:
                 pass
+            self.loc.set_language("en")
 
     def test_magic_bytes_detector(self):
         """Verifies MagicBytesDetector accurately identifies container formats from binary signatures."""

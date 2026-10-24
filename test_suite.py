@@ -16,8 +16,16 @@ Thorough verification of:
 """
 
 import os
+import tempfile
 os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
 os.environ["SD_DISABLE_STARTUP_TOAST"] = "1"
+os.environ["SD_DISABLE_AUTO_UPDATE"] = "1"
+os.environ["SD_LANGUAGE"] = "en"
+if not os.environ.get("SD_CONFIG_DIR"):
+    _sd_test_cfg = os.path.join(tempfile.gettempdir(), "sd_test_isolated_cfg")
+    os.makedirs(_sd_test_cfg, exist_ok=True)
+    os.environ["SD_CONFIG_DIR"] = _sd_test_cfg
+
 import unittest
 import http.server
 import socketserver
@@ -43,7 +51,9 @@ from turbo_downloader import (
     ModernFramelessGUI,
     SafeModalDialog,
     QualitySelectionModal,
-    VideoFormatOption
+    VideoFormatOption,
+    LocalizationManager,
+    set_setting
 )
 from youtube_resolver import (
     is_youtube_url,
@@ -51,6 +61,22 @@ from youtube_resolver import (
     is_media_url,
     extract_media_platform
 )
+
+
+def setUpModule():
+    os.environ["SD_LANGUAGE"] = "en"
+    try:
+        set_setting("language", "en")
+        LocalizationManager.reset_instance("en")
+    except Exception:
+        pass
+
+
+def tearDownModule():
+    try:
+        LocalizationManager.reset_instance()
+    except Exception:
+        pass
 
 
 class MockServerHandler(http.server.BaseHTTPRequestHandler):

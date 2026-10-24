@@ -2,8 +2,16 @@
 Tests for Windows High-DPI Awareness, UI Scaling, and Application Assets
 """
 import os
+import tempfile
 os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
 os.environ["SD_DISABLE_STARTUP_TOAST"] = "1"
+os.environ["SD_DISABLE_AUTO_UPDATE"] = "1"
+os.environ["SD_LANGUAGE"] = "en"
+if not os.environ.get("SD_CONFIG_DIR"):
+    _sd_test_cfg = os.path.join(tempfile.gettempdir(), "sd_test_isolated_cfg")
+    os.makedirs(_sd_test_cfg, exist_ok=True)
+    os.environ["SD_CONFIG_DIR"] = _sd_test_cfg
+
 import sys
 import unittest
 import tkinter as tk
@@ -15,8 +23,27 @@ from turbo_downloader import (
     get_resource_path,
     ModernFramelessGUI,
     SafeModalDialog,
-    QualitySelectionModal
+    QualitySelectionModal,
+    LocalizationManager,
+    set_setting
 )
+
+
+def setUpModule():
+    os.environ["SD_LANGUAGE"] = "en"
+    try:
+        set_setting("language", "en")
+        LocalizationManager.reset_instance("en")
+    except Exception:
+        pass
+
+
+def tearDownModule():
+    try:
+        LocalizationManager.reset_instance()
+    except Exception:
+        pass
+
 
 class TestDPIAndAssets(unittest.TestCase):
     @classmethod
