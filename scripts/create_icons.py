@@ -101,9 +101,18 @@ def clean_transparent_rgb(im: Image.Image) -> Image.Image:
 
 def main():
     src_path = r'C:/Users/hazoz/.gemini/antigravity/brain/1fb424b8-7352-420a-9e4e-5a26862632b1/.user_uploaded/media_1792680613694_4ba98c90.jpg'
+    ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+    png_path = os.path.join(ASSETS_DIR, "app_icon.png")
+    ico_path = os.path.join(ASSETS_DIR, "app_icon.ico")
+
     if not os.path.exists(src_path):
         # Fallback to local app_icon.png if source is not present
-        if os.path.exists('app_icon.png'):
+        if os.path.exists(png_path):
+            print("Using existing assets/app_icon.png as source master...")
+            master = Image.open(png_path).convert('RGBA')
+        elif os.path.exists('app_icon.png'):
             print("Using existing app_icon.png as source master...")
             master = Image.open('app_icon.png').convert('RGBA')
         else:
@@ -113,20 +122,20 @@ def main():
         master = extract_badge(src_path)
         master = clean_transparent_rgb(master)
         icon256 = clean_transparent_rgb(master.resize((256, 256), Image.Resampling.LANCZOS))
-        icon256.save("app_icon.png", format="PNG")
-        print("Saved app_icon.png (256x256)")
+        icon256.save(png_path, format="PNG")
+        print(f"Saved {png_path} (256x256)")
 
     # Multi-resolution ICO: 16, 24, 32, 48, 64, 128, 256
     sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
     master.save(
-        "app_icon.ico",
+        ico_path,
         format="ICO",
         sizes=sizes
     )
-    print(f"Saved app_icon.ico with {len(sizes)} resolutions: {sizes}")
+    print(f"Saved {ico_path} with {len(sizes)} resolutions: {sizes}")
 
     # Update extension icons
-    for d in ["extension/icons", "dist/extension/icons"]:
+    for d in [os.path.join(ROOT_DIR, "extension", "icons"), os.path.join(ROOT_DIR, "dist", "extension", "icons")]:
         os.makedirs(d, exist_ok=True)
         clean_transparent_rgb(master.resize((16, 16), Image.Resampling.LANCZOS)).save(os.path.join(d, "icon16.png"), format="PNG")
         clean_transparent_rgb(master.resize((48, 48), Image.Resampling.LANCZOS)).save(os.path.join(d, "icon48.png"), format="PNG")

@@ -1,0 +1,136 @@
+"""
+Application configuration, paths, constants, and settings management for Smart Download.
+"""
+import os
+import sys
+import json
+import shutil
+import tempfile
+from typing import Dict, Any, Optional
+
+APP_NAME = "Smart Download"
+APP_TITLE = "Smart Download (SD)"
+APP_ID = "SmartDownload"
+APP_VERSION = "2.0.0"
+APP_AUTHOR = "Smart Download Team"
+GITHUB_REPO_OWNER = "hozifa460"
+GITHUB_REPO_NAME = "smart-download-sd"
+DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+IS_WINDOWS = sys.platform.startswith("win")
+
+# Dynamic chunking engine defaults
+CHUNK_SIZE_KB = 1024
+MAX_CONCURRENT_CHUNKS = 32
+DEFAULT_CHUNKS = 8
+MIN_CHUNK_BYTES = 512 * 1024
+BUFFER_SIZE = 64 * 1024
+
+def get_resource_path(relative_path: str) -> str:
+    """Resolve absolute path for bundled assets in development or PyInstaller frozen bundle."""
+    if hasattr(sys, "_MEIPASS"):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    direct = os.path.join(base_path, relative_path)
+    if os.path.exists(direct):
+        return direct
+    in_assets = os.path.join(base_path, "assets", relative_path)
+    if os.path.exists(in_assets):
+        return in_assets
+    curr = base_path
+    for _ in range(3):
+        cand = os.path.join(curr, "assets", relative_path)
+        if os.path.exists(cand):
+            return cand
+        cand_direct = os.path.join(curr, relative_path)
+        if os.path.exists(cand_direct):
+            return cand_direct
+        parent = os.path.dirname(curr)
+        if parent == curr:
+            break
+        curr = parent
+    return in_assets if os.path.exists(in_assets) else direct
+
+
+def get_config_dir() -> str:
+    """Returns persistent application configuration directory path."""
+    cfg_override = os.environ.get("SD_CONFIG_DIR")
+    if cfg_override:
+        try:
+            os.makedirs(cfg_override, exist_ok=True)
+        except Exception:
+            pass
+        return cfg_override
+    if "unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("SD_TESTING"):
+        test_cfg = os.path.join(tempfile.gettempdir(), "sd_test_isolated_cfg")
+        try:
+            os.makedirs(test_cfg, exist_ok=True)
+        except Exception:
+            pass
+        return test_cfg
+    if sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            cfg = os.path.join(appdata, "SmartDownload")
+            legacy_cfg = os.path.join(appdata, "TurboDownloader")
+            if os.path.isdir(legacy_cfg) and not os.path.exists(cfg):
+                try:
+                    shutil.copytree(legacy_cfg, cfg)
+                except Exception:
+                    pass
+        else:
+            cfg = os.path.join(os.path.expanduser("~"), ".smartdownload")
+    else:
+        cfg = os.path.join(os.path.expanduser("~"), ".smartdownload")
+    try:
+        os.makedirs(cfg, exist_ok=True)
+    except Exception:
+        pass
+    return cfg
+
+get_app_config_dir = get_config_dir
+
+def get_settings_file_path() -> str:
+    """Returns absolute path to persistent settings.json."""
+    return os.path.join(get_config_dir(), "settings.json")
+
+def load_settings() -> Dict[str, Any]:
+    """Loads user configuration dictionary from settings.json with robust fallbacks."""
+    path = get_settings_file_path()
+    defaults = {
+        "minimize_to_tray": True,
+        "auto_categorize_folders": True,
+        "language": "ar",
+        "auto_unpack_archives": False,
+    }
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    defaults.update(data)
+        except Exception:
+            pass
+    return defaults
+
+def save_settings(settings_dict: Dict[str, Any]) -> bool:
+    """Persists updated configuration dictionary to settings.json."""
+    path = get_settings_file_path()
+    try:
+        cur = load_settings()
+        cur.update(settings_dict)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cur, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+def get_setting(key: str, default: Any = None) -> Any:
+    """Retrieves a single setting value with fallback default."""
+    return load_settings().get(key, default)
+
+def set_setting(key: str, value: Any) -> bool:
+    """Sets and persists a single setting value."""
+    return save_settings({key: value})
+

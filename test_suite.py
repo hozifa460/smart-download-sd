@@ -515,6 +515,17 @@ class TestTurboDownloader(unittest.TestCase):
         self.assertEqual(ctx1.verify_mode, ssl.CERT_NONE)
         self.assertIs(ctx1, ctx2, "get_permissive_ssl_context should return the cached reusable context")
 
+    def test_app_auto_updater_verified_ssl_context(self):
+        """Verify AppAutoUpdater enforces a strictly verified SSL context by default instead of CERT_NONE."""
+        from updater import AppAutoUpdater, _get_verified_ssl_context
+        updater = AppAutoUpdater(current_version="2.0.0")
+        self.assertIsInstance(updater.ssl_context, ssl.SSLContext)
+        self.assertTrue(updater.ssl_context.check_hostname, "AppAutoUpdater must verify hostname by default")
+        self.assertEqual(updater.ssl_context.verify_mode, ssl.CERT_REQUIRED, "AppAutoUpdater must use CERT_REQUIRED by default")
+        verified_ctx = _get_verified_ssl_context()
+        self.assertTrue(verified_ctx.check_hostname)
+        self.assertEqual(verified_ctx.verify_mode, ssl.CERT_REQUIRED)
+
     def test_engine_custom_and_default_ssl_context(self):
         """Verify TurboDownloadEngine accepts custom SSL context and falls back to permissive."""
         default_engine = TurboDownloadEngine("http://dummy", "dummy.bin")

@@ -4,17 +4,22 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 yt_hidden = collect_submodules('yt_dlp')
 yt_datas = collect_data_files('yt_dlp')
 pystray_hidden = collect_submodules('pystray')
+sd_hidden = collect_submodules('smart_download')
 
 a = Analysis(
     ['turbo_downloader.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
     datas=[
         ('extension', 'extension'),
-        ('app_icon.ico', '.'),
-        ('app_icon.png', '.'),
+        ('assets/app_icon.ico', 'assets'),
+        ('assets/app_icon.png', 'assets'),
+        ('assets/app_icon.ico', '.'),
+        ('assets/app_icon.png', '.'),
+        ('src/smart_download/locales', 'smart_download/locales'),
     ] + yt_datas,
     hiddenimports=[
+        'smart_download',
         'updater',
         'youtube_resolver',
         'browser_bridge',
@@ -25,7 +30,7 @@ a = Analysis(
         'PIL.ImageTk',
         'pystray',
         'pystray._win32',
-    ] + yt_hidden + pystray_hidden,
+    ] + yt_hidden + pystray_hidden + sd_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -58,6 +63,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='app_icon.ico',
-    manifest='app.manifest',
+    icon='assets/app_icon.ico',
+    manifest='assets/app.manifest',
 )

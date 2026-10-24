@@ -407,6 +407,8 @@ def find_payload_sources() -> Dict[str, str]:
     current_dir = os.path.dirname(os.path.abspath(__file__))
     base_dirs.append(os.path.join(current_dir, "installer_payload"))
     base_dirs.append(os.path.join(current_dir, "dist"))
+    base_dirs.append(os.path.join(current_dir, "assets"))
+    base_dirs.append(os.path.join(current_dir, "scripts"))
     base_dirs.append(current_dir)
 
     for b in base_dirs:
@@ -418,14 +420,14 @@ def find_payload_sources() -> Dict[str, str]:
             sources["TurboDownloader.exe"] = cand_legacy
 
     for b in base_dirs:
-        cand = os.path.join(b, "app_icon.ico")
-        if os.path.isfile(cand) and "app_icon.ico" not in sources:
-            sources["app_icon.ico"] = cand
+        for cand in [os.path.join(b, "app_icon.ico"), os.path.join(b, "assets", "app_icon.ico")]:
+            if os.path.isfile(cand) and "app_icon.ico" not in sources:
+                sources["app_icon.ico"] = cand
 
     for b in base_dirs:
-        cand = os.path.join(b, "app_icon.png")
-        if os.path.isfile(cand) and "app_icon.png" not in sources:
-            sources["app_icon.png"] = cand
+        for cand in [os.path.join(b, "app_icon.png"), os.path.join(b, "assets", "app_icon.png")]:
+            if os.path.isfile(cand) and "app_icon.png" not in sources:
+                sources["app_icon.png"] = cand
 
     for b in base_dirs:
         cand = os.path.join(b, "extension")
@@ -433,9 +435,9 @@ def find_payload_sources() -> Dict[str, str]:
             sources["extension"] = cand
 
     for b in base_dirs:
-        cand = os.path.join(b, "sd_host.bat")
-        if os.path.isfile(cand) and "sd_host.bat" not in sources:
-            sources["sd_host.bat"] = cand
+        for cand in [os.path.join(b, "sd_host.bat"), os.path.join(b, "scripts", "sd_host.bat")]:
+            if os.path.isfile(cand) and "sd_host.bat" not in sources:
+                sources["sd_host.bat"] = cand
         cand_legacy = os.path.join(b, "turbo_host.bat")
         if os.path.isfile(cand_legacy) and "turbo_host.bat" not in sources:
             sources["turbo_host.bat"] = cand_legacy

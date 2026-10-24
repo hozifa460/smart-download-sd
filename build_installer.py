@@ -89,7 +89,9 @@ def prepare_payload():
 
     # 2. Icons
     for icon_name in ("app_icon.ico", "app_icon.png"):
-        src = os.path.join(BASE_DIR, icon_name)
+        src = os.path.join(BASE_DIR, "assets", icon_name)
+        if not os.path.isfile(src):
+            src = os.path.join(BASE_DIR, icon_name)
         if os.path.isfile(src):
             shutil.copy2(src, os.path.join(PAYLOAD_DIR, icon_name))
 

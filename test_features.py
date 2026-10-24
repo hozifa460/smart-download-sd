@@ -1081,6 +1081,14 @@ class TestExtensionManifestAndAssets(unittest.TestCase):
             self.assertTrue(os.path.exists(icon_path), f"Icon {icon_key} missing at {icon_path}")
             self.assertGreater(os.path.getsize(icon_path), 0, f"Icon {icon_key} is 0 bytes")
 
+    def test_extension_origin_includes_unpacked_id(self):
+        import register_browser
+        origins = register_browser.get_default_extension_origins()
+        unpacked_id = register_browser.compute_unpacked_extension_id(
+            os.path.join(os.path.dirname(__file__), "extension")
+        )
+        self.assertIn(f"chrome-extension://{unpacked_id}/", origins)
+
 
 class TestVideoQualityFormatExtraction(unittest.TestCase):
     """Verifies YouTube format extraction, ranking, size calculation, and stream info construction."""

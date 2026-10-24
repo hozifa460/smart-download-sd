@@ -1,18 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+from PyInstaller.utils.hooks import collect_submodules
 
 payload_dir = os.path.abspath('installer_payload')
+sd_hidden = collect_submodules('smart_download')
 
 a = Analysis(
     ['installer.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
     datas=[
         (payload_dir, 'payload'),
-        ('app_icon.ico', '.'),
-        ('app_icon.png', '.'),
+        ('assets/app_icon.ico', 'assets'),
+        ('assets/app_icon.png', 'assets'),
+        ('assets/app_icon.ico', '.'),
+        ('assets/app_icon.png', '.'),
     ],
     hiddenimports=[
+        'smart_download',
         'win32com',
         'win32com.client',
         'register_browser',
@@ -20,7 +25,7 @@ a = Analysis(
         'tkinter.ttk',
         'tkinter.filedialog',
         'tkinter.messagebox',
-    ],
+    ] + sd_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -53,6 +58,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='app_icon.ico',
-    manifest='app.manifest',
+    icon='assets/app_icon.ico',
+    manifest='assets/app.manifest',
 )
