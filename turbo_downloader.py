@@ -235,6 +235,416 @@ def set_setting(key: str, value: Any) -> bool:
     """Sets and persists a single setting value."""
     return save_settings({key: value})
 
+# ==============================================================================
+# Complete Arabic & English UI Localization (Bilingual System)
+# ==============================================================================
+TRANSLATIONS: Dict[str, Dict[str, str]] = {
+    "en": {
+        # App identity
+        "app_title": "Smart Download (SD)",
+        "app_header": "SMART DOWNLOAD (SD)",
+        "app_subtitle": "[SD Dynamic Chunking & Bandwidth Throttle Engine]",
+        "app_version_label": "v{version}",
+
+        # Window controls
+        "btn_minimize": "—",
+        "btn_close": "✕",
+        "btn_lang_toggle": "🌐 العربية",
+        "btn_check_updates": "🔄 Check for Updates",
+
+        # Input row
+        "lbl_url": "Download URL:",
+        "btn_add_url": "Add URL",
+        "btn_paste": "📋 Paste",
+        "btn_refresh_url": "🔄 Refresh Link",
+        "lbl_dest": "Save Location:",
+        "btn_browse": "📁 Browse...",
+
+        # Limiter & options row
+        "lbl_threads": "Threads:",
+        "lbl_speed_limiter": "Speed Limiter:",
+        "lbl_custom_speed": "Custom (KB/s):",
+        "btn_apply_limit": "⚡ Apply Limit",
+        "lbl_current_limit_unlimited": "● Current: Unlimited",
+        "lbl_current_limit_active": "● Limit: {limit}",
+        "lbl_live_throttle_slider": "🎚️ Live Throttle Slider:",
+        "slider_val_unlimited": "Unlimited (0 KB/s)",
+
+        # Action buttons
+        "btn_start": "▶ Start Download",
+        "btn_resume_all": "Resume All",
+        "btn_pause": "⏸ Pause",
+        "btn_pause_all": "Pause All",
+        "btn_cancel": "⏹ Cancel",
+        "btn_clear_completed": "🧹 Clear Completed",
+        "btn_settings": "⚙️ Settings",
+
+        # Feature buttons
+        "btn_browser": "🌐 Browser Integration",
+        "btn_sniffer_active": "📋 Sniffer: Active",
+        "btn_sniffer_paused": "📋 Sniffer: Paused",
+        "btn_startup_on": "🚀 Boot: ON",
+        "btn_startup_off": "🚀 Boot: OFF",
+        "btn_cookies_prefix": "🍪 Cookies:",
+        "btn_auto_cat_on": "📁 Auto-Sort: ON",
+        "btn_auto_cat_off": "📁 Auto-Sort: OFF",
+
+        # Metrics card
+        "metric_transferred": "Transferred",
+        "metric_total_size": "Total File Size",
+        "metric_speed": "Current Speed",
+        "metric_eta": "Remaining Time",
+        "metric_progress": "Progress",
+        "metric_threads": "Active Chunks",
+
+        # Notebook tabs
+        "tab_chunks": "  📊 Chunk Segments  ",
+        "tab_active": "  ⚡ Active Downloads  ",
+        "tab_completed": "  ✅ Completed  ",
+        "tab_logs": "  📜 Activity Log  ",
+        "tab_history": "  📂 Download History  ",
+        "tab_settings": "  ⚙️ Settings  ",
+
+        # Chunk table columns
+        "col_chunk_id": "ID",
+        "col_chunk_range": "Byte Offset Range",
+        "col_chunk_size": "Total Span",
+        "col_chunk_downloaded": "Downloaded",
+        "col_chunk_pct": "Progress",
+        "col_chunk_status": "Status",
+
+        # History toolbar
+        "lbl_filter": "Filter:",
+        "hist_filter_all": "All Categories",
+        "btn_hist_open": "📂 Open File",
+        "btn_hist_folder": "📁 Open Folder",
+        "btn_hist_redownload": "🔄 Resume / Retry",
+        "btn_hist_remove": "🗑️ Remove",
+        "btn_hist_clear": "🧹 Clear All",
+
+        # History table columns
+        "col_hist_category": "Category",
+        "col_hist_filename": "File Name",
+        "col_hist_size": "Size",
+        "col_hist_status": "Status",
+        "col_hist_date": "Date Added",
+        "col_hist_path": "Saved Location",
+        "col_hist_actions": "Actions",
+
+        # Download Confirmation Modal
+        "modal_confirm_title": "Download File Info — Smart Download",
+        "modal_file_name": "File Name:",
+        "modal_save_to": "Save To:",
+        "modal_category": "Category:",
+        "modal_quality": "Quality / Format:",
+        "modal_threads": "Connections / Threads:",
+        "modal_speed_limiter": "Speed Limiter:",
+        "modal_custom_speed": "Custom Speed (KB/s):",
+        "modal_btn_start": "▶ Start Download Here",
+        "modal_btn_open_in_main": "📋 Open in Main App",
+        "modal_btn_cancel": "✕ Cancel",
+        "modal_btn_browse": "📁 Browse...",
+        "modal_download_mp3": "Download MP3 Only",
+        "modal_cookies": "Browser Cookies",
+
+        # Quality Selection Modal
+        "modal_quality_title": "Select Video Quality — Smart Download",
+        "modal_quality_header": "Select Quality & Format",
+        "modal_col_res": "Resolution / Format",
+        "modal_col_ext": "Container",
+        "modal_col_size": "Est. Size",
+        "modal_col_fps": "FPS",
+        "modal_col_type": "Stream Type",
+        "modal_btn_download": "▶ Download",
+
+        # MultipleCandidatesModal
+        "multi_modal_title": "Detected Download Links — Smart Download",
+        "multi_modal_source": "Source Page:",
+        "multi_modal_subtitle": "Multiple downloadable files were found on this page. Select the files you want to download:",
+        "multi_col_select": "Select",
+        "multi_col_filename": "File Name",
+        "multi_col_type": "Type",
+        "multi_col_size": "Size",
+        "multi_col_url": "Link Preview",
+        "multi_select_all": "Select All",
+        "multi_btn_download_selected": "Download Selected",
+        "multi_btn_download_all": "Download All",
+        "multi_btn_cancel": "Cancel",
+        "multi_no_selection_warning": "Please select at least one file to download.",
+        "multi_selection_count": "{selected} / {total} files selected",
+
+        # Toasts
+        "toast_startup_title": "Smart Download (SD)",
+        "toast_startup_msg": "Smart Download is active in the background and monitoring for downloads.",
+        "toast_fetching_header": "🔍 Fetching and analyzing link...",
+        "toast_fetching_sub": "Please wait while Smart Download prepares your download...",
+        "toast_completed_title": "Download Completed Successfully! 🚀",
+        "toast_completed_msg": "File saved successfully: {filename}",
+        "toast_error_title": "Download Error ❌",
+        "toast_error_msg": "An error occurred during download: {error}",
+
+        # Dialogs
+        "dialog_not_download_title": "Not a download link",
+        "dialog_not_download_msg": "This link is for a web page, not a direct download file. Open it in your browser and click download, or copy the direct download link.",
+
+        # System Tray Menu
+        "tray_open": "🖥️ Open Smart Download",
+        "tray_sniffer_active": "📋 Clipboard Sniffer: Active",
+        "tray_sniffer_paused": "📋 Clipboard Sniffer: Paused",
+        "tray_startup_on": "🚀 Start with Windows: ON",
+        "tray_startup_off": "🚀 Start with Windows: OFF",
+        "tray_exit": "❌ Exit Completely",
+    },
+    "ar": {
+        # App identity
+        "app_title": "التحميل الذكي (SD)",
+        "app_header": "التحميل الذكي (SD)",
+        "app_subtitle": "[محرك التحميل الذكي متعدد المسارات والتحكم بالنطاق الترددي]",
+        "app_version_label": "الإصدار {version}",
+
+        # Window controls
+        "btn_minimize": "—",
+        "btn_close": "✕",
+        "btn_lang_toggle": "🌐 English",
+        "btn_check_updates": "🔄 التحقق من التحديثات",
+
+        # Input row
+        "lbl_url": "رابط التحميل:",
+        "btn_add_url": "إضافة رابط",
+        "btn_paste": "📋 لصق",
+        "btn_refresh_url": "🔄 تحديث الرابط",
+        "lbl_dest": "مكان الحفظ:",
+        "btn_browse": "📁 استعراض...",
+
+        # Limiter & options row
+        "lbl_threads": "المسارات:",
+        "lbl_speed_limiter": "محدد السرعة:",
+        "lbl_custom_speed": "مخصص (ك.ب/ث):",
+        "btn_apply_limit": "⚡ تطبيق الحد",
+        "lbl_current_limit_unlimited": "● الحالي: غير محدود",
+        "lbl_current_limit_active": "● الحد: {limit}",
+        "lbl_live_throttle_slider": "🎚️ شريط التحكم بالسرعة المباشر:",
+        "slider_val_unlimited": "غير محدود (0 ك.ب/ث)",
+
+        # Action buttons
+        "btn_start": "▶ بدء التحميل",
+        "btn_resume_all": "استئناف الكل",
+        "btn_pause": "⏸ إيقاف مؤقت",
+        "btn_pause_all": "إيقاف الكل",
+        "btn_cancel": "⏹ إلغاء",
+        "btn_clear_completed": "🧹 مسح المكتمل",
+        "btn_settings": "⚙️ الإعدادات",
+
+        # Feature buttons
+        "btn_browser": "🌐 ملحق المتصفح",
+        "btn_sniffer_active": "📋 المراقب: مفعل",
+        "btn_sniffer_paused": "📋 المراقب: معطل",
+        "btn_startup_on": "🚀 التشغيل: مفعل",
+        "btn_startup_off": "🚀 التشغيل: معطل",
+        "btn_cookies_prefix": "🍪 الكوكيز:",
+        "btn_auto_cat_on": "📁 فرز تلقائي: مفعل",
+        "btn_auto_cat_off": "📁 فرز تلقائي: معطل",
+
+        # Metrics card
+        "metric_transferred": "تم نقل",
+        "metric_total_size": "الحجم الإجمالي",
+        "metric_speed": "السرعة الحالية",
+        "metric_eta": "الوقت المتبقي",
+        "metric_progress": "التقدم",
+        "metric_threads": "المسارات النشطة",
+
+        # Notebook tabs
+        "tab_chunks": "  📊 قطاعات التحميل  ",
+        "tab_active": "  ⚡ التحميلات النشطة  ",
+        "tab_completed": "  ✅ التحميلات المكتملة  ",
+        "tab_logs": "  📜 سجل العمليات  ",
+        "tab_history": "  📂 سجل التحميلات  ",
+        "tab_settings": "  ⚙️ الإعدادات  ",
+
+        # Chunk table columns
+        "col_chunk_id": "المعرف",
+        "col_chunk_range": "نطاق البايتات",
+        "col_chunk_size": "الحجم الكلي",
+        "col_chunk_downloaded": "تم تنزيله",
+        "col_chunk_pct": "النسبة",
+        "col_chunk_status": "الحالة",
+
+        # History toolbar
+        "lbl_filter": "تصفية:",
+        "hist_filter_all": "جميع التصنيفات",
+        "btn_hist_open": "📂 فتح الملف",
+        "btn_hist_folder": "📁 فتح المجلد",
+        "btn_hist_redownload": "🔄 استئناف / إعادة المحاولة",
+        "btn_hist_remove": "🗑️ حذف",
+        "btn_hist_clear": "🧹 مسح الكل",
+
+        # History table columns
+        "col_hist_category": "التصنيف",
+        "col_hist_filename": "اسم الملف",
+        "col_hist_size": "الحجم",
+        "col_hist_status": "الحالة",
+        "col_hist_date": "تاريخ الإضافة",
+        "col_hist_path": "مكان الحفظ",
+        "col_hist_actions": "الإجراءات",
+
+        # Download Confirmation Modal
+        "modal_confirm_title": "معلومات تحميل الملف — Smart Download",
+        "modal_file_name": "اسم الملف:",
+        "modal_save_to": "مكان الحفظ:",
+        "modal_category": "التصنيف:",
+        "modal_quality": "الدقة / الصيغة:",
+        "modal_threads": "المسارات / الاتصالات:",
+        "modal_speed_limiter": "محدد السرعة:",
+        "modal_custom_speed": "سرعة مخصصة (ك.ب/ث):",
+        "modal_btn_start": "▶ بدء التحميل هنا",
+        "modal_btn_open_in_main": "📋 فتح في التطبيق",
+        "modal_btn_cancel": "✕ إلغاء",
+        "modal_btn_browse": "📁 استعراض...",
+        "modal_download_mp3": "تحميل صوت MP3 فقط",
+        "modal_cookies": "كوكيز المتصفح",
+
+        # Quality Selection Modal
+        "modal_quality_title": "تحديد دقة الفيديو — Smart Download",
+        "modal_quality_header": "تحديد الجودة والصيغة",
+        "modal_col_res": "الدقة / الصيغة",
+        "modal_col_ext": "الحاوية",
+        "modal_col_size": "الحجم التقديري",
+        "modal_col_fps": "معدل الإطارات",
+        "modal_col_type": "نوع المسار",
+        "modal_btn_download": "▶ تحميل",
+
+        # MultipleCandidatesModal
+        "multi_modal_title": "روابط التحميل المكتشفة — Smart Download",
+        "multi_modal_source": "الصفحة المصدر:",
+        "multi_modal_subtitle": "تم العثور على عدة ملفات متاحة للتحميل في هذه الصفحة. حدد الملفات التي ترغب بتحميلها:",
+        "multi_col_select": "تحديد",
+        "multi_col_filename": "اسم الملف",
+        "multi_col_type": "النوع",
+        "multi_col_size": "الحجم",
+        "multi_col_url": "معاينة الرابط",
+        "multi_select_all": "تحديد الكل",
+        "multi_btn_download_selected": "تحميل المحدد",
+        "multi_btn_download_all": "تحميل الكل",
+        "multi_btn_cancel": "إلغاء",
+        "multi_no_selection_warning": "يرجى تحديد ملف واحد على الأقل للتحميل.",
+        "multi_selection_count": "تم تحديد {selected} من {total} ملف",
+
+        # Toasts
+        "toast_startup_title": "Smart Download (SD)",
+        "toast_startup_msg": "Smart Download يعمل الآن في الخلفية وجاهز لالتقاط الروابط.",
+        "toast_fetching_header": "🔍 جاري جلب وتحليل الرابط...",
+        "toast_fetching_sub": "يرجى الانتظار بينما يجهز البرنامج التحميل...",
+        "toast_completed_title": "اكتمل التحميل بنجاح! 🚀",
+        "toast_completed_msg": "تم حفظ الملف بنجاح: {filename}",
+        "toast_error_title": "خطأ في التحميل ❌",
+        "toast_error_msg": "حدث خطأ أثناء التحميل: {error}",
+
+        # Dialogs
+        "dialog_not_download_title": "ليس رابط تحميل",
+        "dialog_not_download_msg": "هذا الرابط لصفحة ويب وليس لملف تحميل. افتحه في المتصفح واضغط زر التحميل، أو انسخ رابط التحميل المباشر.",
+
+        # System Tray Menu
+        "tray_open": "🖥️ فتح البرنامج",
+        "tray_sniffer_active": "📋 مراقب الحافظة: مفعل",
+        "tray_sniffer_paused": "📋 مراقب الحافظة: معطل",
+        "tray_startup_on": "🚀 التشغيل مع ويندوز: مفعل",
+        "tray_startup_off": "🚀 التشغيل مع ويندوز: معطل",
+        "tray_exit": "❌ خروج نهائي",
+    }
+}
+
+
+class LocalizationManager:
+    """
+    Manages complete Arabic and English application localization.
+    Features:
+    - Persists active language in %APPDATA%\\SmartDownload\\settings.json.
+    - Thread-safe singleton with observer notifications for instantaneous in-place switching.
+    - Fallback resolution guaranteeing no missing translation crashes.
+    """
+    _instance: Optional["LocalizationManager"] = None
+
+    def __init__(self, default_lang: Optional[str] = None):
+        self._observers: List[Callable[[], None]] = []
+        saved = get_setting("language", None)
+        if saved in ("ar", "en"):
+            self._current_lang = saved
+        elif default_lang in ("ar", "en"):
+            self._current_lang = default_lang
+        else:
+            self._current_lang = "en"
+
+    @classmethod
+    def get_instance(cls) -> "LocalizationManager":
+        if cls._instance is None:
+            cls._instance = LocalizationManager()
+        return cls._instance
+
+    def get_language(self) -> str:
+        return self._current_lang
+
+    def set_language(self, lang: str) -> bool:
+        if lang not in ("ar", "en"):
+            return False
+        changed = (self._current_lang != lang)
+        self._current_lang = lang
+        set_setting("language", lang)
+        if changed:
+            self.notify_observers()
+        return True
+
+    def toggle_language(self) -> str:
+        new_lang = "en" if self._current_lang == "ar" else "ar"
+        self.set_language(new_lang)
+        return new_lang
+
+    def is_rtl(self) -> bool:
+        return self._current_lang == "ar"
+
+    def get(self, key: str, default: Optional[str] = None, **kwargs) -> str:
+        lang_dict = TRANSLATIONS.get(self._current_lang, {})
+        val = lang_dict.get(key)
+        if val is None:
+            val = TRANSLATIONS.get("en", {}).get(key)
+        if val is None:
+            val = TRANSLATIONS.get("ar", {}).get(key)
+        if val is None:
+            val = default if default is not None else key
+        if kwargs and isinstance(val, str):
+            try:
+                return val.format(**kwargs)
+            except Exception:
+                return val
+        return val
+
+    def register_observer(self, callback: Callable[[], None]):
+        if callback not in self._observers:
+            self._observers.append(callback)
+
+    def unregister_observer(self, callback: Callable[[], None]):
+        if callback in self._observers:
+            self._observers.remove(callback)
+
+    def notify_observers(self):
+        for cb in list(self._observers):
+            try:
+                cb()
+            except Exception:
+                pass
+
+
+def tr(key: str, default: Optional[str] = None, **kwargs) -> str:
+    """Convenience accessor to active language translation."""
+    return LocalizationManager.get_instance().get(key, default=default, **kwargs)
+
+def get_current_language() -> str:
+    """Returns current active language code ('ar' or 'en')."""
+    return LocalizationManager.get_instance().get_language()
+
+def set_current_language(lang: str) -> bool:
+    """Sets active language and persists preference."""
+    return LocalizationManager.get_instance().set_language(lang)
+
 
 # Configure console encoding safely for Windows terminals and PyInstaller --windowed
 if sys.stdout is None:
@@ -1273,6 +1683,372 @@ def parse_filename_from_cd_header(cd_header: str) -> Optional[str]:
     return None
 
 
+
+class _HtmlCandidateExtractor(HTMLParser):
+    """
+    Extracts structured download candidates and page metadata from HTML.
+    Collects <a> tags, <meta refresh>, and data attributes.
+    """
+    def __init__(self):
+        super().__init__()
+        self.raw_items: List[Dict[str, Any]] = []
+        self._current_tag: Optional[str] = None
+        self._current_attrs: Dict[str, str] = {}
+        self._current_text: List[str] = []
+        self.page_title: str = ""
+        self._in_title: bool = False
+
+    def handle_starttag(self, tag, attrs):
+        attr_dict = {k.lower(): (v or "") for k, v in attrs}
+        tag_lower = tag.lower()
+
+        if tag_lower == "title":
+            self._in_title = True
+        elif tag_lower == "a":
+            self._current_tag = "a"
+            self._current_attrs = attr_dict
+            self._current_text = []
+        elif tag_lower == "meta" and attr_dict.get("http-equiv", "").lower() == "refresh":
+            content = attr_dict.get("content", "")
+            m = re.search(r"url\s*=\s*(?:['\"]([^'\"]+)['\"]|([^;\s'\"]+))", content, re.IGNORECASE)
+            if m:
+                u = m.group(1) or m.group(2)
+                if u:
+                    self.raw_items.append({
+                        "href": u.strip(),
+                        "text": "Auto Redirect",
+                        "title": "",
+                        "aria_label": "",
+                        "download": "",
+                        "tag": "meta"
+                    })
+
+        for k, v in attr_dict.items():
+            if k.startswith("data-download") or k in ("data-href", "data-url", "data-src", "data-link"):
+                if v and tag_lower != "a":
+                    self.raw_items.append({
+                        "href": v.strip(),
+                        "text": attr_dict.get("title") or attr_dict.get("aria-label") or "",
+                        "title": attr_dict.get("title", ""),
+                        "aria_label": attr_dict.get("aria-label", ""),
+                        "download": attr_dict.get("download", ""),
+                        "tag": tag_lower
+                    })
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.page_title += data
+        if self._current_tag == "a":
+            self._current_text.append(data)
+
+    def handle_endtag(self, tag):
+        tag_lower = tag.lower()
+        if tag_lower == "title":
+            self._in_title = False
+        elif tag_lower == "a" and self._current_tag == "a":
+            href = self._current_attrs.get("href", "").strip()
+            if href:
+                text_content = " ".join("".join(self._current_text).split())
+                self.raw_items.append({
+                    "href": href,
+                    "text": text_content,
+                    "title": self._current_attrs.get("title", ""),
+                    "aria_label": self._current_attrs.get("aria-label", ""),
+                    "download": self._current_attrs.get("download", ""),
+                    "tag": "a"
+                })
+            self._current_tag = None
+            self._current_attrs = {}
+            self._current_text = []
+
+
+def resolve_all_download_candidates(
+    url_or_html: str,
+    base_url: str = "",
+    timeout: float = 10.0,
+    ssl_context: Optional[ssl.SSLContext] = None
+) -> List[Dict[str, Any]]:
+    """
+    Extracts and ranks all valid downloadable links from an HTML document or landing URL.
+
+    Filters out non-downloadable links (nav links, terms of service, social media, anchors).
+    Deduplicates and cleans candidate URLs.
+
+    Each candidate dict contains:
+        {
+            "url": direct_url,
+            "filename": filename,
+            "ext": ext,
+            "size_bytes": None or int,
+            "title": text_label,
+            "score": score
+        }
+    Guaranteed never to raise unhandled exceptions.
+    """
+    raw_input = str(url_or_html or "").strip()
+    if not raw_input:
+        return []
+
+    is_url = False
+    html_text = ""
+    effective_base_url = str(base_url or "").strip()
+
+    # Detect if raw_input is an HTTP URL rather than raw HTML markup
+    if (raw_input.startswith(("http://", "https://")) and
+        "\n" not in raw_input and
+        "<html" not in raw_input.lower() and
+        "<body" not in raw_input.lower() and
+        "<a " not in raw_input.lower()):
+        is_url = True
+
+    if is_url:
+        if not effective_base_url:
+            effective_base_url = raw_input
+        ctx = ssl_context if ssl_context is not None else get_permissive_ssl_context()
+        custom_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+        try:
+            req = urllib.request.Request(raw_input, headers=custom_headers)
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                final_u = resp.geturl() or raw_input
+                effective_base_url = final_u
+                ct = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if ct not in ("text/html", "application/xhtml+xml"):
+                    return []
+                raw_bytes = resp.read(1024 * 1024)
+                charset = resp.headers.get_content_charset() or "utf-8"
+                try:
+                    html_text = raw_bytes.decode(charset, errors="replace")
+                except Exception:
+                    html_text = raw_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            return []
+    else:
+        html_text = raw_input
+
+    if not html_text:
+        return []
+
+    extractor = _HtmlCandidateExtractor()
+    try:
+        extractor.feed(html_text)
+    except Exception:
+        pass
+
+    raw_items = list(extractor.raw_items)
+
+    # Inline script navigation and fallback regexes
+    script_patterns = [
+        r'(?:window\.)?location(?:\.href)?\s*=\s*[\'"]([^\'"]+)[\'"]',
+        r'(?:window\.)?location\.(?:assign|replace)\s*\(\s*[\'"]([^\'"]+)[\'"]\s*\)',
+        r'window\.open\s*\(\s*[\'"]([^\'"]+)[\'"]',
+        r'(?:data-download[a-z0-9_-]*|data-href|data-url)\s*=\s*[\'"]([^\'"]+)[\'"]',
+        r'<meta[^>]*?content=[\'"][^>]*?url=([^;\'"\s>]+)[\'"]'
+    ]
+    for pat in script_patterns:
+        for m in re.finditer(pat, html_text, re.IGNORECASE):
+            u = m.group(1).strip()
+            if u:
+                raw_items.append({
+                    "href": u,
+                    "text": "Script Redirect",
+                    "title": "",
+                    "aria_label": "",
+                    "download": "",
+                    "tag": "script"
+                })
+
+    for s_m in re.finditer(r'<script[^>]*>(.*?)</script>', html_text, re.IGNORECASE | re.DOTALL):
+        script_body = s_m.group(1).replace(r'\/', '/')
+        for url_m in re.finditer(r'https?://[^\s"\'<>\\]+', script_body, re.IGNORECASE):
+            raw_items.append({
+                "href": url_m.group(0),
+                "text": "Script Link",
+                "title": "",
+                "aria_label": "",
+                "download": "",
+                "tag": "script"
+            })
+
+    ignored_schemes = ("#", "javascript:", "mailto:", "tel:", "data:", "about:")
+    ignored_exts = {
+        ".css", ".js", ".woff", ".woff2", ".svg", ".png", ".jpg", ".jpeg",
+        ".gif", ".ico", ".webmanifest", ".map", ".ttf", ".eot", ".otf"
+    }
+    preferred_installer_exts = {
+        ".exe", ".msi", ".zip", ".7z", ".rar", ".dmg", ".apk", ".iso",
+        ".appx", ".appxbundle", ".msix", ".msixbundle", ".pkg", ".deb", ".rpm"
+    }
+    social_domains = {
+        "twitter.com", "x.com", "facebook.com", "fb.com", "instagram.com",
+        "linkedin.com", "t.me", "telegram.org", "reddit.com", "tiktok.com",
+        "discord.gg", "discord.com", "pinterest.com"
+    }
+    non_download_keywords = {
+        "privacy", "terms", "about", "contact", "login", "signin", "signup",
+        "register", "logout", "faq", "help", "support", "license", "cookie",
+        "legal", "blog", "pricing"
+    }
+
+    base_p_split = urllib.parse.urlsplit(effective_base_url) if effective_base_url else None
+    base_clean = (base_p_split.scheme.lower(), base_p_split.netloc.lower(), base_p_split.path.rstrip("/")) if base_p_split else None
+
+    src_query = (base_p_split.query or "").lower() if base_p_split else ""
+    platform_tokens: List[str] = []
+    if any(k in src_query for k in ("platform=windows", "os=win", "os=windows", "windows", "win")):
+        platform_tokens = ["windows", "win", "x64", "win64", "x86"]
+    elif any(k in src_query for k in ("platform=mac", "os=mac", "macos", "darwin", "osx")):
+        platform_tokens = ["mac", "macos", "darwin", "dmg", "pkg"]
+    elif any(k in src_query for k in ("platform=linux", "os=linux", "linux")):
+        platform_tokens = ["linux", "appimage", "deb", "rpm", "tar.gz"]
+    elif sys.platform == "win32":
+        platform_tokens = ["windows", "win", "x64", "setup", "installer"]
+
+    seen_dict: Dict[str, Dict[str, Any]] = {}
+
+    for item in raw_items:
+        raw_href = item["href"].strip("\"' \t\r\n")
+        if not raw_href or raw_href.startswith(ignored_schemes):
+            continue
+
+        try:
+            abs_url = urllib.parse.urljoin(effective_base_url, raw_href) if effective_base_url else raw_href
+            p = urllib.parse.urlsplit(abs_url)
+            if p.scheme.lower() not in ("http", "https") or not p.netloc:
+                continue
+
+            netloc_lower = p.netloc.lower()
+            if any(netloc_lower == sd or netloc_lower.endswith("." + sd) for sd in social_domains):
+                continue
+
+            # Skip self-referencing links
+            cand_clean = (p.scheme.lower(), p.netloc.lower(), p.path.rstrip("/"))
+            if base_clean and cand_clean == base_clean and not p.query:
+                continue
+
+            path_lower = p.path.lower()
+            query_lower = (p.query or "").lower()
+            combined_target = path_lower + ("?" + query_lower if query_lower else "")
+
+            # Multi-part extension support
+            ext = ""
+            for multi_ext in (".tar.gz", ".tar.bz2", ".tar.xz", ".user.js"):
+                if path_lower.endswith(multi_ext):
+                    ext = multi_ext
+                    break
+            if not ext:
+                _, ext = os.path.splitext(path_lower)
+
+            if ext in ignored_exts:
+                continue
+
+            # Determine whether link is downloadable
+            has_dl_ext = (ext in preferred_installer_exts) or (ext in COMMON_DOWNLOAD_EXTENSIONS)
+            has_dl_attr = bool(item.get("download"))
+            has_dl_path = any(dp in path_lower for dp in ("/download", "/downloads", "/releases/download/", "/files/", "/get_file/", "/releases/"))
+            has_dl_query = any(dq in query_lower for dq in ("download=", "export=download", "dl=1", "action=download", "file="))
+
+            link_text = (item.get("text") or "").strip()
+            link_title = (item.get("title") or item.get("aria_label") or "").strip()
+            text_lower = (link_text + " " + link_title).lower()
+            has_dl_text = any(tok in text_lower for tok in ("download", "\u062a\u062d\u0645\u064a\u0644", "installer", "setup", "portable", "x64", "64-bit", "32-bit", "arm64", "build"))
+
+            if not (has_dl_ext or has_dl_attr or has_dl_path or has_dl_query or has_dl_text):
+                continue
+
+            if not has_dl_ext:
+                if any(kw in path_lower or kw in query_lower for kw in non_download_keywords):
+                    continue
+
+            # Derive filename
+            cd_fn = item.get("download", "").strip()
+            if cd_fn:
+                filename = cd_fn
+            else:
+                base_fn = os.path.basename(urllib.parse.unquote(p.path.rstrip("/")))
+                if base_fn and base_fn not in (".", ".."):
+                    filename = base_fn
+                else:
+                    filename = derive_download_filename(abs_url)
+
+            cand_ext = ""
+            for multi_ext in (".tar.gz", ".tar.bz2", ".tar.xz", ".user.js"):
+                if filename.lower().endswith(multi_ext):
+                    cand_ext = multi_ext
+                    break
+            if not cand_ext:
+                _, cand_ext = os.path.splitext(filename.lower())
+
+            text_label = link_text or link_title or filename
+            if len(text_label) > 100:
+                text_label = text_label[:97] + "..."
+
+            size_bytes: Optional[int] = None
+            size_m = re.search(r'\(?\b(\d+(?:\.\d+)?)\s*(KB|MB|GB|Bytes)\b\)?', text_lower, re.IGNORECASE)
+            if size_m:
+                val = float(size_m.group(1))
+                unit = size_m.group(2).upper()
+                if unit == "KB":
+                    size_bytes = int(val * 1024)
+                elif unit == "MB":
+                    size_bytes = int(val * 1024 * 1024)
+                elif unit == "GB":
+                    size_bytes = int(val * 1024 * 1024 * 1024)
+                elif unit == "BYTES":
+                    size_bytes = int(val)
+
+            score = 0
+            if cand_ext in preferred_installer_exts:
+                score += 1000
+            elif cand_ext in COMMON_DOWNLOAD_EXTENSIONS:
+                score += 500
+
+            if "/releases/download/" in path_lower:
+                score += 350
+            elif "/download" in path_lower or "/downloads" in path_lower:
+                score += 200
+
+            if any(tok in combined_target or tok in text_lower for tok in platform_tokens):
+                score += 250
+
+            if has_dl_attr:
+                score += 200
+            if has_dl_text:
+                score += 100
+
+            if path_lower in ("", "/"):
+                score -= 600
+
+            canonical_url = urllib.parse.urlunsplit((p.scheme.lower(), p.netloc.lower(), p.path, p.query, ""))
+
+            candidate_obj = {
+                "url": abs_url,
+                "filename": filename,
+                "ext": cand_ext,
+                "size_bytes": size_bytes,
+                "title": text_label,
+                "score": score
+            }
+
+            if canonical_url in seen_dict:
+                existing = seen_dict[canonical_url]
+                if score > existing["score"]:
+                    seen_dict[canonical_url] = candidate_obj
+                elif score == existing["score"] and len(text_label) > len(existing["title"]):
+                    seen_dict[canonical_url] = candidate_obj
+            else:
+                seen_dict[canonical_url] = candidate_obj
+
+        except Exception:
+            continue
+
+    candidates = list(seen_dict.values())
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    return candidates
+
+
 class _HtmlLinkCandidateParser(HTMLParser):
     """Parses HTML document to collect candidate download hyperlinks and refresh targets."""
     def __init__(self):
@@ -1331,7 +2107,9 @@ def resolve_real_download_url(
         "content_type": "",
         "size": 0,
         "filename": "",
-        "error": ""
+        "error": "",
+        "candidates": [],
+        "page_title": ""
     }
 
     if not clean_url:
@@ -1402,6 +2180,19 @@ def resolve_real_download_url(
     result["content_type"] = content_type
     result["size"] = size
     result["filename"] = filename or derive_download_filename(final_url)
+
+    # Extract all candidates and page title
+    all_candidates = resolve_all_download_candidates(html_text, base_url=final_url)
+    result["candidates"] = all_candidates
+
+    extractor_title = ""
+    try:
+        _pe = _HtmlCandidateExtractor()
+        _pe.feed(html_text)
+        extractor_title = _pe.page_title.strip()
+    except Exception:
+        pass
+    result["page_title"] = extractor_title
 
     # Collect link candidates
     parser = _HtmlLinkCandidateParser()
@@ -1548,7 +2339,9 @@ def resolve_real_download_url(
                         "content_type": c_ct,
                         "size": c_size,
                         "filename": c_fn or derive_download_filename(c_final),
-                        "error": ""
+                        "error": "",
+                        "candidates": all_candidates,
+                        "page_title": extractor_title
                     }
                 if not c_ct:
                     head_ok = False
@@ -6290,6 +7083,446 @@ DownloadConfirmationDialog = DownloadConfirmationModal
 # 3F. SLEEK GRAB-FREE REFRESH EXPIRED LINK MODAL DIALOG
 # ======================================================================================
 
+
+DownloadConfirmModal = DownloadConfirmationModal
+
+
+class MultipleCandidatesModal(tk.Toplevel):
+    """
+    Sleek, modern, dark-themed Tkinter modal dialog displayed when multiple
+    download candidate links are detected on a landing page or download page.
+
+    Features:
+    - Displays source page title / URL.
+    - Scrollable list of candidate files with individual checkboxes, file name,
+      file type / extension badge, and destination link preview.
+    - Master "Select All / تحديد الكل" checkbox.
+    - Action buttons:
+      * "تحميل المحدد / Download Selected"
+      * "تحميل الكل / Download All"
+      * "إلغاء / Cancel"
+    - High-DPI scaled, grab-free (avoids grab_set() traps).
+    - Fully non-blocking, safe dispatch to Tkinter main thread.
+    - Complete Arabic and English localization support.
+    """
+    def __init__(
+        self,
+        parent: Optional[tk.Tk],
+        source_url: str,
+        candidates: List[Dict[str, Any]],
+        page_title: str = "",
+        theme: Optional[Dict[str, str]] = None,
+        on_download_selected: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+        on_download_all: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+        on_cancel: Optional[Callable[[], None]] = None,
+        parent_app: Optional[Any] = None
+    ):
+        super().__init__(parent)
+        self.source_url = str(source_url or "").strip()
+        self.candidates = list(candidates or [])
+        self.page_title = str(page_title or "").strip()
+        self.on_download_selected = on_download_selected
+        self.on_download_all = on_download_all
+        self.on_cancel = on_cancel
+        self.parent_app = parent_app
+
+        th = theme or {}
+        self.c_bg = th.get("c_bg", "#0f172a")
+        self.c_panel = th.get("c_panel", "#1e293b")
+        self.c_panel_light = th.get("c_panel_light", "#334155")
+        self.c_border = th.get("c_border", "#475569")
+        self.c_text_bright = th.get("c_text_bright", "#f8fafc")
+        self.c_text_muted = th.get("c_text_muted", "#94a3b8")
+        self.c_accent = th.get("c_accent", "#38bdf8")
+        self.c_accent_dark = th.get("c_accent_dark", "#0284c7")
+        self.c_danger = th.get("c_danger", "#ef4444")
+        self.c_success = th.get("c_success", "#10b981")
+        self.c_input_bg = th.get("c_input_bg", "#0b1220")
+
+        self.title(tr("multi_modal_title"))
+        self.configure(bg=self.c_bg)
+
+        # High-DPI scaling
+        try:
+            dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
+        except Exception:
+            dpi = 96.0
+        self.dpi_scale = max(1.0, dpi / 96.0)
+
+        # Center on parent window or screen
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        dlg_w = min(int(740 * self.dpi_scale), max(560, int(sw * 0.90)))
+        dlg_h = min(int(520 * self.dpi_scale), max(400, int(sh * 0.82)))
+
+        is_parent_visible = False
+        try:
+            if parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal":
+                is_parent_visible = True
+        except Exception:
+            is_parent_visible = False
+
+        if is_parent_visible:
+            try:
+                self.transient(parent)
+            except Exception:
+                pass
+            try:
+                px = parent.winfo_x()
+                py = parent.winfo_y()
+                pw = parent.winfo_width() or dlg_w
+                ph = parent.winfo_height() or dlg_h
+                x = max(0, px + (pw - dlg_w) // 2)
+                y = max(0, py + (ph - dlg_h) // 2)
+                self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+            except Exception:
+                self.geometry(f"{dlg_w}x{dlg_h}")
+        else:
+            try:
+                self.transient("")
+                self.deiconify()
+            except Exception:
+                pass
+            x = max(0, (sw - dlg_w) // 2)
+            y = max(0, (sh - dlg_h) // 2)
+            self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel_clicked)
+        self.bind("<Escape>", lambda e: self._on_cancel_clicked())
+
+        self.candidate_vars: List[tk.BooleanVar] = []
+        self._build_ui()
+
+    def _build_ui(self):
+        # Outer border
+        outer = tk.Frame(self, bg=self.c_border, padx=1, pady=1)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        body = tk.Frame(outer, bg=self.c_bg, padx=16, pady=14)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        # Header Frame
+        hdr_frame = tk.Frame(body, bg=self.c_bg)
+        hdr_frame.pack(fill=tk.X, pady=(0, 8))
+
+        lbl_icon = tk.Label(hdr_frame, text="📦", font=("Segoe UI", 16), bg=self.c_bg, fg=self.c_accent)
+        lbl_icon.pack(side=tk.LEFT, padx=(0, 8))
+
+        title_box = tk.Frame(hdr_frame, bg=self.c_bg)
+        title_box.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.lbl_title = tk.Label(
+            title_box,
+            text=tr("multi_modal_title"),
+            font=("Segoe UI", 11, "bold"),
+            bg=self.c_bg,
+            fg=self.c_accent,
+            anchor="w"
+        )
+        self.lbl_title.pack(anchor="w")
+
+        src_text = self.page_title or self.source_url
+        if len(src_text) > 85:
+            src_text = src_text[:82] + "..."
+        self.lbl_source = tk.Label(
+            title_box,
+            text=f"{tr('multi_modal_source')} {src_text}",
+            font=("Segoe UI", 8),
+            bg=self.c_bg,
+            fg=self.c_text_muted,
+            anchor="w"
+        )
+        self.lbl_source.pack(anchor="w", pady=(1, 0))
+
+        # Subtitle instructions
+        self.lbl_subtitle = tk.Label(
+            body,
+            text=tr("multi_modal_subtitle"),
+            font=("Segoe UI", 9),
+            bg=self.c_bg,
+            fg=self.c_text_bright,
+            anchor="w",
+            wraplength=int(680 * self.dpi_scale),
+            justify="left"
+        )
+        self.lbl_subtitle.pack(fill=tk.X, pady=(0, 8))
+
+        # Master Selection Bar
+        master_bar = tk.Frame(body, bg=self.c_panel, padx=10, pady=6, highlightbackground=self.c_border, highlightthickness=1)
+        master_bar.pack(fill=tk.X, pady=(0, 8))
+
+        self.var_select_all = tk.BooleanVar(value=True)
+        self.chk_select_all = tk.Checkbutton(
+            master_bar,
+            text=tr("multi_select_all"),
+            variable=self.var_select_all,
+            command=self._toggle_select_all,
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel,
+            fg=self.c_text_bright,
+            selectcolor=self.c_input_bg,
+            activebackground=self.c_panel,
+            activeforeground="white",
+            cursor="hand2"
+        )
+        self.chk_select_all.pack(side=tk.LEFT)
+
+        total_cnt = len(self.candidates)
+        self.lbl_counter = tk.Label(
+            master_bar,
+            text=tr("multi_selection_count", selected=total_cnt, total=total_cnt),
+            font=("Segoe UI", 8),
+            bg=self.c_panel,
+            fg=self.c_accent
+        )
+        self.lbl_counter.pack(side=tk.RIGHT)
+
+        # Candidates List Canvas with Scrollbar
+        list_container = tk.Frame(body, bg=self.c_input_bg, highlightbackground=self.c_border, highlightthickness=1)
+        list_container.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.canvas = tk.Canvas(list_container, bg=self.c_input_bg, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=self.canvas.yview)
+        self.scroll_frame = tk.Frame(self.canvas, bg=self.c_input_bg)
+
+        self.scroll_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        # Populate rows
+        self._populate_candidates_list()
+
+        # Bottom Button Row
+        btn_bar = tk.Frame(body, bg=self.c_bg)
+        btn_bar.pack(fill=tk.X)
+
+        self.btn_download_selected = tk.Button(
+            btn_bar,
+            text=tr("multi_btn_download_selected"),
+            command=self._on_download_selected_clicked,
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_accent_dark,
+            fg="white",
+            relief="flat",
+            activebackground=self.c_accent,
+            activeforeground="white",
+            cursor="hand2",
+            padx=14,
+            pady=6
+        )
+        self.btn_download_selected.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_download_all = tk.Button(
+            btn_bar,
+            text=tr("multi_btn_download_all"),
+            command=self._on_download_all_clicked,
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            relief="flat",
+            activebackground=self.c_border,
+            activeforeground="white",
+            cursor="hand2",
+            padx=14,
+            pady=6
+        )
+        self.btn_download_all.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.btn_cancel = tk.Button(
+            btn_bar,
+            text=tr("multi_btn_cancel"),
+            command=self._on_cancel_clicked,
+            font=("Segoe UI", 9),
+            bg=self.c_panel_light,
+            fg=self.c_text_muted,
+            relief="flat",
+            activebackground=self.c_border,
+            activeforeground="white",
+            cursor="hand2",
+            padx=14,
+            pady=6
+        )
+        self.btn_cancel.pack(side=tk.RIGHT)
+
+    def _populate_candidates_list(self):
+        for widget in self.scroll_frame.winfo_children():
+            widget.destroy()
+        self.candidate_vars.clear()
+
+        for idx, cand in enumerate(self.candidates):
+            var = tk.BooleanVar(value=True)
+            self.candidate_vars.append(var)
+
+            fn = cand.get("filename") or derive_download_filename(cand.get("url", ""))
+            ext = cand.get("ext", "")
+            title = cand.get("title", "")
+            url = cand.get("url", "")
+            size_b = cand.get("size_bytes")
+            size_str = ""
+            if size_b is not None and isinstance(size_b, (int, float)) and size_b > 0:
+                if size_b >= 1024 * 1024 * 1024:
+                    size_str = f"({size_b / (1024*1024*1024):.1f} GB)"
+                elif size_b >= 1024 * 1024:
+                    size_str = f"({size_b / (1024*1024):.1f} MB)"
+                elif size_b >= 1024:
+                    size_str = f"({size_b / 1024:.1f} KB)"
+                else:
+                    size_str = f"({size_b} B)"
+
+            cat, icon = get_file_category_and_icon(fn)
+
+            row = tk.Frame(
+                self.scroll_frame,
+                bg=self.c_panel,
+                padx=8,
+                pady=6,
+                highlightbackground=self.c_border,
+                highlightthickness=1
+            )
+            row.pack(fill=tk.X, expand=True, pady=3, padx=2)
+
+            chk = tk.Checkbutton(
+                row,
+                variable=var,
+                command=self._on_item_toggled,
+                bg=self.c_panel,
+                selectcolor=self.c_input_bg,
+                activebackground=self.c_panel,
+                cursor="hand2"
+            )
+            chk.pack(side=tk.LEFT, padx=(0, 6))
+
+            badge = tk.Label(row, text=icon, font=("Segoe UI", 12), bg=self.c_panel)
+            badge.pack(side=tk.LEFT, padx=(0, 6))
+
+            info_col = tk.Frame(row, bg=self.c_panel)
+            info_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+            line1 = tk.Frame(info_col, bg=self.c_panel)
+            line1.pack(fill=tk.X, anchor="w")
+
+            lbl_fn = tk.Label(line1, text=fn, font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright)
+            lbl_fn.pack(side=tk.LEFT, padx=(0, 6))
+
+            if ext:
+                lbl_ext = tk.Label(
+                    line1,
+                    text=ext.upper().lstrip("."),
+                    font=("Segoe UI", 7, "bold"),
+                    bg=self.c_panel_light,
+                    fg=self.c_accent,
+                    padx=4,
+                    pady=1
+                )
+                lbl_ext.pack(side=tk.LEFT, padx=(0, 6))
+
+            if size_str:
+                lbl_sz = tk.Label(line1, text=size_str, font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
+                lbl_sz.pack(side=tk.LEFT)
+
+            line2 = tk.Frame(info_col, bg=self.c_panel)
+            line2.pack(fill=tk.X, anchor="w", pady=(2, 0))
+
+            if title and title != fn:
+                disp_title = title if len(title) <= 45 else title[:42] + "..."
+                lbl_t = tk.Label(line2, text=disp_title, font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_accent)
+                lbl_t.pack(side=tk.LEFT, padx=(0, 6))
+
+            disp_url = url if len(url) <= 70 else url[:67] + "..."
+            lbl_u = tk.Label(line2, text=disp_url, font=("Segoe UI", 7), bg=self.c_panel, fg=self.c_text_muted)
+            lbl_u.pack(side=tk.LEFT)
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
+
+    def _on_mousewheel(self, event):
+        try:
+            if self.canvas.winfo_exists():
+                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
+
+    def _toggle_select_all(self):
+        state = self.var_select_all.get()
+        for var in self.candidate_vars:
+            var.set(state)
+        self._update_counter()
+
+    def _on_item_toggled(self):
+        selected_count = sum(1 for v in self.candidate_vars if v.get())
+        total_count = len(self.candidate_vars)
+        if selected_count == total_count:
+            self.var_select_all.set(True)
+        else:
+            self.var_select_all.set(False)
+        self._update_counter()
+
+    def _update_counter(self):
+        sel = sum(1 for v in self.candidate_vars if v.get())
+        tot = len(self.candidate_vars)
+        self.lbl_counter.configure(
+            text=tr("multi_selection_count", selected=sel, total=tot)
+        )
+
+    def select_all(self, state: bool = True):
+        self.var_select_all.set(state)
+        for var in self.candidate_vars:
+            var.set(state)
+        self._update_counter()
+
+    def select_candidate(self, index: int, state: bool = True):
+        if 0 <= index < len(self.candidate_vars):
+            self.candidate_vars[index].set(state)
+            self._on_item_toggled()
+
+    def get_selected_candidates(self) -> List[Dict[str, Any]]:
+        return [cand for cand, var in zip(self.candidates, self.candidate_vars) if var.get()]
+
+    def _on_download_selected_clicked(self):
+        selected = self.get_selected_candidates()
+        if not selected:
+            if hasattr(self, "parent_app") and self.parent_app and hasattr(self.parent_app, "show_safe_warning"):
+                self.parent_app.show_safe_warning(tr("multi_modal_title"), tr("multi_no_selection_warning"))
+            return
+        if self.on_download_selected:
+            self.on_download_selected(selected)
+        self.destroy()
+
+    def _on_download_all_clicked(self):
+        if self.on_download_all:
+            self.on_download_all(self.candidates)
+        elif self.on_download_selected:
+            self.on_download_selected(self.candidates)
+        self.destroy()
+
+    def _on_cancel_clicked(self):
+        try:
+            self.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
+        if self.on_cancel:
+            try:
+                self.on_cancel()
+            except Exception:
+                pass
+        self.destroy()
+
+    def grab_set(self):
+        pass
+
+    def grab_set_global(self):
+        pass
+
+
 class RefreshLinkModal(tk.Toplevel):
     """
     Modern dark-themed TDM-style dialog for updating an expired or forbidden download link:
@@ -7147,11 +8380,11 @@ class SystemTrayManager:
     def _get_sniffer_text(self, item=None) -> str:
         app = self.app
         active = getattr(app, "_clipboard_sniffer_active", True) if app is not None else True
-        return f"📋 Clipboard Sniffer: {'Active' if active else 'Paused'}"
+        return tr("tray_sniffer_active") if active else tr("tray_sniffer_paused")
 
     def _get_startup_text(self, item=None) -> str:
         enabled = is_startup_enabled()
-        return f"🚀 Start with Windows: {'ON' if enabled else 'OFF'}"
+        return tr("tray_startup_on") if enabled else tr("tray_startup_off")
 
     def _on_menu_open(self, icon=None, item=None):
         app = self.app
@@ -7205,10 +8438,10 @@ class SystemTrayManager:
         if not PYSTRAY_AVAILABLE or TrayMenuItem is None or TrayMenu is None:
             return None
         return TrayMenu(
-            TrayMenuItem("🖥️ Open Smart Download", self._on_menu_open, default=True),
+            TrayMenuItem(tr("tray_open"), self._on_menu_open, default=True),
             TrayMenuItem(self._get_sniffer_text, self._on_menu_toggle_sniffer),
             TrayMenuItem(self._get_startup_text, self._on_menu_toggle_startup),
-            TrayMenuItem("❌ Exit Completely", self._on_menu_exit),
+            TrayMenuItem(tr("tray_exit"), self._on_menu_exit),
         )
 
     @property
@@ -7282,9 +8515,11 @@ class SystemTrayManager:
     def update_menu(self):
         """Refreshes dynamic labels in context menu."""
         with self._lock:
-            if self.icon is not None and getattr(self.icon, "visible", False):
+            if self.icon is not None:
                 try:
-                    self.icon.update_menu()
+                    self.icon.menu = self._build_menu()
+                    if getattr(self.icon, "visible", False):
+                        self.icon.update_menu()
                 except Exception:
                     pass
 
@@ -7447,12 +8682,216 @@ class ModernFramelessGUI:
         if os.environ.get("SD_DISABLE_AUTO_REGISTER") != "1" and "unittest" not in sys.modules:
             self._start_browser_self_registration()
 
+        self._download_queue: List[Tuple[str, str, int, float]] = []
+        self._candidates_modal: Optional[tk.Toplevel] = None
+        LocalizationManager.get_instance().register_observer(self._update_ui_language)
+
         # Non-blocking background check for application and yt-dlp updates
         if os.environ.get("SD_DISABLE_AUTO_UPDATE") != "1" and "unittest" not in sys.modules:
             try:
                 self._update_check_job = self.root.after(2500, self._start_auto_update_check)
             except Exception:
                 pass
+
+    def toggle_language(self):
+        """Toggles active language between Arabic and English dynamically in-place."""
+        new_lang = LocalizationManager.get_instance().toggle_language()
+        self._update_ui_language()
+        self.log(f"[LOCALE] Switched interface language to: {new_lang.upper()}")
+
+    def _update_ui_language(self):
+        """Dynamically re-translates and updates all main UI widgets in-place."""
+        cur_lang = LocalizationManager.get_instance().get_language()
+        if hasattr(self, "btn_lang_toggle") and self.btn_lang_toggle.winfo_exists():
+            self.btn_lang_toggle.configure(text="🌐 English" if cur_lang == "ar" else "🌐 العربية")
+
+        if hasattr(self, "title_lbl") and self.title_lbl.winfo_exists():
+            self.title_lbl.configure(text=tr("app_header"))
+        if hasattr(self, "subtitle_lbl") and self.subtitle_lbl.winfo_exists():
+            self.subtitle_lbl.configure(text=tr("app_subtitle"))
+        try:
+            self.root.title(tr("app_title"))
+        except Exception:
+            pass
+
+        # Input card
+        if hasattr(self, "lbl_url") and self.lbl_url.winfo_exists():
+            self.lbl_url.configure(text=tr("lbl_url"))
+        if hasattr(self, "btn_paste") and self.btn_paste.winfo_exists():
+            self.btn_paste.configure(text=tr("btn_paste"))
+        if hasattr(self, "btn_refresh_url") and self.btn_refresh_url.winfo_exists():
+            self.btn_refresh_url.configure(text=tr("btn_refresh_url"))
+        if hasattr(self, "lbl_dest") and self.lbl_dest.winfo_exists():
+            self.lbl_dest.configure(text=tr("lbl_dest"))
+        if hasattr(self, "btn_browse") and self.btn_browse.winfo_exists():
+            self.btn_browse.configure(text=tr("btn_browse"))
+
+        # Limiter & options card
+        if hasattr(self, "lbl_conn") and self.lbl_conn.winfo_exists():
+            self.lbl_conn.configure(text=tr("lbl_threads"))
+        if hasattr(self, "lbl_limit") and self.lbl_limit.winfo_exists():
+            self.lbl_limit.configure(text=tr("lbl_speed_limiter"))
+        if hasattr(self, "lbl_custom") and self.lbl_custom.winfo_exists():
+            self.lbl_custom.configure(text=tr("lbl_custom_speed"))
+        if hasattr(self, "btn_apply_speed") and self.btn_apply_speed.winfo_exists():
+            self.btn_apply_speed.configure(text=tr("btn_apply_limit"))
+        if hasattr(self, "lbl_slider_title") and self.lbl_slider_title.winfo_exists():
+            self.lbl_slider_title.configure(text=tr("lbl_live_throttle_slider"))
+
+        # Actions card
+        if hasattr(self, "btn_start") and self.btn_start.winfo_exists():
+            self.btn_start.configure(text=tr("btn_start"))
+        if hasattr(self, "btn_pause") and self.btn_pause.winfo_exists():
+            if not (self.engine and getattr(self.engine, "is_paused", False)):
+                self.btn_pause.configure(text=tr("btn_pause"))
+        if hasattr(self, "btn_cancel") and self.btn_cancel.winfo_exists():
+            self.btn_cancel.configure(text=tr("btn_cancel"))
+        if hasattr(self, "btn_refresh_link") and self.btn_refresh_link.winfo_exists():
+            self.btn_refresh_link.configure(text=tr("btn_refresh_url"))
+        if hasattr(self, "btn_browser") and self.btn_browser.winfo_exists():
+            self.btn_browser.configure(text=tr("btn_browser"))
+        if hasattr(self, "btn_check_updates") and self.btn_check_updates.winfo_exists():
+            self.btn_check_updates.configure(text=tr("btn_check_updates"))
+
+        self._update_sniffer_btn()
+        self._update_startup_btn()
+        self._update_cookies_btn()
+        self._update_auto_cat_btn()
+
+        # Metrics card
+        if hasattr(self, "lbl_t_speed") and self.lbl_t_speed.winfo_exists():
+            self.lbl_t_speed.configure(text=tr("metric_speed"))
+        if hasattr(self, "lbl_t_size") and self.lbl_t_size.winfo_exists():
+            self.lbl_t_size.configure(text=tr("metric_total_size"))
+        if hasattr(self, "lbl_t_eta") and self.lbl_t_eta.winfo_exists():
+            self.lbl_t_eta.configure(text=tr("metric_eta"))
+        if hasattr(self, "lbl_t_threads") and self.lbl_t_threads.winfo_exists():
+            self.lbl_t_threads.configure(text=tr("metric_threads"))
+
+        # Notebook tabs
+        if hasattr(self, "notebook") and self.notebook.winfo_exists():
+            try:
+                self.notebook.tab(0, text=tr("tab_chunks"))
+            except Exception:
+                pass
+            try:
+                self.notebook.tab(1, text=tr("tab_logs"))
+            except Exception:
+                pass
+            try:
+                self.notebook.tab(2, text=tr("tab_history"))
+            except Exception:
+                pass
+
+        # Chunks treeview headings
+        if hasattr(self, "tree_chunks") and self.tree_chunks.winfo_exists():
+            self.tree_chunks.heading("id", text=tr("col_chunk_id"))
+            self.tree_chunks.heading("range", text=tr("col_chunk_range"))
+            self.tree_chunks.heading("size", text=tr("col_chunk_size"))
+            self.tree_chunks.heading("downloaded", text=tr("col_chunk_downloaded"))
+            self.tree_chunks.heading("pct", text=tr("col_chunk_pct"))
+            self.tree_chunks.heading("status", text=tr("col_chunk_status"))
+
+        # History toolbar
+        if hasattr(self, "lbl_filter") and self.lbl_filter.winfo_exists():
+            self.lbl_filter.configure(text=tr("lbl_filter"))
+        if hasattr(self, "btn_hist_open") and self.btn_hist_open.winfo_exists():
+            self.btn_hist_open.configure(text=tr("btn_hist_open"))
+        if hasattr(self, "btn_hist_folder") and self.btn_hist_folder.winfo_exists():
+            self.btn_hist_folder.configure(text=tr("btn_hist_folder"))
+        if hasattr(self, "btn_hist_redownload") and self.btn_hist_redownload.winfo_exists():
+            self.btn_hist_redownload.configure(text=tr("btn_hist_redownload"))
+        if hasattr(self, "btn_hist_remove") and self.btn_hist_remove.winfo_exists():
+            self.btn_hist_remove.configure(text=tr("btn_hist_remove"))
+        if hasattr(self, "btn_hist_clear") and self.btn_hist_clear.winfo_exists():
+            self.btn_hist_clear.configure(text=tr("btn_hist_clear"))
+
+        # History treeview headings
+        if hasattr(self, "tree_history") and self.tree_history.winfo_exists():
+            self.tree_history.heading("category", text=tr("col_hist_category"))
+            self.tree_history.heading("filename", text=tr("col_hist_filename"))
+            self.tree_history.heading("size", text=tr("col_hist_size"))
+            self.tree_history.heading("status", text=tr("col_hist_status"))
+            self.tree_history.heading("date", text=tr("col_hist_date"))
+            self.tree_history.heading("path", text=tr("col_hist_path"))
+
+        # Tray menu
+        if hasattr(self, "tray_manager") and self.tray_manager:
+            try:
+                self.tray_manager.update_menu()
+            except Exception:
+                pass
+
+    def _show_multiple_candidates_dialog(self, source_url: str, candidates: List[Dict[str, Any]], page_title: str = ""):
+        """Displays modern dark-themed modal for choosing among multiple download links."""
+        if threading.current_thread() != threading.main_thread():
+            self.root.after(0, lambda: self._show_multiple_candidates_dialog(source_url, candidates, page_title))
+            return
+
+        self._close_fetching_toast()
+
+        def _on_download_selected(selected: List[Dict[str, Any]]):
+            if not selected:
+                return
+            if len(selected) == 1:
+                cand = selected[0]
+                dl_url = cand["url"]
+                fn = cand.get("filename") or derive_download_filename(dl_url)
+                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                auto_cat = getattr(self, "auto_categorize_folders", True)
+                dest = resolve_categorized_path(downloads_dir, fn, auto_categorize=auto_cat)
+                self._show_download_confirmation_dialog(dl_url, dest)
+            else:
+                self._queue_multiple_candidate_downloads(selected)
+
+        def _on_download_all(all_cands: List[Dict[str, Any]]):
+            self._queue_multiple_candidate_downloads(all_cands)
+
+        modal = MultipleCandidatesModal(
+            parent=self.root,
+            source_url=source_url,
+            candidates=candidates,
+            page_title=page_title,
+            theme=self._theme_dict(),
+            on_download_selected=_on_download_selected,
+            on_download_all=_on_download_all,
+            parent_app=self
+        )
+        self._candidates_modal = modal
+
+    def _queue_multiple_candidate_downloads(self, items: List[Dict[str, Any]]):
+        """Queues a list of candidate downloads, starting the first one if idle."""
+        if not items:
+            return
+        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        auto_cat = getattr(self, "auto_categorize_folders", True)
+        try:
+            max_conn = int(self.conn_var.get())
+        except Exception:
+            max_conn = 8
+        try:
+            kb_limit = float(self.entry_custom_speed.get().strip())
+        except Exception:
+            kb_limit = 0.0
+        bytes_limit = kb_limit * 1024.0 if kb_limit > 0 else 0.0
+
+        self.log(f"[BATCH] Queuing {len(items)} download candidates...")
+        for item in items:
+            dl_url = item["url"]
+            fn = item.get("filename") or derive_download_filename(dl_url)
+            dest = resolve_categorized_path(downloads_dir, fn, auto_categorize=auto_cat)
+            self.queue_download(dl_url, dest, max_conn=max_conn, bytes_limit=bytes_limit)
+
+    def queue_download(self, url: str, dest: str, max_conn: int = 8, bytes_limit: float = 0.0):
+        """Queues a download task, starting it immediately if no download is currently running."""
+        if not hasattr(self, "_download_queue"):
+            self._download_queue = []
+
+        if not (self.engine and getattr(self.engine, "is_running", False)):
+            self._start_download_with_engine(url, dest, max_conn, bytes_limit)
+        else:
+            self._download_queue.append((url, dest, max_conn, bytes_limit))
+            self.log(f"[QUEUE] Task queued: {os.path.basename(dest)} ({len(self._download_queue)} queued)")
 
     def _start_browser_self_registration(self):
         """Asynchronously checks and registers or heals browser integration in background without blocking GUI."""
@@ -8015,27 +9454,27 @@ class ModernFramelessGUI:
                 pass
 
         # App Title
-        title_lbl = tk.Label(
+        self.title_lbl = tk.Label(
             title_bar,
-            text="SMART DOWNLOAD (SD)",
+            text=tr("app_header"),
             font=("Segoe UI", 10, "bold"),
             bg=self.c_panel,
             fg=self.c_accent
         )
-        title_lbl.pack(side=tk.LEFT, padx=(6, 8))
-        title_lbl.bind("<ButtonPress-1>", self._on_title_press)
-        title_lbl.bind("<B1-Motion>", self._on_title_drag)
+        self.title_lbl.pack(side=tk.LEFT, padx=(6, 8))
+        self.title_lbl.bind("<ButtonPress-1>", self._on_title_press)
+        self.title_lbl.bind("<B1-Motion>", self._on_title_drag)
 
-        subtitle_lbl = tk.Label(
+        self.subtitle_lbl = tk.Label(
             title_bar,
-            text="[SD Dynamic Chunking & Bandwidth Throttle Engine]",
+            text=tr("app_subtitle"),
             font=("Segoe UI", 8),
             bg=self.c_panel,
             fg=self.c_text_muted
         )
-        subtitle_lbl.pack(side=tk.LEFT)
-        subtitle_lbl.bind("<ButtonPress-1>", self._on_title_press)
-        subtitle_lbl.bind("<B1-Motion>", self._on_title_drag)
+        self.subtitle_lbl.pack(side=tk.LEFT)
+        self.subtitle_lbl.bind("<ButtonPress-1>", self._on_title_press)
+        self.subtitle_lbl.bind("<B1-Motion>", self._on_title_drag)
 
         # Window Control Buttons (Minimize & Close)
         btn_close = tk.Label(
@@ -8080,6 +9519,25 @@ class ModernFramelessGUI:
         )
         self.btn_check_updates.pack(side=tk.RIGHT, padx=(6, 8), pady=6)
         self.btn_update = self.btn_check_updates
+
+        # Prominent Language Toggle Button
+        cur_lang = LocalizationManager.get_instance().get_language()
+        toggle_txt = "🌐 English" if cur_lang == "ar" else "🌐 العربية"
+        self.btn_lang_toggle = tk.Button(
+            title_bar,
+            text=toggle_txt,
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=10,
+            pady=2,
+            command=self.toggle_language
+        )
+        self.btn_lang_toggle.pack(side=tk.RIGHT, padx=(4, 6), pady=6)
 
         lbl_ver = tk.Label(
             title_bar,
@@ -8126,6 +9584,10 @@ class ModernFramelessGUI:
 
     def _cleanup_resources(self):
         self._closing = True
+        try:
+            LocalizationManager.get_instance().unregister_observer(self._update_ui_language)
+        except Exception:
+            pass
         if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
             try:
                 self._yt_cancel_event.set()
@@ -8370,8 +9832,8 @@ class ModernFramelessGUI:
         url_row = tk.Frame(card, bg=self.c_panel)
         url_row.pack(fill=tk.X, pady=2)
 
-        lbl_url = tk.Label(url_row, text="Download URL:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
-        lbl_url.pack(side=tk.LEFT)
+        self.lbl_url = tk.Label(url_row, text=tr("lbl_url"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
+        self.lbl_url.pack(side=tk.LEFT)
 
         default_url = "https://speed.cloudflare.com/__down?bytes=50000000"  # 50MB benchmark file
         self.entry_url = tk.Entry(url_row, font=("Segoe UI", 9), bg=self.c_input_bg, fg=self.c_text_bright, insertbackground=self.c_accent, relief="flat")
@@ -8379,18 +9841,18 @@ class ModernFramelessGUI:
         self.entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), ipady=3)
         self.entry_url.bind("<KeyRelease>", lambda e: self._on_url_change())
 
-        btn_paste = tk.Button(url_row, text="📋 Paste", font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._paste_url)
-        btn_paste.pack(side=tk.RIGHT)
+        self.btn_paste = tk.Button(url_row, text=tr("btn_paste"), font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._paste_url)
+        self.btn_paste.pack(side=tk.RIGHT)
 
-        btn_refresh_url = tk.Button(url_row, text="🔄 Refresh Link", font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._open_refresh_link_dialog)
-        btn_refresh_url.pack(side=tk.RIGHT, padx=(0, 6))
+        self.btn_refresh_url = tk.Button(url_row, text=tr("btn_refresh_url"), font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._open_refresh_link_dialog)
+        self.btn_refresh_url.pack(side=tk.RIGHT, padx=(0, 6))
 
         # Destination Row
         dest_row = tk.Frame(card, bg=self.c_panel)
         dest_row.pack(fill=tk.X, pady=(6, 2))
 
-        lbl_dest = tk.Label(dest_row, text="Save Location:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
-        lbl_dest.pack(side=tk.LEFT)
+        self.lbl_dest = tk.Label(dest_row, text=tr("lbl_dest"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
+        self.lbl_dest.pack(side=tk.LEFT)
 
         downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
         default_fn = "cloudflare_50mb.bin"
@@ -8402,8 +9864,8 @@ class ModernFramelessGUI:
         self.entry_dest.insert(0, default_dest)
         self.entry_dest.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), ipady=3)
 
-        btn_browse = tk.Button(dest_row, text="📁 Browse...", font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._browse_destination)
-        btn_browse.pack(side=tk.RIGHT)
+        self.btn_browse = tk.Button(dest_row, text=tr("btn_browse"), font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._browse_destination)
+        self.btn_browse.pack(side=tk.RIGHT)
 
     def _paste_url(self):
         try:
@@ -8472,16 +9934,16 @@ class ModernFramelessGUI:
         row1.pack(fill=tk.X, pady=2)
 
         # Max Connections
-        lbl_conn = tk.Label(row1, text="Threads:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright)
-        lbl_conn.pack(side=tk.LEFT)
+        self.lbl_conn = tk.Label(row1, text=tr("lbl_threads"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright)
+        self.lbl_conn.pack(side=tk.LEFT)
 
         self.conn_var = tk.StringVar(value="8")
         conn_combo = ttk.Combobox(row1, textvariable=self.conn_var, values=["1", "2", "4", "8", "16", "24", "32"], width=4, state="readonly")
         conn_combo.pack(side=tk.LEFT, padx=(4, 16))
 
         # Speed Limiter controls
-        lbl_limit = tk.Label(row1, text="Speed Limiter:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
-        lbl_limit.pack(side=tk.LEFT)
+        self.lbl_limit = tk.Label(row1, text=tr("lbl_speed_limiter"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
+        self.lbl_limit.pack(side=tk.LEFT)
 
         self.limit_preset_var = tk.StringVar(value="Unlimited")
         self.preset_options = [
@@ -8501,16 +9963,16 @@ class ModernFramelessGUI:
         preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
 
         # Custom entry
-        lbl_custom = tk.Label(row1, text="Custom (KB/s):", font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
-        lbl_custom.pack(side=tk.LEFT)
+        self.lbl_custom = tk.Label(row1, text=tr("lbl_custom_speed"), font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
+        self.lbl_custom.pack(side=tk.LEFT)
 
         self.entry_custom_speed = tk.Entry(row1, font=("Segoe UI", 9), width=7, bg=self.c_input_bg, fg=self.c_text_bright, insertbackground=self.c_accent, relief="flat")
         self.entry_custom_speed.insert(0, "0")
         self.entry_custom_speed.pack(side=tk.LEFT, padx=(4, 6), ipady=1)
         self.entry_custom_speed.bind("<Return>", lambda e: self._apply_speed_limit())
 
-        btn_apply_speed = tk.Button(row1, text="⚡ Apply Limit", font=("Segoe UI", 8, "bold"), bg=self.c_accent_dark, fg="white", relief="flat", activebackground=self.c_accent, cursor="hand2", command=self._apply_speed_limit)
-        btn_apply_speed.pack(side=tk.LEFT, padx=(2, 16))
+        self.btn_apply_speed = tk.Button(row1, text=tr("btn_apply_limit"), font=("Segoe UI", 8, "bold"), bg=self.c_accent_dark, fg="white", relief="flat", activebackground=self.c_accent, cursor="hand2", command=self._apply_speed_limit)
+        self.btn_apply_speed.pack(side=tk.LEFT, padx=(2, 16))
 
         # Active limit status indicator
         self.lbl_active_limit = tk.Label(row1, text="● Current: Unlimited", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
@@ -8520,8 +9982,8 @@ class ModernFramelessGUI:
         row_slider = tk.Frame(card, bg=self.c_panel)
         row_slider.pack(fill=tk.X, pady=(6, 2))
 
-        lbl_slider_title = tk.Label(row_slider, text="🎚️ Live Throttle Slider:", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted)
-        lbl_slider_title.pack(side=tk.LEFT, padx=(0, 8))
+        self.lbl_slider_title = tk.Label(row_slider, text=tr("lbl_live_throttle_slider"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted)
+        self.lbl_slider_title.pack(side=tk.LEFT, padx=(0, 8))
 
         slider_len = max(20, int(22 * getattr(self, "dpi_scale", 1.0)))
         slider_w = max(14, int(16 * getattr(self, "dpi_scale", 1.0)))
@@ -8711,13 +10173,13 @@ class ModernFramelessGUI:
             return
         if self.auto_categorize_folders:
             self.btn_auto_cat.configure(
-                text="📁 Auto-Sort: ON",
+                text=tr("btn_auto_cat_on"),
                 fg=self.c_success,
                 bg=self.c_panel_light
             )
         else:
             self.btn_auto_cat.configure(
-                text="📁 Auto-Sort: OFF",
+                text=tr("btn_auto_cat_off"),
                 fg=self.c_text_muted,
                 bg=self.c_panel
             )
@@ -8820,13 +10282,17 @@ class ModernFramelessGUI:
             grid_frame.columnconfigure(i, weight=1, uniform="metric")
 
         # 1. Download Speed
-        self.card_speed = self._create_metric_box(grid_frame, 0, "🚀 DOWNLOAD SPEED", "0.0 KB/s")
+        self.card_speed = self._create_metric_box(grid_frame, 0, tr("metric_speed"), "0.0 KB/s")
+        self.lbl_t_speed = self.card_speed.master.lbl_t
         # 2. Downloaded / Total
-        self.card_size = self._create_metric_box(grid_frame, 1, "💾 SIZE / PROGRESS", "0 B / 0 B (0%)")
+        self.card_size = self._create_metric_box(grid_frame, 1, tr("metric_total_size"), "0 B / 0 B (0%)")
+        self.lbl_t_size = self.card_size.master.lbl_t
         # 3. ETA
-        self.card_eta = self._create_metric_box(grid_frame, 2, "⏱️ TIME REMAINING", "--:--:--")
+        self.card_eta = self._create_metric_box(grid_frame, 2, tr("metric_eta"), "--:--:--")
+        self.lbl_t_eta = self.card_eta.master.lbl_t
         # 4. Connections
-        self.card_threads = self._create_metric_box(grid_frame, 3, "🌐 ACTIVE CHUNKS", "0 / 0 Threads")
+        self.card_threads = self._create_metric_box(grid_frame, 3, tr("metric_threads"), "0 / 0 Threads")
+        self.lbl_t_threads = self.card_threads.master.lbl_t
 
     def _create_metric_box(self, parent, col, title, initial_value):
         frame = tk.Frame(parent, bg=self.c_bg, padx=10, pady=8, highlightbackground=self.c_border, highlightthickness=1)
@@ -8834,9 +10300,11 @@ class ModernFramelessGUI:
 
         lbl_t = tk.Label(frame, text=title, font=("Segoe UI", 8, "bold"), bg=self.c_bg, fg=self.c_text_muted)
         lbl_t.pack(anchor="w")
+        frame.lbl_t = lbl_t
 
         lbl_v = tk.Label(frame, text=initial_value, font=("Segoe UI", 11, "bold"), bg=self.c_bg, fg=self.c_text_bright)
         lbl_v.pack(anchor="w", pady=(2, 0))
+        frame.lbl_v = lbl_v
         return lbl_v
 
     def _draw_main_progress(self, pct: float):
@@ -8985,8 +10453,8 @@ class ModernFramelessGUI:
         hist_toolbar = tk.Frame(tab_history, bg=self.c_panel, padx=8, pady=6)
         hist_toolbar.pack(side=tk.TOP, fill=tk.X)
 
-        lbl_filter = tk.Label(hist_toolbar, text="Filter:", font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright)
-        lbl_filter.pack(side=tk.LEFT, padx=(0, 6))
+        self.lbl_filter = tk.Label(hist_toolbar, text=tr("lbl_filter"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright)
+        self.lbl_filter.pack(side=tk.LEFT, padx=(0, 6))
 
         self.combo_history_filter = ttk.Combobox(
             hist_toolbar,
@@ -9858,7 +11326,22 @@ class ModernFramelessGUI:
                 except Exception:
                     pass
 
+                candidates = info.get("candidates") or []
+
                 if info.get("is_html") and not info.get("resolved"):
+                    if len(candidates) > 1:
+                        self.clear_last_clipboard_url()
+                        if modal_to_close:
+                            try:
+                                modal_to_close.destroy()
+                            except Exception:
+                                pass
+                            if getattr(self, "_confirm_modal", None) is modal_to_close:
+                                self._confirm_modal = None
+                        self.log(f"[LINK RESOLVER] Multiple download candidates ({len(candidates)}) detected on page: {url}")
+                        self._show_multiple_candidates_dialog(url, candidates, page_title=info.get("page_title", ""))
+                        return
+
                     self.clear_last_clipboard_url()
                     if modal_to_close:
                         try:
@@ -9874,18 +11357,36 @@ class ModernFramelessGUI:
                     except Exception:
                         pass
                     self.log(f"[LINK RESOLVER] Web page detected (not a download link): {url}")
-                    msg = (
-                        "\u0647\u0630\u0627 \u0627\u0644\u0631\u0627\u0628\u0637 \u0644\u0635\u0641\u062d\u0629 \u0648\u064a\u0628 \u0648\u0644\u064a\u0633 \u0644\u0645\u0644\u0641 \u062a\u062d\u0645\u064a\u0644. \u0627\u0641\u062a\u062d\u0647 \u0641\u064a \u0627\u0644\u0645\u062a\u0635\u0641\u062d \u0648\u0627\u0636\u063a\u0637 \u0632\u0631 \u0627\u0644\u062a\u062d\u0645\u064a\u0644\u060c \u0623\u0648 \u0627\u0646\u0633\u062e \u0631\u0627\u0628\u0637 \u0627\u0644\u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0645\u0628\u0627\u0634\u0631.\n\n"
-                        "This link is for a web page, not a direct download file. Open it in your browser and click download, or copy the direct download link."
-                    )
+                    msg = tr("dialog_not_download_msg")
                     SafeModalDialog(
                         self.root,
-                        title="Not a download link",
+                        title=tr("dialog_not_download_title"),
                         message=msg,
                         dialog_type="warning",
                         theme=self._theme_dict()
                     )
                     return
+
+                if len(candidates) > 1:
+                    self.clear_last_clipboard_url()
+                    if modal_to_close:
+                        try:
+                            modal_to_close.destroy()
+                        except Exception:
+                            pass
+                        if getattr(self, "_confirm_modal", None) is modal_to_close:
+                            self._confirm_modal = None
+                    self.log(f"[LINK RESOLVER] Multiple download candidates ({len(candidates)}) detected on page: {url}")
+                    self._show_multiple_candidates_dialog(url, candidates, page_title=info.get("page_title", ""))
+                    return
+
+                if len(candidates) == 1 and info.get("is_html"):
+                    cand = candidates[0]
+                    info["url"] = cand["url"]
+                    if cand.get("filename"):
+                        info["filename"] = cand["filename"]
+                    info["resolved"] = True
+                    info["is_html"] = False
 
                 on_resolved(info)
 
@@ -10119,30 +11620,42 @@ class ModernFramelessGUI:
             self._confirm_modal = None
             self.log(f"[CONFIRM MODAL ERROR] {e}")
 
+    def _update_sniffer_btn(self):
+        """Refreshes the visual state of the clipboard sniffer button."""
+        if not hasattr(self, "btn_clipboard_sniffer"):
+            return
+        try:
+            if not self.btn_clipboard_sniffer.winfo_exists():
+                return
+        except Exception:
+            return
+        if getattr(self, "_clipboard_sniffer_active", True):
+            self.btn_clipboard_sniffer.configure(
+                text=tr("btn_sniffer_active"),
+                fg=self.c_success,
+                bg=self.c_panel_light
+            )
+        else:
+            self.btn_clipboard_sniffer.configure(
+                text=tr("btn_sniffer_paused"),
+                fg=self.c_text_muted,
+                bg=self.c_panel
+            )
+
     def toggle_clipboard_sniffer(self):
         """Toggles automatic clipboard URL monitoring on or off."""
         self._clipboard_sniffer_active = not self._clipboard_sniffer_active
-        if hasattr(self, "btn_clipboard_sniffer"):
-            if self._clipboard_sniffer_active:
-                self.btn_clipboard_sniffer.configure(
-                    text="📋 Sniffer: Active",
-                    fg=self.c_success,
-                    bg=self.c_panel_light
-                )
-                self.log("[CLIPBOARD] Sniffer Active: Monitoring system clipboard for downloadable links.")
-                if getattr(self, "_clipboard_job", None) is None and hasattr(self, "root") and self.root:
-                    try:
-                        if self.root.winfo_exists():
-                            self._clipboard_job = self.root.after(self._clipboard_poll_interval, self._check_clipboard_tick)
-                    except Exception:
-                        pass
-            else:
-                self.btn_clipboard_sniffer.configure(
-                    text="📋 Sniffer: Paused",
-                    fg=self.c_text_muted,
-                    bg=self.c_panel
-                )
-                self.log("[CLIPBOARD] Sniffer Paused: Clipboard monitoring paused.")
+        self._update_sniffer_btn()
+        if self._clipboard_sniffer_active:
+            self.log("[CLIPBOARD] Sniffer Active: Monitoring system clipboard for downloadable links.")
+            if getattr(self, "_clipboard_job", None) is None and hasattr(self, "root") and self.root:
+                try:
+                    if self.root.winfo_exists():
+                        self._clipboard_job = self.root.after(self._clipboard_poll_interval, self._check_clipboard_tick)
+                except Exception:
+                    pass
+        else:
+            self.log("[CLIPBOARD] Sniffer Paused: Clipboard monitoring paused.")
 
         if hasattr(self, "tray_manager") and self.tray_manager:
             try:
@@ -10162,13 +11675,13 @@ class ModernFramelessGUI:
             self._startup_enabled = enabled
             if enabled:
                 self.btn_startup.configure(
-                    text="🚀 Boot: ON",
+                    text=tr("btn_startup_on"),
                     fg=self.c_success,
                     bg=self.c_panel_light
                 )
             else:
                 self.btn_startup.configure(
-                    text="🚀 Boot: OFF",
+                    text=tr("btn_startup_off"),
                     fg=self.c_text_muted,
                     bg=self.c_panel
                 )
@@ -11144,6 +12657,11 @@ class ModernFramelessGUI:
                     self._refresh_history_table()
             except Exception:
                 pass
+            if hasattr(self, "_download_queue") and self._download_queue:
+                q_url, q_dest, q_conn, q_limit = self._download_queue.pop(0)
+                self.log(f"[QUEUE] Launching next queued download: {os.path.basename(q_dest)} ({len(self._download_queue)} remaining)")
+                self._start_download_with_engine(q_url, q_dest, q_conn, q_limit)
+
             if suppress_dialog:
                 return
             msg = (
@@ -11704,5 +13222,8 @@ if __name__ == "__main__":
 
 
 
-# Backward-compatible and modern engine alias
+# Backward-compatible and modern engine/GUI aliases
 SmartDownloadEngine = TurboDownloadEngine
+TurboDownloaderGUI = ModernFramelessGUI
+DownloaderApp = ModernFramelessGUI
+SmartDownloadGUI = ModernFramelessGUI

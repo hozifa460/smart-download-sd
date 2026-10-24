@@ -7298,6 +7298,539 @@ class TestHtmlLinkResolverAndStartupToast(unittest.TestCase):
                 pass
 
 
+
+
+# ==============================================================================
+# Feature 1: Multiple Download Links Detection & Modal Tests
+# ==============================================================================
+class MockMultiCandidateServer(http.server.BaseHTTPRequestHandler):
+    """Local mock server for testing resolve_all_download_candidates."""
+    def log_message(self, format, *args):
+        pass
+
+    def do_GET(self):
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path
+
+        if path == "/file.exe":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", "1024")
+            self.end_headers()
+            self.wfile.write(b"x" * 1024)
+
+        elif path == "/multi-candidates":
+            body = (
+                b"<!doctype html><html><head><title>ZadLoop Multi Downloads</title></head><body>"
+                b"<h1>Choose your package</h1>"
+                b"<a href=\"/files/App-2.0-x64.exe\">Windows 64-bit Installer</a>"
+                b"<a href=\"/files/App-2.0-x86.exe\">Windows 32-bit Installer</a>"
+                b"<a href=\"/files/App-2.0-arm64.exe\">Windows ARM64 Installer</a>"
+                b"<a href=\"/files/App-2.0-portable.zip\">Portable Zip (50 MB)</a>"
+                b"<a href=\"/about-us\">About Us</a>"
+                b"<a href=\"/privacy\">Privacy Policy</a>"
+                b"<a href=\"https://twitter.com/example\">Twitter</a>"
+                b"</body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/single-candidate":
+            body = (
+                b"<!doctype html><html><head><title>Download Ready</title></head><body>"
+                b"<a href=\"/files/Tool-Setup.exe\">Click here to download Tool</a>"
+                b"<a href=\"/contact\">Contact Us</a>"
+                b"</body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/zero-candidates":
+            body = (
+                b"<!doctype html><html><head><title>Articles</title></head><body>"
+                b"<a href=\"/blog/post-1\">Read Post 1</a>"
+                b"<a href=\"/terms\">Terms of Use</a>"
+                b"</body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+class TestMultipleDownloadCandidates(unittest.TestCase):
+    """Verifies resolve_all_download_candidates HTML parsing, filtering, deduplication, and MultipleCandidatesModal GUI."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = socketserver.TCPServer(("127.0.0.1", 0), MockMultiCandidateServer)
+        cls.port = cls.server.server_address[1]
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.server.shutdown()
+            cls.server.server_close()
+        except Exception:
+            pass
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+    def tearDown(self):
+        try:
+            for child in self.root.winfo_children():
+                try:
+                    child.destroy()
+                except Exception:
+                    pass
+            self.root.update_idletasks()
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def test_resolve_all_download_candidates_multiple_html(self):
+        """Extracts all valid download candidates while filtering out navigation, policy, and social links."""
+        from turbo_downloader import resolve_all_download_candidates
+
+        html = """
+        <!DOCTYPE html>
+        <html>
+        <head><title>App Downloads</title></head>
+        <body>
+        <h1>Download Packages</h1>
+        <a href="/downloads/App-2.0.0-x64.exe">Windows 64-bit Installer</a>
+        <a href="/downloads/App-2.0.0-x86.exe">Windows 32-bit Installer</a>
+        <a href="/downloads/App-2.0.0-arm64.exe">Windows ARM64 Installer</a>
+        <a href="/downloads/App-2.0.0-portable.zip">Portable Archive (30 MB)</a>
+        <a href="/about-us">About Us</a>
+        <a href="/privacy-policy">Privacy Policy</a>
+        <a href="/terms-of-service">Terms</a>
+        <a href="https://twitter.com/example">Twitter</a>
+        <a href="https://facebook.com/example">Facebook</a>
+        <a href="#top">Back to Top</a>
+        </body>
+        </html>
+        """
+        candidates = resolve_all_download_candidates(html, base_url="https://example.com/downloads/thanks")
+        self.assertEqual(len(candidates), 4)
+
+        fns = [c["filename"] for c in candidates]
+        self.assertIn("App-2.0.0-x64.exe", fns)
+        self.assertIn("App-2.0.0-x86.exe", fns)
+        self.assertIn("App-2.0.0-arm64.exe", fns)
+        self.assertIn("App-2.0.0-portable.zip", fns)
+
+        # Verify each candidate dictionary structure
+        for c in candidates:
+            self.assertIn("url", c)
+            self.assertTrue(c["url"].startswith("https://example.com/downloads/App-2.0.0-"))
+            self.assertIn("filename", c)
+            self.assertIn("ext", c)
+            self.assertIn(c["ext"], (".exe", ".zip"))
+            self.assertIn("size_bytes", c)
+            self.assertIn("title", c)
+            self.assertIn("score", c)
+            self.assertGreater(c["score"], 0)
+
+        # Check size parsing on portable archive
+        portable_cand = [c for c in candidates if c["filename"] == "App-2.0.0-portable.zip"][0]
+        self.assertEqual(portable_cand["size_bytes"], 30 * 1024 * 1024)
+
+    def test_resolve_all_download_candidates_deduplication(self):
+        """Deduplicates multiple identical links or anchor variations pointing to the same file."""
+        from turbo_downloader import resolve_all_download_candidates
+
+        html = """
+        <html><body>
+        <a href="/builds/release.exe">Download Executable</a>
+        <a href="/builds/release.exe#download">Direct Link</a>
+        <a href="https://example.com/builds/release.exe">Mirror Link</a>
+        </body></html>
+        """
+        candidates = resolve_all_download_candidates(html, base_url="https://example.com/page")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["filename"], "release.exe")
+
+    def test_resolve_all_download_candidates_zero_candidates(self):
+        """Returns empty list for regular web pages with zero downloadable files."""
+        from turbo_downloader import resolve_all_download_candidates
+
+        html = """
+        <html><body>
+        <a href="/home">Home</a>
+        <a href="/news">News</a>
+        <a href="/contact">Contact</a>
+        <a href="/privacy">Privacy</a>
+        </body></html>
+        """
+        candidates = resolve_all_download_candidates(html, base_url="https://example.com/news")
+        self.assertEqual(len(candidates), 0)
+
+    def test_resolve_all_download_candidates_single_candidate(self):
+        """Returns exactly 1 candidate when page contains only a single download link."""
+        from turbo_downloader import resolve_all_download_candidates
+
+        html = """
+        <html><body>
+        <h1>Thank you!</h1>
+        <p>If download didn't start, <a href="/setup.msi">click here</a>.</p>
+        <a href="/">Home</a>
+        </body></html>
+        """
+        candidates = resolve_all_download_candidates(html, base_url="https://example.com/thanks")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["filename"], "setup.msi")
+        self.assertEqual(candidates[0]["ext"], ".msi")
+
+    def test_resolve_all_download_candidates_from_live_mock_url(self):
+        """Fetches and extracts candidates over HTTP network connection."""
+        from turbo_downloader import resolve_all_download_candidates
+
+        url = f"http://127.0.0.1:{self.port}/multi-candidates"
+        candidates = resolve_all_download_candidates(url)
+        self.assertEqual(len(candidates), 4)
+        fns = [c["filename"] for c in candidates]
+        self.assertIn("App-2.0-x64.exe", fns)
+        self.assertIn("App-2.0-portable.zip", fns)
+
+    def test_resolve_all_download_candidates_direct_binary_url(self):
+        """Returns empty candidate list when target URL returns direct octet-stream."""
+        from turbo_downloader import resolve_all_download_candidates
+
+        url = f"http://127.0.0.1:{self.port}/file.exe"
+        candidates = resolve_all_download_candidates(url)
+        self.assertEqual(len(candidates), 0)
+
+    def test_multiple_candidates_modal_grab_free_and_ui(self):
+        """Verifies MultipleCandidatesModal initialization, grab-free architecture, and geometry."""
+        from turbo_downloader import MultipleCandidatesModal
+
+        candidates = [
+            {"url": "https://example.com/app-x64.exe", "filename": "app-x64.exe", "ext": ".exe", "size_bytes": 1024, "title": "64-bit Installer", "score": 1000},
+            {"url": "https://example.com/app-x86.exe", "filename": "app-x86.exe", "ext": ".exe", "size_bytes": 1024, "title": "32-bit Installer", "score": 900},
+            {"url": "https://example.com/app-portable.zip", "filename": "app-portable.zip", "ext": ".zip", "size_bytes": 2048, "title": "Portable ZIP", "score": 800},
+        ]
+
+        modal = MultipleCandidatesModal(
+            parent=self.root,
+            source_url="https://example.com/downloads",
+            candidates=candidates,
+            page_title="App Downloads"
+        )
+
+        self.assertIsNone(self.root.grab_current(), "Modal must never capture grab")
+        self.assertEqual(len(modal.candidate_vars), 3)
+        self.assertTrue(modal.var_select_all.get())
+        self.assertEqual(modal.candidates[0]["filename"], "app-x64.exe")
+        self.assertEqual(len(modal.candidates), 3)
+        modal.destroy()
+
+    def test_multiple_candidates_modal_select_all_toggle(self):
+        """Tests master checkbox toggles all candidates on and off."""
+        from turbo_downloader import MultipleCandidatesModal
+
+        candidates = [
+            {"url": "https://example.com/file1.exe", "filename": "file1.exe", "ext": ".exe", "size_bytes": None, "title": "File 1", "score": 500},
+            {"url": "https://example.com/file2.zip", "filename": "file2.zip", "ext": ".zip", "size_bytes": None, "title": "File 2", "score": 400},
+        ]
+
+        modal = MultipleCandidatesModal(
+            parent=self.root,
+            source_url="https://example.com/page",
+            candidates=candidates
+        )
+
+        # Uncheck master select all
+        modal.select_all(False)
+        self.assertFalse(modal.var_select_all.get())
+        self.assertEqual(len(modal.get_selected_candidates()), 0)
+
+        # Re-check master select all
+        modal.select_all(True)
+        self.assertTrue(modal.var_select_all.get())
+        self.assertEqual(len(modal.get_selected_candidates()), 2)
+        modal.destroy()
+
+    def test_multiple_candidates_modal_select_specific(self):
+        """Tests selecting or deselecting a specific candidate updates selection state."""
+        from turbo_downloader import MultipleCandidatesModal
+
+        candidates = [
+            {"url": "https://example.com/f1.exe", "filename": "f1.exe", "ext": ".exe", "size_bytes": None, "title": "F1", "score": 500},
+            {"url": "https://example.com/f2.exe", "filename": "f2.exe", "ext": ".exe", "size_bytes": None, "title": "F2", "score": 400},
+            {"url": "https://example.com/f3.exe", "filename": "f3.exe", "ext": ".exe", "size_bytes": None, "title": "F3", "score": 300},
+        ]
+
+        modal = MultipleCandidatesModal(
+            parent=self.root,
+            source_url="https://example.com/page",
+            candidates=candidates
+        )
+
+        # Deselect index 1
+        modal.select_candidate(1, False)
+        self.assertFalse(modal.var_select_all.get())
+        selected = modal.get_selected_candidates()
+        self.assertEqual(len(selected), 2)
+        self.assertEqual([s["filename"] for s in selected], ["f1.exe", "f3.exe"])
+        modal.destroy()
+
+    def test_multiple_candidates_modal_action_download_selected(self):
+        """Tests Download Selected button dispatches selected items to callback."""
+        from turbo_downloader import MultipleCandidatesModal
+
+        candidates = [
+            {"url": "https://example.com/f1.exe", "filename": "f1.exe", "ext": ".exe", "size_bytes": None, "title": "F1", "score": 500},
+            {"url": "https://example.com/f2.exe", "filename": "f2.exe", "ext": ".exe", "size_bytes": None, "title": "F2", "score": 400},
+        ]
+
+        dispatched = []
+        modal = MultipleCandidatesModal(
+            parent=self.root,
+            source_url="https://example.com/page",
+            candidates=candidates,
+            on_download_selected=lambda items: dispatched.append(items)
+        )
+
+        modal.select_candidate(0, False)
+        modal.btn_download_selected.invoke()
+        self.assertEqual(len(dispatched), 1)
+        self.assertEqual(len(dispatched[0]), 1)
+        self.assertEqual(dispatched[0][0]["filename"], "f2.exe")
+        self.assertFalse(modal.winfo_exists())
+
+    def test_multiple_candidates_modal_action_download_all(self):
+        """Tests Download All button dispatches all candidates regardless of unchecked boxes."""
+        from turbo_downloader import MultipleCandidatesModal
+
+        candidates = [
+            {"url": "https://example.com/f1.exe", "filename": "f1.exe", "ext": ".exe", "size_bytes": None, "title": "F1", "score": 500},
+            {"url": "https://example.com/f2.exe", "filename": "f2.exe", "ext": ".exe", "size_bytes": None, "title": "F2", "score": 400},
+        ]
+
+        dispatched = []
+        modal = MultipleCandidatesModal(
+            parent=self.root,
+            source_url="https://example.com/page",
+            candidates=candidates,
+            on_download_all=lambda items: dispatched.append(items)
+        )
+
+        # Uncheck one item, then invoke Download All
+        modal.select_candidate(0, False)
+        modal.btn_download_all.invoke()
+        self.assertEqual(len(dispatched), 1)
+        self.assertEqual(len(dispatched[0]), 2)
+        self.assertFalse(modal.winfo_exists())
+
+    def test_multiple_candidates_modal_action_cancel(self):
+        """Tests Cancel button invokes on_cancel and closes modal."""
+        from turbo_downloader import MultipleCandidatesModal
+
+        cancelled = []
+        modal = MultipleCandidatesModal(
+            parent=self.root,
+            source_url="https://example.com/page",
+            candidates=[{"url": "https://example.com/f.exe", "filename": "f.exe", "ext": ".exe", "size_bytes": None, "title": "F", "score": 100}],
+            on_cancel=lambda: cancelled.append(True)
+        )
+
+        modal.btn_cancel.invoke()
+        self.assertEqual(len(cancelled), 1)
+        self.assertFalse(modal.winfo_exists())
+
+
+# ==============================================================================
+# Feature 2: Bilingual UI Localization Tests (Arabic & English)
+# ==============================================================================
+class TestBilingualLocalization(unittest.TestCase):
+    """Verifies LocalizationManager, translation dictionaries, persistence, dynamic switching, and widget updates."""
+
+    def setUp(self):
+        from turbo_downloader import LocalizationManager, get_setting
+        self.loc = LocalizationManager.get_instance()
+        self.orig_lang = get_setting("language", "en")
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+    def tearDown(self):
+        from turbo_downloader import set_setting
+        self.loc.set_language(self.orig_lang)
+        set_setting("language", self.orig_lang)
+        try:
+            for child in self.root.winfo_children():
+                try:
+                    child.destroy()
+                except Exception:
+                    pass
+            self.root.update_idletasks()
+            self.root.destroy()
+        except Exception:
+            pass
+
+    def test_localization_manager_singleton_and_defaults(self):
+        """Tests singleton access and language getters/setters."""
+        from turbo_downloader import LocalizationManager, get_current_language, set_current_language
+
+        loc1 = LocalizationManager.get_instance()
+        loc2 = LocalizationManager.get_instance()
+        self.assertIs(loc1, loc2)
+
+        set_current_language("en")
+        self.assertEqual(get_current_language(), "en")
+        self.assertFalse(loc1.is_rtl())
+
+        set_current_language("ar")
+        self.assertEqual(get_current_language(), "ar")
+        self.assertTrue(loc1.is_rtl())
+
+    def test_translations_key_symmetry_and_required_coverage(self):
+        """Verifies complete key symmetry between Arabic and English dictionaries and coverage of all required keys."""
+        from turbo_downloader import TRANSLATIONS
+
+        ar_keys = set(TRANSLATIONS["ar"].keys())
+        en_keys = set(TRANSLATIONS["en"].keys())
+
+        # Exact key symmetry: every key in Arabic must exist in English and vice-versa
+        diff_ar = ar_keys - en_keys
+        diff_en = en_keys - ar_keys
+        self.assertEqual(diff_ar, set(), f"Keys in Arabic but missing in English: {diff_ar}")
+        self.assertEqual(diff_en, set(), f"Keys in English but missing in Arabic: {diff_en}")
+
+        # Check required key categories from specifications
+        required_keys = [
+            # App identity
+            "app_title", "app_header", "app_subtitle",
+            # Notebook tabs
+            "tab_chunks", "tab_active", "tab_completed", "tab_logs", "tab_history", "tab_settings",
+            # Control buttons
+            "btn_add_url", "btn_start", "btn_resume_all", "btn_pause", "btn_pause_all", "btn_cancel",
+            "btn_clear_completed", "btn_settings", "btn_sniffer_active", "btn_sniffer_paused",
+            "btn_startup_on", "btn_startup_off", "btn_auto_cat_on", "btn_auto_cat_off",
+            "btn_cookies_prefix", "btn_browser", "btn_check_updates", "btn_lang_toggle",
+            # History tab columns
+            "col_hist_category", "col_hist_filename", "col_hist_size", "col_hist_status",
+            "col_hist_date", "col_hist_path", "col_hist_actions",
+            # History action buttons
+            "btn_hist_open", "btn_hist_folder", "btn_hist_redownload", "btn_hist_remove", "btn_hist_clear",
+            "lbl_filter", "hist_filter_all",
+            # Download Confirmation & Quality Modals
+            "modal_file_name", "modal_save_to", "modal_category", "modal_quality", "modal_download_mp3",
+            "modal_cookies", "modal_btn_start", "modal_btn_open_in_main", "modal_btn_cancel", "modal_btn_browse",
+            "modal_threads", "modal_speed_limiter", "modal_confirm_title", "modal_quality_title",
+            # MultipleCandidatesModal
+            "multi_modal_title", "multi_modal_source", "multi_modal_subtitle", "multi_col_select",
+            "multi_col_filename", "multi_col_type", "multi_col_size", "multi_col_url",
+            "multi_select_all", "multi_btn_download_selected", "multi_btn_download_all", "multi_btn_cancel",
+            "multi_no_selection_warning", "multi_selection_count",
+            # Toasts
+            "toast_startup_title", "toast_startup_msg", "toast_fetching_header", "toast_fetching_sub",
+            "toast_completed_title", "toast_completed_msg", "toast_error_title", "toast_error_msg",
+            # System Tray
+            "tray_open", "tray_sniffer_active", "tray_sniffer_paused", "tray_startup_on", "tray_startup_off", "tray_exit"
+        ]
+
+        for rk in required_keys:
+            self.assertIn(rk, ar_keys, f"Required key '{rk}' missing in Arabic translations")
+            self.assertIn(rk, en_keys, f"Required key '{rk}' missing in English translations")
+
+    def test_settings_persistence(self):
+        """Verifies changing language persists preference to settings.json."""
+        from turbo_downloader import get_setting
+
+        self.loc.set_language("ar")
+        self.assertEqual(get_setting("language"), "ar")
+
+        self.loc.set_language("en")
+        self.assertEqual(get_setting("language"), "en")
+
+    def test_runtime_language_switching_and_observers(self):
+        """Verifies toggle_language switches between 'ar' and 'en' and notifies registered observers."""
+        from turbo_downloader import tr
+
+        notifications = []
+        def _observer():
+            notifications.append(self.loc.get_language())
+
+        self.loc.register_observer(_observer)
+        try:
+            self.loc.set_language("en")
+            self.assertEqual(tr("btn_start"), "▶ Start Download")
+            self.assertEqual(self.loc.get_language(), "en")
+
+            # Toggle from en to ar
+            new_lang = self.loc.toggle_language()
+            self.assertEqual(new_lang, "ar")
+            self.assertEqual(tr("btn_start"), "▶ بدء التحميل")
+            self.assertEqual(notifications[-1], "ar")
+
+            # Toggle from ar to en
+            new_lang2 = self.loc.toggle_language()
+            self.assertEqual(new_lang2, "en")
+            self.assertEqual(tr("btn_start"), "▶ Start Download")
+            self.assertEqual(notifications[-1], "en")
+        finally:
+            self.loc.unregister_observer(_observer)
+
+    def test_gui_language_toggle_and_widget_updates(self):
+        """Verifies clicking btn_lang_toggle dynamically updates all GUI labels, notebook tabs, and headings in place."""
+        from turbo_downloader import ModernFramelessGUI, tr
+
+        self.loc.set_language("en")
+        app = ModernFramelessGUI(self.root, start_hidden=True)
+
+        try:
+            # When language is English:
+            # btn_lang_toggle displays '🌐 العربية'
+            self.assertEqual(app.btn_lang_toggle.cget("text"), "🌐 العربية")
+            self.assertEqual(app.title_lbl.cget("text"), tr("app_header"))
+            self.assertEqual(app.btn_start.cget("text"), "▶ Start Download")
+            self.assertEqual(app.tree_history.heading("category")["text"], "Category")
+            self.assertEqual(app.tree_history.heading("filename")["text"], "File Name")
+            self.assertIn("Chunk Segments", app.notebook.tab(0, "text"))
+
+            # Toggle language to Arabic by invoking button
+            app.btn_lang_toggle.invoke()
+
+            # Now language is Arabic:
+            # btn_lang_toggle displays '🌐 English'
+            self.assertEqual(self.loc.get_language(), "ar")
+            self.assertEqual(app.btn_lang_toggle.cget("text"), "🌐 English")
+            self.assertEqual(app.title_lbl.cget("text"), "التحميل الذكي (SD)")
+            self.assertEqual(app.btn_start.cget("text"), "▶ بدء التحميل")
+            self.assertEqual(app.tree_history.heading("category")["text"], "التصنيف")
+            self.assertEqual(app.tree_history.heading("filename")["text"], "اسم الملف")
+            self.assertIn("قطاعات التحميل", app.notebook.tab(0, "text"))
+
+            # Toggle back to English by invoking button again
+            app.btn_lang_toggle.invoke()
+            self.assertEqual(self.loc.get_language(), "en")
+            self.assertEqual(app.btn_lang_toggle.cget("text"), "🌐 العربية")
+            self.assertEqual(app.title_lbl.cget("text"), "SMART DOWNLOAD (SD)")
+            self.assertEqual(app.btn_start.cget("text"), "▶ Start Download")
+            self.assertEqual(app.tree_history.heading("category")["text"], "Category")
+            self.assertIn("Chunk Segments", app.notebook.tab(0, "text"))
+        finally:
+            try:
+                app._cleanup_resources()
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     unittest.main()
 
