@@ -950,6 +950,39 @@ def derive_download_filename(url: str) -> str:
         return "download.bin"
 
 
+def is_potential_html_url(url: str) -> bool:
+    """
+    Determines whether a candidate URL might be an HTML landing page / redirector
+    that requires background probing to resolve the real underlying file download link.
+    Media URLs, direct benchmark stream endpoints, and URLs ending in recognized binary
+    extensions (.exe, .zip, .msi, etc.) bypass pre-modal probe.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    if is_media_url(url):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        path = parsed.path.lower()
+        if path.endswith("/__down"):
+            return False
+        if "bytes=" in (parsed.query or "").lower():
+            return False
+        _, ext = os.path.splitext(path)
+        ext = ext.lower()
+        if ext in WEB_SCRIPT_EXTENSIONS:
+            return True
+        if ext in ("", ".bin"):
+            return True
+        if ("/download" in path or "/downloads" in path) and ext not in (COMMON_DOWNLOAD_EXTENSIONS - {".bin"}):
+            return True
+        if ext not in COMMON_DOWNLOAD_EXTENSIONS:
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _win32_clipboard_get() -> Optional[str]:
     """
     Robust 64-bit safe Win32 clipboard text reader with transient lock retry loop.
@@ -1383,6 +1416,7 @@ def resolve_real_download_url(
     script_patterns = [
         r'(?:window\.)?location(?:\.href)?\s*=\s*[\'"]([^\'"]+)[\'"]',
         r'(?:window\.)?location\.(?:assign|replace)\s*\(\s*[\'"]([^\'"]+)[\'"]\s*\)',
+        r'window\.open\s*\(\s*[\'"]([^\'"]+)[\'"]',
         r'(?:data-download[a-z0-9_-]*|data-href|data-url)\s*=\s*[\'"]([^\'"]+)[\'"]',
         r'<meta[^>]*?content=[\'"][^>]*?url=([^;\'"\s>]+)[\'"]'
     ]
@@ -1391,6 +1425,13 @@ def resolve_real_download_url(
             u = m.group(1).strip()
             if u:
                 raw_candidates.append(u)
+
+    # Extract absolute URLs and paths from inline <script> blocks
+    for s_m in re.finditer(r'<script[^>]*>(.*?)</script>', html_text, re.IGNORECASE | re.DOTALL):
+        script_body = s_m.group(1)
+        clean_script = script_body.replace(r'\/', '/')
+        for url_m in re.finditer(r'https?://[^\s"\'<>\\]+', clean_script, re.IGNORECASE):
+            raw_candidates.append(url_m.group(0))
 
     ignored_exts = {
         ".css", ".js", ".woff", ".woff2", ".svg", ".png", ".jpg", ".jpeg",
@@ -1435,6 +1476,9 @@ def resolve_real_download_url(
                 continue
 
             path_lower = p.path.lower()
+            query_lower = (p.query or "").lower()
+            cand_str = path_lower + ("?" + query_lower if query_lower else "")
+
             _, ext = os.path.splitext(path_lower)
             if ext in ignored_exts:
                 continue
@@ -1450,7 +1494,7 @@ def resolve_real_download_url(
                 score += 500
 
             has_dl = ("/download" in path_lower or "/downloads" in path_lower)
-            has_plat = any(tok in path_lower for tok in platform_tokens)
+            has_plat = any(tok in cand_str for tok in platform_tokens)
 
             if has_dl and has_plat:
                 score += 400
@@ -1506,7 +1550,10 @@ def resolve_real_download_url(
                         "filename": c_fn or derive_download_filename(c_final),
                         "error": ""
                     }
-                head_ok = True
+                if not c_ct:
+                    head_ok = False
+                else:
+                    head_ok = True
         except Exception:
             head_ok = False
 
@@ -9910,6 +9957,53 @@ class ModernFramelessGUI:
         else:
             if self.engine and self.engine.is_running:
                 self.log(f"[CLIPBOARD] Note: Active transfer in progress. URL '{url_fn}' populated in inputs.")
+            elif is_potential_html_url(url):
+                def _on_clipboard_resolved(info: Dict[str, Any]):
+                    if self.engine and self.engine.is_running:
+                        return
+
+                    real_url = info.get("url") or url
+                    if info.get("resolved"):
+                        self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
+
+                    downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                    cur_d = ""
+                    try:
+                        cur_d = self.entry_dest.get().strip()
+                    except Exception:
+                        pass
+                    dest_dir = os.path.dirname(cur_d) if cur_d else downloads_dir
+                    if not os.path.isdir(dest_dir):
+                        dest_dir = downloads_dir
+
+                    resolved_fn = info.get("filename") or derive_download_filename(real_url)
+                    if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+                        final_dest = resolve_categorized_path(downloads_dir, resolved_fn, auto_categorize=True)
+                    else:
+                        final_dest = os.path.join(dest_dir, resolved_fn)
+
+                    try:
+                        self.entry_url.delete(0, tk.END)
+                        self.entry_url.insert(0, real_url)
+                        self.entry_dest.delete(0, tk.END)
+                        self.entry_dest.insert(0, final_dest)
+                    except Exception:
+                        pass
+
+                    if not self.is_window_hidden_or_minimized():
+                        try:
+                            self.root.lift()
+                            self.root.focus_force()
+                        except Exception:
+                            pass
+
+                    if getattr(self, "_auto_start_clipboard", True):
+                        self.log(f"[CLIPBOARD] Intercepted link ready: '{resolved_fn}'. Showing TDM confirmation dialog...")
+                        self._show_download_confirmation_dialog(real_url, final_dest)
+                    else:
+                        self.log(f"[CLIPBOARD] Intercepted link populated: '{resolved_fn}'. Ready for one-click start.")
+
+                self._resolve_real_url_async(url, on_resolved=_on_clipboard_resolved, show_toast=True)
             elif getattr(self, "_auto_start_clipboard", True):
                 self.log(f"[CLIPBOARD] Intercepted link ready: '{url_fn}'. Showing TDM confirmation dialog...")
                 self._show_download_confirmation_dialog(url, new_dest)
@@ -9954,7 +10048,11 @@ class ModernFramelessGUI:
                 self.log(f"[CLIPBOARD] Download started in standalone window: {os.path.basename(act_dest)} (Threads: {max_conn}, Speed Limit: {bytes_limit} B/s)")
                 self._start_download_with_engine(resolved_url, act_dest, max_conn, bytes_limit, modal=modal)
 
-            self._resolve_real_url_async(url, on_resolved=_proceed_start, modal_to_close=modal)
+            if is_potential_html_url(url):
+                self._resolve_real_url_async(url, on_resolved=_proceed_start, modal_to_close=modal)
+            else:
+                self.log(f"[CLIPBOARD] Download started in standalone window: {os.path.basename(final_dest)} (Threads: {max_conn}, Speed Limit: {bytes_limit} B/s)")
+                self._start_download_with_engine(url, final_dest, max_conn, bytes_limit, modal=modal)
 
         def _on_open_in_main(final_dest: str, max_conn: int, bytes_limit: float):
             self._confirm_modal = None
@@ -9973,7 +10071,7 @@ class ModernFramelessGUI:
             except Exception:
                 pass
             self.log(f"[CLIPBOARD] Download opened in main app: {os.path.basename(final_dest)}")
-            self._on_start_download()
+            self._on_start_download(skip_resolver=True)
 
         def _on_confirm(final_dest: str, *args):
             self._confirm_modal = None
@@ -10302,10 +10400,54 @@ class ModernFramelessGUI:
         else:
             if self.engine and self.engine.is_running:
                 self.log(f"[BROWSER] Note: Active transfer in progress. URL '{os.path.basename(new_dest)}' queued in inputs.")
+                return
+
+            if is_potential_html_url(url):
+                def _on_browser_resolved(info: Dict[str, Any]):
+                    if self.engine and self.engine.is_running:
+                        return
+
+                    real_url = info.get("url") or url
+                    if info.get("resolved"):
+                        self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
+
+                    downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                    cur_d = self.entry_dest.get().strip()
+                    dest_dir = os.path.dirname(cur_d) if cur_d else downloads_dir
+                    if not os.path.isdir(dest_dir):
+                        dest_dir = downloads_dir
+
+                    target_fn = info.get("filename") or (sanitize_filename(urllib.parse.unquote(filename)) if filename else derive_download_filename(real_url))
+                    if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+                        resolved_dest = resolve_categorized_path(downloads_dir, target_fn, auto_categorize=True)
+                    else:
+                        resolved_dest = os.path.join(dest_dir, target_fn)
+
+                    try:
+                        self.entry_url.delete(0, tk.END)
+                        self.entry_url.insert(0, real_url)
+                        self.entry_dest.delete(0, tk.END)
+                        self.entry_dest.insert(0, resolved_dest)
+                    except Exception:
+                        pass
+
+                    if not self.is_window_hidden_or_minimized():
+                        try:
+                            self.root.lift()
+                            self.root.focus_force()
+                        except Exception:
+                            pass
+
+                    if self.is_window_hidden_or_minimized() or not start_immediately or getattr(self, "_auto_start_clipboard", True) or getattr(self, "_was_started_hidden", False):
+                        self._show_download_confirmation_dialog(real_url, resolved_dest)
+                    else:
+                        self._on_start_download(skip_resolver=True)
+
+                self._resolve_real_url_async(url, on_resolved=_on_browser_resolved, show_toast=True)
             elif self.is_window_hidden_or_minimized() or not start_immediately or getattr(self, "_auto_start_clipboard", True) or getattr(self, "_was_started_hidden", False):
                 self._show_download_confirmation_dialog(url, new_dest)
             else:
-                self._on_start_download()
+                self._on_start_download(skip_resolver=True)
 
     def _open_browser_integration_dialog(self):
         """Displays settings, connection status, and extension installation instructions."""

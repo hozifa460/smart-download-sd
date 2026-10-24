@@ -7157,7 +7157,7 @@ class TestHtmlLinkResolverAndStartupToast(unittest.TestCase):
         self.assertEqual(info["filename"], "setup.msi")
 
     def test_gui_clipboard_flow_with_unresolvable_html_does_not_start(self):
-        """Unresolvable HTML page modal 'Download Now' and _on_start_download abort without starting engine."""
+        """Unresolvable HTML page clipboard flow does not create _confirm_modal and does not start engine."""
         root = tk.Tk()
         root.withdraw()
         try:
@@ -7167,22 +7167,11 @@ class TestHtmlLinkResolverAndStartupToast(unittest.TestCase):
             url = f"http://127.0.0.1:{self.port}/nav-only"
             gui._on_clipboard_url_detected(url)
 
-            self.assertIsNotNone(gui._confirm_modal)
-            modal = gui._confirm_modal
-
-            # Click Download Now in modal
-            modal._on_start_in_window()
-
             # Wait for background thread and queue drain
             for _ in range(50):
                 gui._drain_dispatch_queue()
                 root.update()
                 time.sleep(0.04)
-                if getattr(gui, "_confirm_modal", None) is None:
-                    break
-
-            gui._drain_dispatch_queue()
-            root.update()
 
             self.assertIsNone(getattr(gui, "_confirm_modal", None))
             self.assertTrue(gui.engine is None or not gui.engine.is_running)
@@ -7202,6 +7191,63 @@ class TestHtmlLinkResolverAndStartupToast(unittest.TestCase):
             self.assertTrue(gui.engine is None or not gui.engine.is_running)
             self.assertFalse(os.path.exists(os.path.join(self.temp_dir, "nav.bin")))
 
+            gui._cleanup_resources()
+        finally:
+            root.destroy()
+
+    def test_gui_clipboard_flow_with_resolvable_html_creates_modal_with_real_file(self):
+        """Resolvable HTML landing page resolves to real binary and shows confirmation modal with .exe in Programs."""
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            gui = ModernFramelessGUI(root, start_hidden=True)
+            gui._start_hidden = True
+            gui._clipboard_sniffer_active = False
+            url = f"http://127.0.0.1:{self.port}/page-with-link?platform=windows"
+            gui._on_clipboard_url_detected(url)
+
+            # Wait for background thread and queue drain
+            for _ in range(50):
+                gui._drain_dispatch_queue()
+                root.update()
+                time.sleep(0.04)
+                if getattr(gui, "_confirm_modal", None) is not None:
+                    break
+
+            gui._drain_dispatch_queue()
+            root.update()
+
+            self.assertIsNotNone(gui._confirm_modal)
+            self.assertTrue(gui._confirm_modal.winfo_exists())
+            self.assertTrue(gui.entry_url.get().endswith("App-1.0-x64.exe"))
+            self.assertIn("Programs", gui.entry_dest.get())
+            self.assertTrue(gui.entry_dest.get().endswith("App-1.0-x64.exe"))
+            gui._confirm_modal.destroy()
+            gui._cleanup_resources()
+        finally:
+            root.destroy()
+
+    def test_gui_browser_download_unresolvable_html_aborts(self):
+        """Browser download received with unresolvable HTML does not create _confirm_modal and does not start engine."""
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            gui = ModernFramelessGUI(root, start_hidden=True)
+            gui._start_hidden = True
+            gui._clipboard_sniffer_active = False
+            url = f"http://127.0.0.1:{self.port}/nav-only"
+            gui._apply_browser_download({"url": url, "filename": "thanks.bin", "start_immediately": True})
+
+            for _ in range(50):
+                gui._drain_dispatch_queue()
+                root.update()
+                time.sleep(0.04)
+
+            gui._drain_dispatch_queue()
+            root.update()
+
+            self.assertIsNone(getattr(gui, "_confirm_modal", None))
+            self.assertTrue(gui.engine is None or not gui.engine.is_running)
             gui._cleanup_resources()
         finally:
             root.destroy()
