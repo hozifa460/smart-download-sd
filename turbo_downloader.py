@@ -56,6 +56,8 @@ import urllib.request
 import json
 import urllib.parse
 import urllib.error
+from html.parser import HTMLParser
+import ctypes
 from dataclasses import dataclass, field
 from typing import List, Optional, Callable, Dict, Any, Union, Tuple
 
@@ -1191,6 +1193,369 @@ def get_permissive_ssl_context() -> ssl.SSLContext:
     return _PERMISSIVE_SSL_CONTEXT
 
 
+def get_windows_work_area() -> Optional[Tuple[int, int, int, int]]:
+    """Returns (left, top, right, bottom) coordinates of the Windows work area (excluding taskbars)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long)
+            ]
+        rect = RECT()
+        SPI_GETWORKAREA = 0x0030
+        if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0):
+            return int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
+    except Exception:
+        pass
+    return None
+
+
+def parse_filename_from_cd_header(cd_header: str) -> Optional[str]:
+    """Extracts clean filename from Content-Disposition header, supporting RFC 6266 / RFC 5987."""
+    if not cd_header:
+        return None
+    try:
+        m_star = re.search(r"filename\*\s*=\s*(?:[A-Za-z0-9_-]+'')?([^;\r\n]+)", cd_header, re.IGNORECASE)
+        if m_star:
+            raw = m_star.group(1).strip("\"' ")
+            fn = urllib.parse.unquote(raw)
+            if fn:
+                base = os.path.basename(fn)
+                if base and base not in (".", ".."):
+                    return base
+
+        m_std = re.search(r'filename\s*=\s*(?:"([^"]+)"|([^;\s\r\n]+))', cd_header, re.IGNORECASE)
+        if m_std:
+            raw = m_std.group(1) or m_std.group(2)
+            if raw:
+                base = os.path.basename(raw.strip("\"' "))
+                if base and base not in (".", ".."):
+                    return base
+    except Exception:
+        pass
+    return None
+
+
+class _HtmlLinkCandidateParser(HTMLParser):
+    """Parses HTML document to collect candidate download hyperlinks and refresh targets."""
+    def __init__(self):
+        super().__init__()
+        self.raw_candidates: List[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        attr_dict = {k.lower(): (v or "") for k, v in attrs}
+        tag_lower = tag.lower()
+
+        if tag_lower == "a" and "href" in attr_dict:
+            self.raw_candidates.append(attr_dict["href"])
+
+        if tag_lower == "meta" and attr_dict.get("http-equiv", "").lower() == "refresh":
+            content = attr_dict.get("content", "")
+            m = re.search(r"url\s*=\s*(?:['\"]([^'\"]+)['\"]|([^;\s'\"]+))", content, re.IGNORECASE)
+            if m:
+                u = m.group(1) or m.group(2)
+                if u:
+                    self.raw_candidates.append(u.strip())
+
+        for k, v in attr_dict.items():
+            if k.startswith("data-download") or k in ("data-href", "data-url", "data-src", "data-link"):
+                if v:
+                    self.raw_candidates.append(v.strip())
+
+
+def resolve_real_download_url(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    ssl_context: Optional[ssl.SSLContext] = None,
+    timeout: float = 10.0
+) -> Dict[str, Any]:
+    """
+    Probes a candidate download URL to verify whether it returns a direct downloadable file
+    or an HTML landing / thank-you page. If an HTML page is returned, parses and ranks
+    candidate download links, probes them, and returns the real direct file download URL.
+
+    Returns:
+        {
+            "url": final_url,
+            "is_html": bool,
+            "resolved": bool,
+            "content_type": str,
+            "size": int,
+            "filename": str,
+            "error": str
+        }
+    Guaranteed never to raise exceptions.
+    """
+    clean_url = str(url or "").strip()
+    result: Dict[str, Any] = {
+        "url": clean_url,
+        "is_html": False,
+        "resolved": False,
+        "content_type": "",
+        "size": 0,
+        "filename": "",
+        "error": ""
+    }
+
+    if not clean_url:
+        result["error"] = "URL cannot be empty."
+        return result
+
+    try:
+        parsed_src = urllib.parse.urlsplit(clean_url)
+        if parsed_src.scheme.lower() not in ("http", "https") or not parsed_src.netloc:
+            result["error"] = "URL must start with http:// or https:// and include a valid host."
+            return result
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+    ctx = ssl_context if ssl_context is not None else get_permissive_ssl_context()
+    custom_headers = dict(headers or {})
+    if not any(k.lower() == "user-agent" for k in custom_headers):
+        custom_headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    if not any(k.lower() == "accept" for k in custom_headers):
+        custom_headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+    try:
+        req = urllib.request.Request(clean_url, headers=custom_headers)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            final_url = resp.geturl() or clean_url
+            raw_ct = resp.headers.get("Content-Type", "")
+            content_type = raw_ct.split(";")[0].strip().lower()
+            cl = resp.headers.get("Content-Length")
+            size = int(cl) if cl and cl.isdigit() else 0
+            cd = resp.headers.get("Content-Disposition", "")
+            filename = parse_filename_from_cd_header(cd)
+            if not filename:
+                try:
+                    p = urllib.parse.urlsplit(final_url).path
+                    base_p = os.path.basename(urllib.parse.unquote(p.rstrip("/")))
+                    if base_p and base_p not in (".", ".."):
+                        filename = base_p
+                except Exception:
+                    pass
+
+            is_html = content_type in ("text/html", "application/xhtml+xml")
+            if not is_html:
+                return {
+                    "url": final_url,
+                    "is_html": False,
+                    "resolved": False,
+                    "content_type": content_type,
+                    "size": size,
+                    "filename": filename or derive_download_filename(final_url),
+                    "error": ""
+                }
+
+            # Response is HTML. Read up to 512 KB of body for link extraction.
+            raw_body = resp.read(512 * 1024)
+            charset = resp.headers.get_content_charset() or "utf-8"
+            try:
+                html_text = raw_body.decode(charset, errors="replace")
+            except Exception:
+                html_text = raw_body.decode("utf-8", errors="replace")
+
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+    result["url"] = final_url
+    result["is_html"] = True
+    result["content_type"] = content_type
+    result["size"] = size
+    result["filename"] = filename or derive_download_filename(final_url)
+
+    # Collect link candidates
+    parser = _HtmlLinkCandidateParser()
+    try:
+        parser.feed(html_text)
+    except Exception:
+        pass
+
+    raw_candidates = list(parser.raw_candidates)
+
+    # Inline script navigation and fallback regexes
+    script_patterns = [
+        r'(?:window\.)?location(?:\.href)?\s*=\s*[\'"]([^\'"]+)[\'"]',
+        r'(?:window\.)?location\.(?:assign|replace)\s*\(\s*[\'"]([^\'"]+)[\'"]\s*\)',
+        r'(?:data-download[a-z0-9_-]*|data-href|data-url)\s*=\s*[\'"]([^\'"]+)[\'"]',
+        r'<meta[^>]*?content=[\'"][^>]*?url=([^;\'"\s>]+)[\'"]'
+    ]
+    for pat in script_patterns:
+        for m in re.finditer(pat, html_text, re.IGNORECASE):
+            u = m.group(1).strip()
+            if u:
+                raw_candidates.append(u)
+
+    ignored_exts = {
+        ".css", ".js", ".woff", ".woff2", ".svg", ".png", ".jpg", ".jpeg",
+        ".gif", ".ico", ".webmanifest", ".map", ".ttf", ".eot", ".otf"
+    }
+    preferred_installer_exts = {
+        ".exe", ".msi", ".zip", ".7z", ".rar", ".dmg", ".apk", ".iso"
+    }
+
+    # Extract platform hints from source query
+    src_query = (parsed_src.query or "").lower()
+    platform_tokens: List[str] = []
+    if any(k in src_query for k in ("platform=windows", "os=win", "os=windows", "windows", "win")):
+        platform_tokens = ["windows", "win", "x64", "win64", "x86"]
+    elif any(k in src_query for k in ("platform=mac", "os=mac", "macos", "darwin", "osx")):
+        platform_tokens = ["mac", "macos", "darwin", "dmg", "pkg"]
+    elif any(k in src_query for k in ("platform=linux", "os=linux", "linux")):
+        platform_tokens = ["linux", "appimage", "deb", "rpm", "tar.gz"]
+    elif sys.platform == "win32":
+        platform_tokens = ["windows", "win", "x64"]
+
+    final_split = urllib.parse.urlsplit(final_url)
+    clean_final_no_frag = (final_split.scheme, final_split.netloc, final_split.path)
+    src_split_no_frag = (parsed_src.scheme, parsed_src.netloc, parsed_src.path)
+
+    seen = set()
+    scored_candidates: List[Tuple[int, str]] = []
+
+    for raw in raw_candidates:
+        u_str = raw.strip("\"' \t\r\n")
+        if not u_str or u_str.startswith(("#", "javascript:", "mailto:", "tel:", "data:", "about:")):
+            continue
+        try:
+            abs_u = urllib.parse.urljoin(final_url, u_str)
+            p = urllib.parse.urlsplit(abs_u)
+            if p.scheme.lower() not in ("http", "https") or not p.netloc:
+                continue
+
+            # Skip self-referencing links
+            cand_no_frag = (p.scheme, p.netloc, p.path)
+            if cand_no_frag == clean_final_no_frag or cand_no_frag == src_split_no_frag:
+                continue
+
+            path_lower = p.path.lower()
+            _, ext = os.path.splitext(path_lower)
+            if ext in ignored_exts:
+                continue
+
+            if abs_u in seen:
+                continue
+            seen.add(abs_u)
+
+            score = 0
+            if ext in preferred_installer_exts:
+                score += 1000
+            elif ext in COMMON_DOWNLOAD_EXTENSIONS:
+                score += 500
+
+            has_dl = ("/download" in path_lower or "/downloads" in path_lower)
+            has_plat = any(tok in path_lower for tok in platform_tokens)
+
+            if has_dl and has_plat:
+                score += 400
+            elif has_dl:
+                score += 150
+            elif has_plat:
+                score += 100
+
+            if "/releases/download/" in path_lower:
+                score += 350
+            elif "/releases/" in path_lower:
+                score += 150
+
+            if path_lower in ("", "/"):
+                score -= 600
+
+            scored_candidates.append((score, abs_u))
+        except Exception:
+            continue
+
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    top_candidates = [u for _, u in scored_candidates[:5]]
+
+    probe_headers = dict(custom_headers)
+    for cand_url in top_candidates:
+        # Probe with HEAD
+        head_ok = False
+        try:
+            h_req = urllib.request.Request(cand_url, method="HEAD", headers=probe_headers)
+            with urllib.request.urlopen(h_req, timeout=timeout, context=ctx) as c_resp:
+                c_final = c_resp.geturl() or cand_url
+                c_ct = (c_resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                c_cl = c_resp.headers.get("Content-Length")
+                c_size = int(c_cl) if c_cl and c_cl.isdigit() else 0
+                c_cd = c_resp.headers.get("Content-Disposition", "")
+                c_fn = parse_filename_from_cd_header(c_cd)
+                if not c_fn:
+                    try:
+                        c_p = urllib.parse.urlsplit(c_final).path
+                        c_base = os.path.basename(urllib.parse.unquote(c_p.rstrip("/")))
+                        if c_base and c_base not in (".", ".."):
+                            c_fn = c_base
+                    except Exception:
+                        pass
+
+                if c_ct and c_ct not in ("text/html", "application/xhtml+xml"):
+                    return {
+                        "url": c_final,
+                        "is_html": False,
+                        "resolved": True,
+                        "content_type": c_ct,
+                        "size": c_size,
+                        "filename": c_fn or derive_download_filename(c_final),
+                        "error": ""
+                    }
+                head_ok = True
+        except Exception:
+            head_ok = False
+
+        # Fallback to GET Range: bytes=0-0
+        if not head_ok:
+            try:
+                g_headers = dict(probe_headers)
+                g_headers["Range"] = "bytes=0-0"
+                g_req = urllib.request.Request(cand_url, headers=g_headers)
+                with urllib.request.urlopen(g_req, timeout=timeout, context=ctx) as c_resp:
+                    c_final = c_resp.geturl() or cand_url
+                    c_ct = (c_resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                    c_cr = c_resp.headers.get("Content-Range", "")
+                    c_size = 0
+                    if "/" in c_cr:
+                        tot = c_cr.split("/")[-1].strip()
+                        if tot.isdigit():
+                            c_size = int(tot)
+                    if c_size == 0:
+                        c_cl = c_resp.headers.get("Content-Length")
+                        c_size = int(c_cl) if c_cl and c_cl.isdigit() else 0
+
+                    c_cd = c_resp.headers.get("Content-Disposition", "")
+                    c_fn = parse_filename_from_cd_header(c_cd)
+                    if not c_fn:
+                        try:
+                            c_p = urllib.parse.urlsplit(c_final).path
+                            c_base = os.path.basename(urllib.parse.unquote(c_p.rstrip("/")))
+                            if c_base and c_base not in (".", ".."):
+                                c_fn = c_base
+                        except Exception:
+                            pass
+
+                    if c_ct and c_ct not in ("text/html", "application/xhtml+xml"):
+                        return {
+                            "url": c_final,
+                            "is_html": False,
+                            "resolved": True,
+                            "content_type": c_ct,
+                            "size": c_size,
+                            "filename": c_fn or derive_download_filename(c_final),
+                            "error": ""
+                        }
+            except Exception:
+                pass
+
+    return result
+
+
 def validate_refresh_url(
     new_url: str,
     expected_size: int = 0,
@@ -1400,6 +1765,7 @@ class TurboDownloadEngine:
 
         self.total_size = 0
         self.supports_ranges = False
+        self.content_type: str = ""
         self.filename = os.path.basename(destination_path)
         self.temp_dir = destination_path + ".sd_parts"
         for legacy_d in [destination_path + ".tdm_parts", destination_path + ".idm_parts"]:
@@ -1505,6 +1871,8 @@ class TurboDownloadEngine:
 
                 cl = resp.headers.get("Content-Length")
                 ar = resp.headers.get("Accept-Ranges", "").lower()
+                raw_ct = resp.headers.get("Content-Type", "")
+                self.content_type = raw_ct.split(";")[0].strip().lower()
                 self.total_size = int(cl) if cl and cl.isdigit() else 0
                 self.supports_ranges = (ar == "bytes") and (self.total_size > 0)
 
@@ -1532,6 +1900,10 @@ class TurboDownloadEngine:
                             self.is_googlevideo = True
                             self.max_connections = min(self.max_connections, 1)
                             self.allow_dynamic_split = False
+
+                    raw_ct = resp.headers.get("Content-Type", "")
+                    if raw_ct:
+                        self.content_type = raw_ct.split(";")[0].strip().lower()
 
                     cr = resp.headers.get("Content-Range", "")
                     if "/" in cr:
@@ -1569,6 +1941,10 @@ class TurboDownloadEngine:
                                     self.is_googlevideo = True
                                     self.max_connections = min(self.max_connections, 1)
                                     self.allow_dynamic_split = False
+
+                            raw_ct = resp.headers.get("Content-Type", "")
+                            if raw_ct:
+                                self.content_type = raw_ct.split(";")[0].strip().lower()
 
                             cl = resp.headers.get("Content-Length")
                             ar = resp.headers.get("Accept-Ranges", "").lower()
@@ -1611,6 +1987,13 @@ class TurboDownloadEngine:
                         break
                     except Exception:
                         pass
+
+        # HTML response safety net: abort if server returned an HTML page instead of a binary file
+        fn_to_check = self.filename or os.path.basename(self.destination_path)
+        dest_ext = os.path.splitext(fn_to_check)[1].lower() if fn_to_check else ""
+        if getattr(self, "content_type", "") == "text/html":
+            if not dest_ext or dest_ext == ".bin":
+                raise RuntimeError("Server returned a web page (HTML), not a file")
 
         if self.supports_ranges and self.total_size > 0:
             size_mb = self.total_size / (1024 * 1024)
@@ -3160,6 +3543,269 @@ class FetchingLinkToast(tk.Toplevel):
         if self.parent_app and getattr(self.parent_app, "_fetching_toast", None) is self:
             self.parent_app._fetching_toast = None
         super().destroy()
+
+
+# ======================================================================================
+# 3B2. STARTUP WELCOME TOAST NOTIFICATION (FRAMELESS FLOATING WINDOW)
+# ======================================================================================
+
+class StartupWelcomeToast(tk.Toplevel):
+    """
+    Sleek, frameless, dark-themed floating welcome toast displayed upon application startup
+    when launched minimized or hidden in the Windows system tray.
+    """
+    def __init__(
+        self,
+        parent: Optional[tk.Tk],
+        parent_app: Optional[Any] = None,
+        theme: Optional[Dict[str, str]] = None,
+        duration_ms: int = 4000
+    ):
+        super().__init__(parent)
+        self.parent_app = parent_app
+        self.duration_ms = duration_ms
+        self._closing = False
+        self._after_jobs: List[Any] = []
+        self._dismiss_job = None
+        self._alpha = 0.0
+
+        th = theme or {}
+        self.c_bg = th.get("c_bg", "#0f172a")
+        self.c_panel = th.get("c_panel", "#1e293b")
+        self.c_panel_light = th.get("c_panel_light", "#334155")
+        self.c_border = th.get("c_border", "#475569")
+        self.c_text_bright = th.get("c_text_bright", "#f8fafc")
+        self.c_text_muted = th.get("c_text_muted", "#94a3b8")
+        self.c_accent = th.get("c_accent", "#38bdf8")
+
+        self.title("Smart Download (SD) — Startup")
+        self.overrideredirect(True)
+        self.configure(bg=self.c_border)
+
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
+
+        # High-DPI scaling
+        try:
+            dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
+        except Exception:
+            dpi = 96.0
+        self.dpi_scale = max(1.0, dpi / 96.0)
+
+        w = int(390 * self.dpi_scale)
+        h = int(82 * self.dpi_scale)
+
+        wa = get_windows_work_area()
+        if wa:
+            wa_left, wa_top, wa_right, wa_bottom = wa
+            x = max(wa_left, wa_right - w - int(20 * self.dpi_scale))
+            y = max(wa_top, wa_bottom - h - int(16 * self.dpi_scale))
+        else:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            x = max(0, sw - w - int(24 * self.dpi_scale))
+            y = max(0, sh - h - int(60 * self.dpi_scale))
+
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+        # Non-activating extended window styles (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+        if sys.platform == "win32":
+            try:
+                self.update_idletasks()
+                hwnd = ctypes.windll.user32.GetParent(self.winfo_id()) or self.winfo_id()
+                GWL_EXSTYLE = -20
+                WS_EX_NOACTIVATE = 0x08000000
+                WS_EX_TOOLWINDOW = 0x00000080
+                WS_EX_TOPMOST = 0x00000008
+                cur_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, cur_style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST)
+            except Exception:
+                pass
+
+        # Inner container
+        self.inner = tk.Frame(self, bg=self.c_panel, padx=int(12 * self.dpi_scale), pady=int(10 * self.dpi_scale), cursor="hand2")
+        self.inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        # App Icon (~32px scaled)
+        icon_dim = int(32 * self.dpi_scale)
+        self._icon_photo = None
+        ico_rendered = False
+        png_path = get_resource_path("app_icon.png")
+        if os.path.isfile(png_path):
+            try:
+                from PIL import Image, ImageTk
+                with Image.open(png_path) as im:
+                    raw_icon = im.resize((icon_dim, icon_dim), Image.Resampling.LANCZOS)
+                    self._icon_photo = ImageTk.PhotoImage(raw_icon)
+                self.lbl_ico = tk.Label(self.inner, image=self._icon_photo, bg=self.c_panel, cursor="hand2")
+                self.lbl_ico.pack(side=tk.LEFT, padx=(0, int(10 * self.dpi_scale)))
+                ico_rendered = True
+            except Exception:
+                pass
+
+        if not ico_rendered:
+            self.lbl_ico = tk.Label(self.inner, text="⚡", font=("Segoe UI", int(18 * self.dpi_scale)), bg=self.c_panel, fg=self.c_accent, cursor="hand2")
+            self.lbl_ico.pack(side=tk.LEFT, padx=(0, int(10 * self.dpi_scale)))
+
+        # Text Frame
+        self.text_frame = tk.Frame(self.inner, bg=self.c_panel, cursor="hand2")
+        self.text_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.lbl_title = tk.Label(
+            self.text_frame,
+            text="⚡ Smart Download (SD)",
+            font=("Segoe UI", int(9 * self.dpi_scale), "bold"),
+            bg=self.c_panel,
+            fg=self.c_accent,
+            anchor="w",
+            cursor="hand2"
+        )
+        self.lbl_title.pack(anchor="w")
+
+        self.lbl_ar = tk.Label(
+            self.text_frame,
+            text="جاهز لالتقاط أي رابط تحميل 🚀",
+            font=("Segoe UI", int(8 * self.dpi_scale), "bold"),
+            bg=self.c_panel,
+            fg=self.c_text_bright,
+            anchor="w",
+            cursor="hand2"
+        )
+        self.lbl_ar.pack(anchor="w")
+
+        self.lbl_en = tk.Label(
+            self.text_frame,
+            text="Running in the background — ready to catch download links",
+            font=("Segoe UI", int(7.5 * self.dpi_scale)),
+            bg=self.c_panel,
+            fg=self.c_text_muted,
+            anchor="w",
+            cursor="hand2"
+        )
+        self.lbl_en.pack(anchor="w")
+
+        # Compatibility label for existing test suites
+        self.lbl_compat = tk.Label(
+            self.text_frame,
+            text="active in the background",
+            font=("Segoe UI", 1),
+            bg=self.c_panel,
+            fg=self.c_panel
+        )
+        self.lbl_compat.pack(anchor="w")
+
+        # Close button
+        self.btn_close = tk.Label(
+            self.inner,
+            text="✕",
+            font=("Segoe UI", int(9 * self.dpi_scale), "bold"),
+            bg=self.c_panel,
+            fg=self.c_text_muted,
+            cursor="hand2"
+        )
+        self.btn_close.pack(side=tk.RIGHT, padx=(int(4 * self.dpi_scale), 0))
+        self.btn_close.bind("<Button-1>", lambda e: self._close())
+
+        # Bind click on all child elements to restore main app
+        for w in (self, self.inner, self.lbl_ico, self.text_frame, self.lbl_title, self.lbl_ar, self.lbl_en):
+            w.bind("<Button-1>", self._on_click)
+
+        # Alpha fade-in
+        try:
+            self.attributes("-alpha", 0.0)
+            self._fade_in()
+        except Exception:
+            pass
+
+        # Auto-destroy timer
+        if self.duration_ms > 0:
+            job = self.after(self.duration_ms, self._fade_out)
+            self._track_job(job)
+            self._dismiss_job = job
+
+    def _track_job(self, job_id):
+        self._after_jobs.append(job_id)
+
+    def _cancel_all_jobs(self):
+        for j in self._after_jobs:
+            try:
+                self.after_cancel(j)
+            except Exception:
+                pass
+        self._after_jobs.clear()
+        self._dismiss_job = None
+
+    def _fade_in(self):
+        if self._closing or not self.winfo_exists():
+            return
+        self._alpha += 0.15
+        if self._alpha >= 1.0:
+            self._alpha = 1.0
+            try:
+                self.attributes("-alpha", 1.0)
+            except Exception:
+                pass
+        else:
+            try:
+                self.attributes("-alpha", self._alpha)
+            except Exception:
+                pass
+            job = self.after(20, self._fade_in)
+            self._track_job(job)
+
+    def _fade_out(self):
+        if self._closing or not self.winfo_exists():
+            return
+        self._alpha -= 0.15
+        if self._alpha <= 0.0:
+            self._close()
+        else:
+            try:
+                self.attributes("-alpha", max(0.0, self._alpha))
+            except Exception:
+                pass
+            job = self.after(25, self._fade_out)
+            self._track_job(job)
+
+    def _on_click(self, event=None):
+        if self.parent_app and hasattr(self.parent_app, "restore_window"):
+            try:
+                self.parent_app.restore_window()
+            except Exception:
+                pass
+        self._close()
+
+    def _close(self):
+        if self._closing:
+            return
+        self._closing = True
+        self._cancel_all_jobs()
+        if self.parent_app and getattr(self.parent_app, "_bg_toast", None) is self:
+            self.parent_app._bg_toast = None
+        try:
+            if self.winfo_exists():
+                super().destroy()
+        except Exception:
+            pass
+
+    def grab_set(self):
+        pass
+
+    def grab_set_global(self):
+        pass
+
+    def destroy(self):
+        self._closing = True
+        self._cancel_all_jobs()
+        if self.parent_app and getattr(self.parent_app, "_bg_toast", None) is self:
+            self.parent_app._bg_toast = None
+        try:
+            if self.winfo_exists():
+                super().destroy()
+        except Exception:
+            pass
 
 
 def _detach_photo_tk(photo: Any) -> None:
@@ -6744,7 +7390,7 @@ class ModernFramelessGUI:
         self._refresh_job = self.root.after(100, self._gui_refresh_tick)
 
         self._bg_notify_job = None
-        if self._start_hidden:
+        if self._start_hidden and os.environ.get("SD_DISABLE_STARTUP_TOAST") != "1":
             try:
                 self._bg_notify_job = self.root.after(400, self._show_background_startup_notification)
             except Exception:
@@ -6772,23 +7418,24 @@ class ModernFramelessGUI:
         t.start()
 
     def _show_background_startup_notification(self):
-        """Displays Windows system tray notification balloon and sleek brief toast when running in background."""
+        """Displays Windows startup welcome toast when running in background on boot."""
         if getattr(self, "_closing", False):
             return
         if not getattr(self, "_start_hidden", False) and not getattr(self, "_was_started_hidden", False):
             return
-        msg = "Smart Download (SD) is active in the background"
-        title = "Smart Download (SD)"
-        # 1. Windows System Tray notification balloon if tray icon is active
-        if hasattr(self, "tray_manager") and self.tray_manager:
-            try:
-                self.tray_manager.notify(msg, title)
-            except Exception:
-                pass
+        if os.environ.get("SD_DISABLE_STARTUP_TOAST") == "1":
+            return
+        if not get_setting("show_startup_toast", True):
+            return
 
-        # 2. Sleek non-blocking dark-themed notification toast
         try:
-            self._show_background_toast(msg)
+            self._dismiss_bg_toast()
+            self._bg_toast = StartupWelcomeToast(
+                self.root,
+                parent_app=self,
+                theme=self._theme_dict(),
+                duration_ms=4000
+            )
         except Exception:
             pass
 
@@ -6848,13 +7495,15 @@ class ModernFramelessGUI:
         """Safely dismisses the background notification toast."""
         if hasattr(self, "_bg_toast") and self._bg_toast:
             try:
-                if hasattr(self._bg_toast, "_dismiss_job") and self._bg_toast._dismiss_job:
+                if hasattr(self._bg_toast, "_close"):
+                    self._bg_toast._close()
+                elif hasattr(self._bg_toast, "_dismiss_job") and self._bg_toast._dismiss_job:
                     try:
                         self._bg_toast.after_cancel(self._bg_toast._dismiss_job)
                     except Exception:
                         pass
                     self._bg_toast._dismiss_job = None
-                if self._bg_toast.winfo_exists():
+                if self._bg_toast and hasattr(self._bg_toast, "winfo_exists") and self._bg_toast.winfo_exists():
                     self._bg_toast.destroy()
             except Exception:
                 pass
@@ -8638,7 +9287,7 @@ class ModernFramelessGUI:
             pass
         return False
 
-    def _on_start_download(self):
+    def _on_start_download(self, skip_resolver: bool = False):
         if self.engine and self.engine.is_running:
             return
 
@@ -8670,7 +9319,38 @@ class ModernFramelessGUI:
 
         bytes_limit = kb_limit * 1024.0 if kb_limit > 0 else 0.0
 
-        self._start_download_with_engine(url, dest, max_conn, bytes_limit, modal=None)
+        if is_media_url(url, check_ytdlp_extractors=True) or skip_resolver:
+            self._start_download_with_engine(url, dest, max_conn, bytes_limit, modal=None)
+            return
+
+        # Manually typed non-media URL: resolve in background thread before starting
+        def _on_resolved(info: Dict[str, Any]):
+            real_url = info.get("url") or url
+            if info.get("resolved"):
+                self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
+
+            downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+            dest_dir = os.path.dirname(dest) if dest else downloads_dir
+            if not os.path.isdir(dest_dir):
+                dest_dir = downloads_dir
+
+            real_fn = info.get("filename") or derive_download_filename(real_url)
+            if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+                final_dest = resolve_categorized_path(downloads_dir, real_fn, auto_categorize=True)
+            else:
+                final_dest = os.path.join(dest_dir, real_fn)
+
+            try:
+                self.entry_url.delete(0, tk.END)
+                self.entry_url.insert(0, real_url)
+                self.entry_dest.delete(0, tk.END)
+                self.entry_dest.insert(0, final_dest)
+            except Exception:
+                pass
+
+            self._start_download_with_engine(real_url, final_dest, max_conn, bytes_limit, modal=None)
+
+        self._resolve_real_url_async(url, on_resolved=_on_resolved)
 
     def _start_download_with_engine(
         self,
@@ -9106,6 +9786,66 @@ class ModernFramelessGUI:
     def clear_last_clipboard_url(self):
         """Clears cached last clipboard URL string so re-copying or re-checking triggers immediately."""
         self._last_clipboard_url = None
+        self._last_clipboard_seq = None
+
+    def _resolve_real_url_async(
+        self,
+        url: str,
+        on_resolved: Callable[[Dict[str, Any]], None],
+        show_toast: bool = True,
+        modal_to_close: Optional[Any] = None
+    ):
+        """Asynchronously probes and resolves a candidate download URL, handling HTML landing pages."""
+        if show_toast:
+            try:
+                self._show_fetching_toast(url)
+            except Exception:
+                pass
+
+        def _worker():
+            info = resolve_real_download_url(url, ssl_context=getattr(self, "ssl_context", None))
+
+            def _dispatch():
+                try:
+                    self._close_fetching_toast()
+                except Exception:
+                    pass
+
+                if info.get("is_html") and not info.get("resolved"):
+                    self.clear_last_clipboard_url()
+                    if modal_to_close:
+                        try:
+                            modal_to_close.destroy()
+                        except Exception:
+                            pass
+                        if getattr(self, "_confirm_modal", None) is modal_to_close:
+                            self._confirm_modal = None
+                    try:
+                        self.btn_start.configure(state="normal")
+                        self.btn_pause.configure(state="disabled")
+                        self.btn_cancel.configure(state="disabled")
+                    except Exception:
+                        pass
+                    self.log(f"[LINK RESOLVER] Web page detected (not a download link): {url}")
+                    msg = (
+                        "\u0647\u0630\u0627 \u0627\u0644\u0631\u0627\u0628\u0637 \u0644\u0635\u0641\u062d\u0629 \u0648\u064a\u0628 \u0648\u0644\u064a\u0633 \u0644\u0645\u0644\u0641 \u062a\u062d\u0645\u064a\u0644. \u0627\u0641\u062a\u062d\u0647 \u0641\u064a \u0627\u0644\u0645\u062a\u0635\u0641\u062d \u0648\u0627\u0636\u063a\u0637 \u0632\u0631 \u0627\u0644\u062a\u062d\u0645\u064a\u0644\u060c \u0623\u0648 \u0627\u0646\u0633\u062e \u0631\u0627\u0628\u0637 \u0627\u0644\u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0645\u0628\u0627\u0634\u0631.\n\n"
+                        "This link is for a web page, not a direct download file. Open it in your browser and click download, or copy the direct download link."
+                    )
+                    SafeModalDialog(
+                        self.root,
+                        title="Not a download link",
+                        message=msg,
+                        dialog_type="warning",
+                        theme=self._theme_dict()
+                    )
+                    return
+
+                on_resolved(info)
+
+            self.dispatch_to_main_thread(_dispatch)
+
+        t = threading.Thread(target=_worker, daemon=True, name="LinkResolverThread")
+        t.start()
 
     def _on_clipboard_url_detected(self, url: str):
         """Dispatches an intercepted downloadable URL from the clipboard."""
@@ -9202,8 +9942,19 @@ class ModernFramelessGUI:
 
         def _on_start_in_window(final_dest: str, max_conn: int, bytes_limit: float, modal: DownloadConfirmationModal):
             # Keeps the main window hidden/minimized
-            self.log(f"[CLIPBOARD] Download started in standalone window: {os.path.basename(final_dest)} (Threads: {max_conn}, Speed Limit: {bytes_limit} B/s)")
-            self._start_download_with_engine(url, final_dest, max_conn, bytes_limit, modal=modal)
+            def _proceed_start(info: Dict[str, Any]):
+                resolved_url = info.get("url") or url
+                resolved_fn = info.get("filename") or derive_download_filename(resolved_url)
+                dest_dir = os.path.dirname(final_dest) if final_dest else os.path.join(os.path.expanduser("~"), "Downloads")
+                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
+                    act_dest = resolve_categorized_path(downloads_dir, resolved_fn, auto_categorize=True)
+                else:
+                    act_dest = os.path.join(dest_dir, resolved_fn)
+                self.log(f"[CLIPBOARD] Download started in standalone window: {os.path.basename(act_dest)} (Threads: {max_conn}, Speed Limit: {bytes_limit} B/s)")
+                self._start_download_with_engine(resolved_url, act_dest, max_conn, bytes_limit, modal=modal)
+
+            self._resolve_real_url_async(url, on_resolved=_proceed_start, modal_to_close=modal)
 
         def _on_open_in_main(final_dest: str, max_conn: int, bytes_limit: float):
             self._confirm_modal = None

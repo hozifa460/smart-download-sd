@@ -15,12 +15,14 @@ Thorough verification of:
 ========================================================================================
 """
 
+import os
+os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
+os.environ["SD_DISABLE_STARTUP_TOAST"] = "1"
 import unittest
 import http.server
 import socketserver
 import threading
 import time
-import os
 import shutil
 import hashlib
 import ssl

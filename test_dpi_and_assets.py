@@ -2,6 +2,8 @@
 Tests for Windows High-DPI Awareness, UI Scaling, and Application Assets
 """
 import os
+os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
+os.environ["SD_DISABLE_STARTUP_TOAST"] = "1"
 import sys
 import unittest
 import tkinter as tk

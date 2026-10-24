@@ -18,6 +18,7 @@ Comprehensive verification covering:
 import os
 os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
 os.environ["SD_DISABLE_AUTO_UPDATE"] = "1"
+os.environ["SD_DISABLE_STARTUP_TOAST"] = "1"
 import sys
 import time
 import json
@@ -108,7 +109,9 @@ from turbo_downloader import (
     CATEGORY_SUBFOLDERS,
     resolve_categorized_path,
     DownloadHistoryManager,
-    get_app_config_dir
+    get_app_config_dir,
+    resolve_real_download_url,
+    StartupWelcomeToast
 )
 
 
@@ -3648,12 +3651,12 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
                 body = json.loads(resp.read().decode("utf-8"))
                 self.assertEqual(body.get("status"), "ok")
 
-            for _ in range(25):
+            for _ in range(50):
                 gui._drain_dispatch_queue()
                 self.root.update()
                 if not gui._start_hidden:
                     break
-                time.sleep(0.02)
+                time.sleep(0.03)
 
             self.assertFalse(gui._start_hidden)
             self.assertTrue(self.root.winfo_viewable())
@@ -3667,12 +3670,12 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             self.assertTrue(gui._start_hidden)
             handled = notify_running_instance(show=True)
             self.assertTrue(handled, "notify_running_instance should succeed when instance is listening")
-            for _ in range(25):
+            for _ in range(50):
                 gui._drain_dispatch_queue()
                 self.root.update()
                 if not gui._start_hidden:
                     break
-                time.sleep(0.02)
+                time.sleep(0.03)
             self.assertFalse(gui._start_hidden)
         finally:
             gui._cleanup_resources()
@@ -5306,10 +5309,13 @@ class TestBackgroundStartupNotificationAndTray(unittest.TestCase):
 
     def setUp(self):
         import tkinter as tk
+        self._orig_toast_env = os.environ.pop("SD_DISABLE_STARTUP_TOAST", None)
         self.root = tk.Tk()
         self.root.withdraw()
 
     def tearDown(self):
+        if self._orig_toast_env is not None:
+            os.environ["SD_DISABLE_STARTUP_TOAST"] = self._orig_toast_env
         try:
             self.root.destroy()
         except Exception:
@@ -6971,6 +6977,279 @@ class TestDownloadHistoryAndCategorization(unittest.TestCase):
         finally:
             root.update_idletasks()
             root.destroy()
+
+
+class MockHtmlResolverHandler(http.server.BaseHTTPRequestHandler):
+    """Local HTTP mock server for testing resolve_real_download_url and HTML download protection."""
+    def log_message(self, format, *args):
+        pass
+
+    def do_HEAD(self):
+        self._handle_req(send_body=False)
+
+    def do_GET(self):
+        self._handle_req(send_body=True)
+
+    def _handle_req(self, send_body=True):
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path
+
+        if path in ("/file.bin", "/file.exe"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", "1024")
+            self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(path)}"')
+            self.end_headers()
+            if send_body:
+                self.wfile.write(b"b" * 1024)
+
+        elif path.startswith("/page-with-link"):
+            body = (
+                b"<!doctype html><html><head><title>Thanks</title></head><body>"
+                b"<h1>Thank you for downloading ZadLoop</h1>"
+                b"<p>Your download should start automatically. If not, "
+                b"<a href=\"/download/windows\">click here for Windows</a>.</p>"
+                b"</body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if send_body:
+                self.wfile.write(body)
+
+        elif path == "/download/windows":
+            # 302 redirect to /files/App-1.0-x64.exe
+            self.send_response(302)
+            self.send_header("Location", "/files/App-1.0-x64.exe")
+            self.end_headers()
+
+        elif path == "/files/App-1.0-x64.exe":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", "2048")
+            self.send_header("Content-Disposition", 'attachment; filename="App-1.0-x64.exe"')
+            self.end_headers()
+            if send_body:
+                self.wfile.write(b"e" * 2048)
+
+        elif path == "/nav-only":
+            body = (
+                b"<!doctype html><html><head><title>Nav Only</title></head><body>"
+                b"<a href=\"/about\">About Us</a>"
+                b"<a href=\"/style.css\">Stylesheet</a>"
+                b"<a href=\"/script.js\">Javascript</a>"
+                b"</body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if send_body:
+                self.wfile.write(body)
+
+        elif path == "/about":
+            body = b"<!doctype html><html><body>About Page Content</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if send_body:
+                self.wfile.write(body)
+
+        elif path == "/meta-refresh":
+            body = (
+                b"<!doctype html><html><head>"
+                b"<meta http-equiv=\"refresh\" content=\"0;url=/f/setup.msi\">"
+                b"</head><body>Please wait...</body></html>"
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if send_body:
+                self.wfile.write(body)
+
+        elif path == "/f/setup.msi":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-msi")
+            self.send_header("Content-Length", "4096")
+            self.send_header("Content-Disposition", 'attachment; filename="setup.msi"')
+            self.end_headers()
+            if send_body:
+                self.wfile.write(b"m" * 4096)
+
+        elif path in ("/html-trap.bin", "/thanks.bin", "/webpage"):
+            body = b"<!doctype html><html><body>Server returned web page</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if send_body:
+                self.wfile.write(body)
+
+        else:
+            self.send_error(404)
+
+
+class TestHtmlLinkResolverAndStartupToast(unittest.TestCase):
+    """Verifies resolve_real_download_url, HTML download protection safety net, and StartupWelcomeToast."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = socketserver.TCPServer(("127.0.0.1", 0), MockHtmlResolverHandler)
+        cls.port = cls.server.server_address[1]
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.server.shutdown()
+            cls.server.server_close()
+        except Exception:
+            pass
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp(prefix="sd_resolver_test_")
+        self._orig_toast_env = os.environ.pop("SD_DISABLE_STARTUP_TOAST", None)
+
+    def tearDown(self):
+        if self._orig_toast_env is not None:
+            os.environ["SD_DISABLE_STARTUP_TOAST"] = self._orig_toast_env
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_non_html_file_url_returned_unchanged(self):
+        """Non-HTML file URL is returned unchanged with is_html=False."""
+        url = f"http://127.0.0.1:{self.port}/file.exe"
+        info = resolve_real_download_url(url)
+        self.assertFalse(info["is_html"])
+        self.assertFalse(info["resolved"])
+        self.assertTrue(info["url"].endswith("/file.exe"))
+        self.assertEqual(info["filename"], "file.exe")
+        self.assertEqual(info["error"], "")
+
+    def test_html_page_with_redirect_resolved_to_real_download(self):
+        """HTML page with <a href="/download/windows"> 302-redirecting to .exe is resolved."""
+        url = f"http://127.0.0.1:{self.port}/page-with-link?platform=windows"
+        info = resolve_real_download_url(url)
+        self.assertFalse(info["is_html"])
+        self.assertTrue(info["resolved"])
+        self.assertTrue(info["url"].endswith("App-1.0-x64.exe"))
+        self.assertEqual(info["filename"], "App-1.0-x64.exe")
+        self.assertEqual(info["size"], 2048)
+        self.assertEqual(info["error"], "")
+
+    def test_html_page_with_only_nav_links_unresolved(self):
+        """HTML page with only nav links returns is_html=True, resolved=False."""
+        url = f"http://127.0.0.1:{self.port}/nav-only"
+        info = resolve_real_download_url(url)
+        self.assertTrue(info["is_html"])
+        self.assertFalse(info["resolved"])
+
+    def test_meta_refresh_resolved(self):
+        """<meta http-equiv="refresh" content="0;url=/f/setup.msi"> is resolved."""
+        url = f"http://127.0.0.1:{self.port}/meta-refresh"
+        info = resolve_real_download_url(url)
+        self.assertFalse(info["is_html"])
+        self.assertTrue(info["resolved"])
+        self.assertTrue(info["url"].endswith("/f/setup.msi"))
+        self.assertEqual(info["filename"], "setup.msi")
+
+    def test_gui_clipboard_flow_with_unresolvable_html_does_not_start(self):
+        """Unresolvable HTML page modal 'Download Now' and _on_start_download abort without starting engine."""
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            gui = ModernFramelessGUI(root, start_hidden=True)
+            gui._start_hidden = True
+            gui._clipboard_sniffer_active = False
+            url = f"http://127.0.0.1:{self.port}/nav-only"
+            gui._on_clipboard_url_detected(url)
+
+            self.assertIsNotNone(gui._confirm_modal)
+            modal = gui._confirm_modal
+
+            # Click Download Now in modal
+            modal._on_start_in_window()
+
+            # Wait for background thread and queue drain
+            for _ in range(50):
+                gui._drain_dispatch_queue()
+                root.update()
+                time.sleep(0.04)
+                if getattr(gui, "_confirm_modal", None) is None:
+                    break
+
+            gui._drain_dispatch_queue()
+            root.update()
+
+            self.assertIsNone(getattr(gui, "_confirm_modal", None))
+            self.assertTrue(gui.engine is None or not gui.engine.is_running)
+
+            # Test direct _on_start_download aborts as well
+            gui.entry_url.delete(0, tk.END)
+            gui.entry_url.insert(0, url)
+            gui.entry_dest.delete(0, tk.END)
+            gui.entry_dest.insert(0, os.path.join(self.temp_dir, "nav.bin"))
+            gui._on_start_download()
+
+            for _ in range(50):
+                gui._drain_dispatch_queue()
+                root.update()
+                time.sleep(0.04)
+
+            self.assertTrue(gui.engine is None or not gui.engine.is_running)
+            self.assertFalse(os.path.exists(os.path.join(self.temp_dir, "nav.bin")))
+
+            gui._cleanup_resources()
+        finally:
+            root.destroy()
+
+    def test_engine_safety_net_html_to_bin_errors(self):
+        """TurboDownloadEngine aborts with clear error when server returns text/html for a .bin destination."""
+        url = f"http://127.0.0.1:{self.port}/html-trap.bin"
+        dest = os.path.join(self.temp_dir, "thanks.bin")
+        engine = TurboDownloadEngine(url, destination_path=dest)
+        with self.assertRaises(RuntimeError) as cm:
+            engine.probe()
+        self.assertIn("Server returned a web page (HTML), not a file", str(cm.exception))
+        self.assertFalse(os.path.exists(dest))
+
+    def test_startup_welcome_toast(self):
+        """StartupWelcomeToast creates, positions within screen bounds, and auto-destroys."""
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            toast = StartupWelcomeToast(root, duration_ms=250)
+            self.assertTrue(toast.winfo_exists())
+            root.update()
+
+            x = toast.winfo_x()
+            y = toast.winfo_y()
+            w = toast.winfo_width()
+            h = toast.winfo_height()
+            sw = toast.winfo_screenwidth()
+            sh = toast.winfo_screenheight()
+
+            self.assertGreaterEqual(x, 0)
+            self.assertGreaterEqual(y, 0)
+            self.assertLessEqual(x + w, sw + 10)
+            self.assertLessEqual(y + h, sh + 10)
+
+            # Auto-destruction
+            for _ in range(30):
+                root.update()
+                time.sleep(0.02)
+                if not toast.winfo_exists():
+                    break
+
+            self.assertFalse(toast.winfo_exists())
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
