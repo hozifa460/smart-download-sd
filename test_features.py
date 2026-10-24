@@ -19,6 +19,7 @@ import os
 os.environ["SD_DISABLE_SYSTEM_TRAY"] = "1"
 os.environ["SD_DISABLE_AUTO_UPDATE"] = "1"
 os.environ["SD_DISABLE_STARTUP_TOAST"] = "1"
+os.environ["SD_LANGUAGE"] = "en"
 import sys
 import time
 import json
@@ -7824,6 +7825,131 @@ class TestBilingualLocalization(unittest.TestCase):
             self.assertEqual(app.btn_start.cget("text"), "▶ Start Download")
             self.assertEqual(app.tree_history.heading("category")["text"], "Category")
             self.assertIn("Chunk Segments", app.notebook.tab(0, "text"))
+        finally:
+            try:
+                app._cleanup_resources()
+            except Exception:
+                pass
+
+    def test_startup_button_arabic_text_clarity(self):
+        """Verifies startup button in Arabic mode displays clear text avoiding confusion with 'Bot'."""
+        from turbo_downloader import ModernFramelessGUI
+        self.loc.set_language("ar")
+        app = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            btn_text = app.btn_startup.cget("text")
+            self.assertIn("بدء التشغيل مع ويندوز", btn_text)
+            self.assertNotIn("Boot:", btn_text)
+            self.assertNotIn("Bot", btn_text)
+        finally:
+            try:
+                app._cleanup_resources()
+            except Exception:
+                pass
+
+    def test_magic_bytes_detector(self):
+        """Verifies MagicBytesDetector accurately identifies container formats from binary signatures."""
+        from turbo_downloader import MagicBytesDetector
+        # ZIP
+        zip_hdr = b"PK\x03\x04" + b"\x00" * 20
+        self.assertEqual(MagicBytesDetector.detect_bytes(zip_hdr)[0], ".zip")
+        # 7Z
+        sevenz_hdr = b"\x37\x7A\xBC\xAF\x27\x1C" + b"\x00" * 10
+        self.assertEqual(MagicBytesDetector.detect_bytes(sevenz_hdr)[0], ".7z")
+        # RAR
+        rar_hdr = b"Rar!\x1A\x07\x00" + b"\x00" * 10
+        self.assertEqual(MagicBytesDetector.detect_bytes(rar_hdr)[0], ".rar")
+        # PDF
+        pdf_hdr = b"%PDF-1.4\r\n"
+        self.assertEqual(MagicBytesDetector.detect_bytes(pdf_hdr)[0], ".pdf")
+        # PNG
+        png_hdr = b"\x89PNG\r\n\x1a\n" + b"\x00" * 10
+        self.assertEqual(MagicBytesDetector.detect_bytes(png_hdr)[0], ".png")
+        # EXE
+        exe_hdr = b"MZ" + b"\x00" * 50
+        self.assertEqual(MagicBytesDetector.detect_bytes(exe_hdr)[0], ".exe")
+        # MP4
+        mp4_hdr = b"\x00\x00\x00\x20ftypisom" + b"\x00" * 20
+        self.assertEqual(MagicBytesDetector.detect_bytes(mp4_hdr)[0], ".mp4")
+
+    def test_file_integrity_calculator(self):
+        """Verifies calculate_file_integrity calculates accurate CRC-32 and SHA-256."""
+        from turbo_downloader import calculate_file_integrity
+        with tempfile.NamedTemporaryFile(delete=False) as tf:
+            tf.write(b"Hello Turbo Downloader Integrity Test!")
+            tf_path = tf.name
+        try:
+            res = calculate_file_integrity(tf_path)
+            self.assertTrue("crc32" in res)
+            self.assertTrue("sha256" in res)
+            expected_sha = hashlib.sha256(b"Hello Turbo Downloader Integrity Test!").hexdigest().lower()
+            self.assertEqual(res["sha256"], expected_sha)
+        finally:
+            if os.path.exists(tf_path):
+                os.remove(tf_path)
+
+    def test_safe_shutdown_preserves_parts(self):
+        """Verifies safe_shutdown halts download and serializes state without purging .sd_parts."""
+        from turbo_downloader import TurboDownloadEngine, DownloadChunk
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dest = os.path.join(tmp_dir, "test_file.bin")
+            parts_dir = dest + ".sd_parts"
+            engine = TurboDownloadEngine(
+                url="https://example.com/file.bin",
+                destination_path=dest,
+                max_connections=2
+            )
+            # Create simulated chunk & parts dir
+            os.makedirs(parts_dir, exist_ok=True)
+            chunk_file = os.path.join(parts_dir, "chunk_0.part")
+            with open(chunk_file, "wb") as f:
+                f.write(b"part data")
+            engine.chunks = [DownloadChunk(chunk_id=0, start_byte=0, end_byte=100, part_filepath=chunk_file)]
+            engine.chunks[0].downloaded_bytes = 9
+            engine.is_running = True
+
+            engine.safe_shutdown()
+
+            self.assertFalse(engine.is_running)
+            self.assertTrue(engine.is_paused)
+            self.assertTrue(os.path.isdir(parts_dir), ".sd_parts was erroneously purged")
+            self.assertTrue(os.path.isfile(chunk_file), "chunk file was erroneously purged")
+            self.assertTrue(os.path.isfile(os.path.join(parts_dir, "state.json")), "state.json was not saved")
+
+    def test_history_open_paused_resumes_seamlessly(self):
+        """Verifies _history_open_selected_file on incomplete/paused entry prompts to resume."""
+        from turbo_downloader import ModernFramelessGUI
+        app = ModernFramelessGUI(self.root, start_hidden=True)
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                fake_dest = os.path.join(tmp_dir, "incomplete.zip")
+                fake_url = "https://example.com/incomplete.zip"
+                # Add paused entry to history
+                app.history_manager.add_or_update_entry(
+                    url=fake_url,
+                    file_path=fake_dest,
+                    size_bytes=1024,
+                    status="Paused"
+                )
+                app._refresh_history_table()
+                # Select the first entry
+                children = app.tree_history.get_children()
+                self.assertTrue(len(children) > 0)
+                app.tree_history.selection_set(children[0])
+
+                yesno_asked = []
+                def _mock_yesno(title, msg, on_yes=None, on_no=None):
+                    yesno_asked.append((title, msg))
+                    if on_yes:
+                        on_yes()
+
+                app.ask_safe_yesno = _mock_yesno
+                redownload_called = []
+                app._history_redownload_selected = lambda: redownload_called.append(True)
+
+                app._history_open_selected_file()
+                self.assertEqual(len(yesno_asked), 1)
+                self.assertEqual(len(redownload_called), 1)
         finally:
             try:
                 app._cleanup_resources()

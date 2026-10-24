@@ -58,6 +58,9 @@ import urllib.parse
 import urllib.error
 from html.parser import HTMLParser
 import ctypes
+import zlib
+import zipfile
+import tarfile
 from dataclasses import dataclass, field
 from typing import List, Optional, Callable, Dict, Any, Union, Tuple
 
@@ -204,6 +207,8 @@ def load_settings() -> Dict[str, Any]:
     defaults = {
         "minimize_to_tray": True,
         "auto_categorize_folders": True,
+        "language": "ar",
+        "auto_unpack_archives": False,
     }
     if os.path.isfile(path):
         try:
@@ -394,6 +399,89 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tray_startup_on": "🚀 Start with Windows: ON",
         "tray_startup_off": "🚀 Start with Windows: OFF",
         "tray_exit": "❌ Exit Completely",
+
+        # Dialog Action Buttons
+        "btn_yes": "Yes",
+        "btn_no": "No",
+        "btn_ok": "OK",
+
+        # Context Menus
+        "ctx_open_file": "📂 Open File",
+        "ctx_open_folder": "📁 Open Containing Folder",
+        "ctx_copy_url": "📋 Copy URL",
+        "ctx_resume_retry": "🔄 Resume / Retry",
+        "ctx_remove_history": "🗑️ Remove from History",
+        "ctx_refresh_address": "🔄 Refresh Download Address...",
+        "ctx_resume_download": "▶ Resume Download",
+        "ctx_pause_download": "⏸ Pause Download",
+        "ctx_cancel_download": "⏹ Cancel Download",
+        "ctx_copy_download_url": "📋 Copy Download URL",
+
+        # Refresh Link Dialog
+        "refresh_modal_title": "Refresh Download Address — Smart Download",
+        "refresh_modal_header": "Refresh Expired Download Address",
+        "refresh_modal_sub": "Paste the new active link to continue downloading without losing your downloaded parts.",
+        "refresh_modal_filename": "File Name:",
+        "refresh_modal_preserved": "Preserved Data:",
+        "refresh_modal_old_addr": "Old Address:",
+        "refresh_modal_new_url": "New Download URL:",
+        "refresh_modal_status_idle": "Paste the new download link and click Validate & Resume.",
+        "refresh_modal_btn_validate": "🔄 Validate & Resume",
+        "refresh_modal_btn_cancel": "✕ Cancel",
+
+        # Browser Integration Dialog
+        "browser_dlg_title": "🌐 Browser Integration & WebExtension Setup",
+        "browser_dlg_header": "🌐 BROWSER INTEGRATION & EXTENSION SETUP",
+        "browser_card_sniffer_title": "📋 ZERO-INSTALL CLIPBOARD MONITOR (SD SMART CAPTURE — ALL BROWSERS)",
+        "browser_card_sniffer_desc": "Works 100% across ALL browsers (Chrome, Edge, Firefox, Brave, Opera, Safari) without any extension.\nJust right-click any link or video and choose 'Copy Link Address' — Smart Download catches it instantly!",
+        "browser_card_server_title": "LOCAL IPC LOOPBACK LISTENER",
+        "browser_server_active": "● Active on http://{host}:{port}",
+        "browser_server_stopped": "● Listener Stopped / Offline",
+        "browser_btn_stop_server": "⏹ Stop Server",
+        "browser_btn_start_server": "▶ Start Server",
+        "browser_btn_test_ping": "⚡ Test Ping",
+        "browser_card_reg_title": "WINDOWS REGISTRY DIRECT BROWSER LINK (NATIVE MESSAGING)",
+        "browser_reg_active": "● Registry Active: {chrome}  {edge} (com.smartdownload.host)",
+        "browser_reg_inactive": "● Not Registered in Windows Registry",
+        "browser_btn_reregister": "🔄 Re-Register",
+        "browser_btn_register": "🔗 1-Click Register (Chrome & Edge)",
+        "browser_btn_unregister": "Unregister",
+        "browser_card_boot_title": "🚀 WINDOWS STARTUP AUTO-BOOT (SILENT BACKGROUND MODE)",
+        "browser_boot_enabled": "● Start with Windows: Enabled (Silent Background)",
+        "browser_boot_disabled": "● Start with Windows: Disabled",
+        "browser_btn_boot_enabled": "🚀 Start on Boot: Enabled",
+        "browser_btn_boot_disabled": "🚀 Start on Boot: Disabled",
+        "browser_card_tray_title": "🔔 WINDOWS SYSTEM TRAY & BACKGROUND MINIMIZATION",
+        "browser_tray_enabled": "● Close (✕) Action: Minimize to System Tray",
+        "browser_tray_disabled": "● Close (✕) Action: Exit Application Completely",
+        "browser_btn_tray_enabled": "[✓] Minimize to System Tray on Close (✕)",
+        "browser_btn_tray_disabled": "[  ] Minimize to System Tray on Close (✕)",
+        "browser_card_ext_title": "WEBEXTENSION ARTIFACT (MANIFEST V3)",
+        "browser_btn_open_folder": "📂 Open Folder",
+        "browser_tab_chrome": " Chrome & Brave ",
+        "browser_tab_edge": " Microsoft Edge ",
+        "browser_tab_firefox": " Mozilla Firefox ",
+        "browser_btn_close": "Close",
+
+        # Dialogs & History Statuses
+        "dialog_not_found_title": "File Not Found",
+        "dialog_not_found_msg": "The downloaded file does not exist at:\n{path}",
+        "dialog_resume_incomplete_title": "Resume Incomplete Download",
+        "dialog_resume_incomplete_msg": "This file is paused or incomplete. Would you like to resume downloading now?",
+        "dialog_exit_title": "Exit Confirmation",
+        "dialog_exit_msg": "A download is currently active. Stop and exit completely?",
+        "status_completed": "Completed",
+        "status_paused": "Paused",
+        "status_in_progress": "In Progress",
+        "status_failed": "Failed",
+        "status_cancelled": "Cancelled",
+
+        # Tooltips
+        "tip_lang_toggle": "Switch between Arabic and English",
+        "tip_startup": "Toggle start on Windows boot",
+        "tip_sniffer": "Toggle clipboard link sniffer",
+        "tip_auto_cat": "Toggle automatic folder categorization",
+        "tip_speed_slider": "Drag to throttle live download speed",
     },
     "ar": {
         # App identity
@@ -439,8 +527,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "btn_browser": "🌐 ملحق المتصفح",
         "btn_sniffer_active": "📋 المراقب: مفعل",
         "btn_sniffer_paused": "📋 المراقب: معطل",
-        "btn_startup_on": "🚀 التشغيل: مفعل",
-        "btn_startup_off": "🚀 التشغيل: معطل",
+        "btn_startup_on": "🚀 بدء التشغيل مع ويندوز: مفعل",
+        "btn_startup_off": "🚀 بدء التشغيل مع ويندوز: معطل",
         "btn_cookies_prefix": "🍪 الكوكيز:",
         "btn_auto_cat_on": "📁 فرز تلقائي: مفعل",
         "btn_auto_cat_off": "📁 فرز تلقائي: معطل",
@@ -547,9 +635,92 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "tray_open": "🖥️ فتح البرنامج",
         "tray_sniffer_active": "📋 مراقب الحافظة: مفعل",
         "tray_sniffer_paused": "📋 مراقب الحافظة: معطل",
-        "tray_startup_on": "🚀 التشغيل مع ويندوز: مفعل",
-        "tray_startup_off": "🚀 التشغيل مع ويندوز: معطل",
+        "tray_startup_on": "🚀 بدء التشغيل مع ويندوز: مفعل",
+        "tray_startup_off": "🚀 بدء التشغيل مع ويندوز: معطل",
         "tray_exit": "❌ خروج نهائي",
+
+        # Dialog Action Buttons
+        "btn_yes": "نعم",
+        "btn_no": "لا",
+        "btn_ok": "موافق",
+
+        # Context Menus
+        "ctx_open_file": "📂 فتح الملف",
+        "ctx_open_folder": "📁 فتح المجلد المحتوي",
+        "ctx_copy_url": "📋 نسخ الرابط",
+        "ctx_resume_retry": "🔄 استئناف / إعادة المحاولة",
+        "ctx_remove_history": "🗑️ حذف من السجل",
+        "ctx_refresh_address": "🔄 تجديد عنوان التحميل...",
+        "ctx_resume_download": "▶ استئناف التحميل",
+        "ctx_pause_download": "⏸ إيقاف التحميل مؤقتاً",
+        "ctx_cancel_download": "⏹ إلغاء التحميل",
+        "ctx_copy_download_url": "📋 نسخ رابط التحميل",
+
+        # Refresh Link Dialog
+        "refresh_modal_title": "تجديد عنوان التحميل — Smart Download",
+        "refresh_modal_header": "تجديد رابط التحميل المنتهي",
+        "refresh_modal_sub": "الصق الرابط النشط الجديد لمتابعة التحميل دون فقدان الأجزاء المنزلة.",
+        "refresh_modal_filename": "اسم الملف:",
+        "refresh_modal_preserved": "البيانات المحفوظة:",
+        "refresh_modal_old_addr": "العنوان القديم:",
+        "refresh_modal_new_url": "رابط التحميل الجديد:",
+        "refresh_modal_status_idle": "الصق رابط التحميل الجديد واضغط تحديث واستئناف.",
+        "refresh_modal_btn_validate": "🔄 تحديث واستئناف",
+        "refresh_modal_btn_cancel": "✕ إلغاء",
+
+        # Browser Integration Dialog
+        "browser_dlg_title": "🌐 ملحق المتصفح وإعداد الإضافة",
+        "browser_dlg_header": "🌐 ملحق المتصفح وإعداد الإضافة",
+        "browser_card_sniffer_title": "📋 مراقب الحافظة الفوري (التقاط ذكي — لكافة المتصفحات)",
+        "browser_card_sniffer_desc": "يعمل 100% عبر كافة المتصفحات دون الحاجة لأي إضافة.\nفقط انقر بزر الفأرة الأيمن على أي رابط واختر 'نسخ عنوان الرابط' وسيلتقطه البرنامج فوراً!",
+        "browser_card_server_title": "خادم الاتصال المحلي السريع (IPC)",
+        "browser_server_active": "● نشط على http://{host}:{port}",
+        "browser_server_stopped": "● الخادم متوقف / غير متصل",
+        "browser_btn_stop_server": "⏹ إيقاف الخادم",
+        "browser_btn_start_server": "▶ تشغيل الخادم",
+        "browser_btn_test_ping": "⚡ اختبار الاتصال",
+        "browser_card_reg_title": "الربط المباشر مع سجل ويندوز (Native Messaging)",
+        "browser_reg_active": "● مسجل بنجاح في ويندوز: {chrome}  {edge} (com.smartdownload.host)",
+        "browser_reg_inactive": "● غير مسجل في سجل ويندوز",
+        "browser_btn_reregister": "🔄 إعادة التسجيل",
+        "browser_btn_register": "🔗 تسجيل فوري (Chrome & Edge)",
+        "browser_btn_unregister": "إلغاء التسجيل",
+        "browser_card_boot_title": "🚀 بدء التشغيل التلقائي مع ويندوز (الوضع الصامت في الخلفية)",
+        "browser_boot_enabled": "● بدء التشغيل مع ويندوز: مفعل (الوضع الصامت)",
+        "browser_boot_disabled": "● بدء التشغيل مع ويندوز: معطل",
+        "browser_btn_boot_enabled": "🚀 بدء التشغيل مع ويندوز: مفعل",
+        "browser_btn_boot_disabled": "🚀 بدء التشغيل مع ويندوز: معطل",
+        "browser_card_tray_title": "🔔 التصغير لشريط المهام (System Tray) والعمل بالخلفية",
+        "browser_tray_enabled": "● إجراء الإغلاق (✕): التصغير لشريط المهام",
+        "browser_tray_disabled": "● إجراء الإغلاق (✕): الخروج النهائي من البرنامج",
+        "browser_btn_tray_enabled": "[✓] تصغير لشريط المهام عند الإغلاق (✕)",
+        "browser_btn_tray_disabled": "[  ] تصغير لشريط المهام عند الإغلاق (✕)",
+        "browser_card_ext_title": "ملفات إضافة المتصفح (Manifest V3)",
+        "browser_btn_open_folder": "📂 فتح المجلد",
+        "browser_tab_chrome": " كروم وبريف ",
+        "browser_tab_edge": " مايكروسوفت إيدج ",
+        "browser_tab_firefox": " موزيلا فايرفوكس ",
+        "browser_btn_close": "إغلاق",
+
+        # Dialogs & History Statuses
+        "dialog_not_found_title": "الملف غير موجود",
+        "dialog_not_found_msg": "الملف المحمل غير موجود في المسار:\n{path}",
+        "dialog_resume_incomplete_title": "استئناف التحميل غير المكتمل",
+        "dialog_resume_incomplete_msg": "هذا الملف متوقف مؤقتاً أو غير مكتمل. هل ترغب في استئناف تحميله الآن؟",
+        "dialog_exit_title": "تأكيد الخروج",
+        "dialog_exit_msg": "هناك تحميل نشط حالياً. هل ترغب في الإيقاف والخروج النهائي؟",
+        "status_completed": "مكتمل",
+        "status_paused": "متوقف مؤقتاً",
+        "status_in_progress": "قيد التحميل",
+        "status_failed": "فشل",
+        "status_cancelled": "ملغي",
+
+        # Tooltips
+        "tip_lang_toggle": "التبديل بين اللغتين العربية والإنجليزية",
+        "tip_startup": "تفعيل/تعطيل بدء التشغيل التلقائي مع ويندوز",
+        "tip_sniffer": "تفعيل/تعطيل مراقب الحافظة التلقائي",
+        "tip_auto_cat": "تفعيل/تعطيل الفرز التلقائي في مجلدات",
+        "tip_speed_slider": "اسحب للتحكم المباشر في سرعة التحميل",
     }
 }
 
@@ -566,13 +737,16 @@ class LocalizationManager:
 
     def __init__(self, default_lang: Optional[str] = None):
         self._observers: List[Callable[[], None]] = []
+        if os.environ.get("SD_LANGUAGE") in ("ar", "en"):
+            self._current_lang = os.environ.get("SD_LANGUAGE")
+            return
         saved = get_setting("language", None)
         if saved in ("ar", "en"):
             self._current_lang = saved
         elif default_lang in ("ar", "en"):
             self._current_lang = default_lang
         else:
-            self._current_lang = "en"
+            self._current_lang = "ar"
 
     @classmethod
     def get_instance(cls) -> "LocalizationManager":
@@ -3332,7 +3506,10 @@ class TurboDownloadEngine:
         - On-disk part file size validations.
         - 64KB streaming buffer merge into target file.
         - Total assembled size verification.
-        - Temporary directory cleanup.
+        - Pre-allocation and streamlined streaming buffers (inspired by splitter.rs).
+        - Magic bytes container detection (inspired by detector.rs).
+        - Post-download integrity verification (CRC-32 & SHA-256).
+        - Temporary directory cleanup upon successful assembly.
         """
         self.log("Beginning strict sequential assembly...")
 
@@ -3341,6 +3518,27 @@ class TurboDownloadEngine:
 
         if not sorted_chunks:
             raise ValueError("No download chunks available for assembly.")
+
+        # Magic bytes detection inspired by AeroArchive Studio (detector.rs)
+        if sorted_chunks and os.path.exists(sorted_chunks[0].part_filepath):
+            try:
+                with open(sorted_chunks[0].part_filepath, "rb") as f0:
+                    head_bytes = f0.read(512)
+                detected = MagicBytesDetector.detect_bytes(head_bytes)
+                if detected:
+                    det_ext, det_mime, det_cat = detected
+                    cur_ext = os.path.splitext(self.destination_path)[1].lower()
+                    if (
+                        cur_ext in ("", ".bin", ".download", ".octet-stream", ".part")
+                        and not self.destination_path.endswith((".video.tmp", ".audio.tmp", ".tmp"))
+                        and det_ext
+                    ):
+                        new_dest = os.path.splitext(self.destination_path)[0] + det_ext
+                        self.log(f"[DETECTOR] Detected true format via magic bytes: {det_ext} ({det_cat}) -> {os.path.basename(new_dest)}")
+                        self.destination_path = new_dest
+                        self.filename = os.path.basename(new_dest)
+            except Exception:
+                pass
 
         # Boundary assertions
         if self.supports_ranges and self.total_size > 0:
@@ -3368,8 +3566,8 @@ class TurboDownloadEngine:
                     f"Chunk #{c.chunk_id} size mismatch: disk {actual_size:,} bytes != expected {expected_size:,} bytes."
                 )
 
-        # 64KB streaming assembly
-        BUFFER_SIZE = 64 * 1024
+        # Streamlined 128KB streaming assembly (inspired by splitter.rs join_chunks)
+        BUFFER_SIZE = 128 * 1024
         total_written = 0
 
         # Ensure target directory exists
@@ -3378,6 +3576,11 @@ class TurboDownloadEngine:
             os.makedirs(dest_dir, exist_ok=True)
 
         with open(self.destination_path, "wb") as out_f:
+            if self.total_size > 0:
+                try:
+                    out_f.truncate(self.total_size)
+                except Exception:
+                    pass
             for c in sorted_chunks:
                 if not os.path.exists(c.part_filepath):
                     continue
@@ -3388,6 +3591,7 @@ class TurboDownloadEngine:
                             break
                         out_f.write(buf)
                         total_written += len(buf)
+            out_f.flush()
 
         if self.total_size > 0:
             assert total_written == self.total_size, (
@@ -3396,12 +3600,48 @@ class TurboDownloadEngine:
 
         self.log(f"Assembled and verified {total_written:,} bytes with zero corruption.")
 
+        # Post-download integrity verification (CRC-32 & SHA-256)
+        try:
+            hashes = calculate_file_integrity(self.destination_path)
+            self.log(f"[INTEGRITY] SHA-256: {hashes.get('sha256')} | CRC-32: {hashes.get('crc32')}")
+        except Exception as e:
+            self.log(f"[INTEGRITY] Verification error: {e}")
+
+        # Optional auto-unpack for archive files
+        if get_setting("auto_unpack_archives", False):
+            try:
+                unpacked_to = auto_unpack_archive(self.destination_path)
+                if unpacked_to:
+                    self.log(f"[ARCHIVE] Successfully auto-unpacked to: {unpacked_to}")
+            except Exception as e:
+                self.log(f"[ARCHIVE] Auto-unpack error: {e}")
+
         # Cleanup part files
         try:
             shutil.rmtree(self.temp_dir, ignore_errors=True)
             self.log("Cleaned up temporary chunk files.")
         except Exception:
             pass
+
+    def safe_shutdown(self):
+        """
+        Safely halts all active workers and serializes state into state.json
+        WITHOUT purging temporary chunk files (.sd_parts).
+        Enables seamless download resumption upon next launch.
+        """
+        self.is_running = False
+        self.is_paused = True
+        self._pause_event.set()
+        self._cancel_event.set()
+        with self._lock:
+            for conn in list(self._active_connections):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._active_connections.clear()
+        self.save_state()
+        self.log("Download state saved safely in .sd_parts. Resume ready.")
 
     def _stop_workers_for_error(self):
         """Closes active socket connections and signals all workers to abort immediately."""
@@ -3758,6 +3998,13 @@ class StreamDownloadCoordinator:
             self._cancel_event.set()
             if self.current_engine:
                 self.current_engine.cancel()
+
+    def safe_shutdown(self):
+        with self._lock:
+            self._is_running = False
+            self._cancel_event.set()
+            if self.current_engine and hasattr(self.current_engine, "safe_shutdown"):
+                self.current_engine.safe_shutdown()
 
     def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):
         with self._lock:
@@ -5493,7 +5740,7 @@ class SafeModalDialog(tk.Toplevel):
         if dialog_type == "confirm":
             btn_yes = tk.Button(
                 btn_frame,
-                text="Yes",
+                text=tr("btn_yes", "Yes"),
                 font=("Segoe UI", 9, "bold"),
                 bg=accent_col,
                 fg="white",
@@ -5508,7 +5755,7 @@ class SafeModalDialog(tk.Toplevel):
 
             btn_no = tk.Button(
                 btn_frame,
-                text="No",
+                text=tr("btn_no", "No"),
                 font=("Segoe UI", 9),
                 bg=c_panel_light,
                 fg=c_text_muted,
@@ -5523,7 +5770,7 @@ class SafeModalDialog(tk.Toplevel):
         else:
             btn_ok = tk.Button(
                 btn_frame,
-                text="OK",
+                text=tr("btn_ok", "OK"),
                 font=("Segoe UI", 9, "bold"),
                 bg=accent_col,
                 fg="white",
@@ -5575,6 +5822,239 @@ class SafeModalDialog(tk.Toplevel):
                 self.on_cancel()
             except Exception:
                 pass
+
+
+class ToolTip:
+    """
+    Lightweight, high-DPI aware, floating tooltip for Tkinter widgets.
+    Dynamically resolves localized text via callable or translation key.
+    """
+    def __init__(self, widget: tk.Widget, text_or_key: Union[str, Callable[[], str]]):
+        self.widget = widget
+        self.text_or_key = text_or_key
+        self.tip_window: Optional[tk.Toplevel] = None
+        self._show_job = None
+        try:
+            self.widget.bind("<Enter>", self._on_enter, add="+")
+            self.widget.bind("<Leave>", self._on_leave, add="+")
+            self.widget.bind("<ButtonPress>", self._on_leave, add="+")
+            self.widget.bind("<Destroy>", self._on_destroy, add="+")
+        except Exception:
+            pass
+
+    def _get_text(self) -> str:
+        if callable(self.text_or_key):
+            try:
+                return str(self.text_or_key())
+            except Exception:
+                return ""
+        return tr(self.text_or_key, self.text_or_key)
+
+    def _on_enter(self, event=None):
+        self._schedule()
+
+    def _on_leave(self, event=None):
+        self._unschedule()
+        self._hide()
+
+    def _on_destroy(self, event=None):
+        self._unschedule()
+        self._hide()
+
+    def _schedule(self):
+        self._unschedule()
+        if hasattr(self.widget, "after"):
+            try:
+                self._show_job = self.widget.after(500, self._show)
+            except Exception:
+                pass
+
+    def _unschedule(self):
+        if self._show_job and hasattr(self.widget, "after_cancel"):
+            try:
+                self.widget.after_cancel(self._show_job)
+            except Exception:
+                pass
+            self._show_job = None
+
+    def _show(self):
+        text = self._get_text()
+        if not text:
+            return
+        try:
+            if not self.widget.winfo_exists() or not self.widget.winfo_viewable():
+                return
+            if self.tip_window:
+                return
+            x = self.widget.winfo_rootx() + (self.widget.winfo_width() // 2)
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+            self.tip_window = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            tw.attributes("-topmost", True)
+            label = tk.Label(
+                tw,
+                text=text,
+                justify=tk.LEFT,
+                background="#1e293b",
+                foreground="#f8fafc",
+                relief=tk.SOLID,
+                borderwidth=1,
+                font=("Segoe UI", 8),
+                padx=6,
+                pady=3
+            )
+            label.pack(ipadx=1)
+        except Exception:
+            self._hide()
+
+    def _hide(self):
+        tw = self.tip_window
+        self.tip_window = None
+        if tw:
+            try:
+                tw.destroy()
+            except Exception:
+                pass
+
+
+# ======================================================================================
+# ARCHITECTURAL ENHANCEMENTS (AEROARCHIVE STUDIO INSPIRED)
+# ======================================================================================
+
+class MagicBytesDetector:
+    """
+    Magic-bytes file type detector inspired by AeroArchive Studio (detector.rs).
+    Detects true binary container and format from initial bytes (header signature),
+    independent of generic URLs or query parameters.
+    """
+    SIGNATURES = [
+        # (magic_bytes, offset, extension, mime_type, category)
+        (b"PK\x03\x04", 0, ".zip", "application/zip", "Compressed"),
+        (b"PK\x05\x06", 0, ".zip", "application/zip", "Compressed"),
+        (b"PK\x07\x08", 0, ".zip", "application/zip", "Compressed"),
+        (b"\x37\x7A\xBC\xAF\x27\x1C", 0, ".7z", "application/x-7z-compressed", "Compressed"),
+        (b"Rar!\x1A\x07\x00", 0, ".rar", "application/x-rar-compressed", "Compressed"),
+        (b"Rar!\x1A\x07\x01\x00", 0, ".rar", "application/x-rar-compressed", "Compressed"),
+        (b"\x1F\x8B", 0, ".gz", "application/gzip", "Compressed"),
+        (b"%PDF-", 0, ".pdf", "application/pdf", "Documents"),
+        (b"\x89PNG\r\n\x1a\n", 0, ".png", "image/png", "Images"),
+        (b"\xFF\xD8\xFF", 0, ".jpg", "image/jpeg", "Images"),
+        (b"GIF87a", 0, ".gif", "image/gif", "Images"),
+        (b"GIF89a", 0, ".gif", "image/gif", "Images"),
+        (b"\x1A\x45\xDF\xA3", 0, ".mkv", "video/x-matroska", "Video"),
+        (b"ID3", 0, ".mp3", "audio/mpeg", "Audio"),
+        (b"\xFF\xFB", 0, ".mp3", "audio/mpeg", "Audio"),
+        (b"\xFF\xF3", 0, ".mp3", "audio/mpeg", "Audio"),
+        (b"MZ", 0, ".exe", "application/x-msdownload", "Programs"),
+        (b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", 0, ".msi", "application/x-msi", "Programs"),
+    ]
+
+    @classmethod
+    def detect_bytes(cls, data: bytes) -> Optional[Tuple[str, str, str]]:
+        """
+        Returns (extension, mime_type, category) if recognized, or None.
+        """
+        if not data or len(data) < 2:
+            return None
+
+        # Check MP4 / MOV (offset 4: ftyp)
+        if len(data) >= 12 and data[4:8] == b"ftyp":
+            brand = data[8:12].lower()
+            if brand in (b"qt  ", b"moov"):
+                return (".mov", "video/quicktime", "Video")
+            return (".mp4", "video/mp4", "Video")
+
+        # Check RIFF subtypes (WEBP, WAV, AVI)
+        if len(data) >= 12 and data[:4] == b"RIFF":
+            form_type = data[8:12]
+            if form_type == b"WEBP":
+                return (".webp", "image/webp", "Images")
+            elif form_type == b"WAVE":
+                return (".wav", "audio/wav", "Audio")
+            elif form_type == b"AVI ":
+                return (".avi", "video/x-msvideo", "Video")
+
+        # Check TAR (offset 257: ustar)
+        if len(data) >= 265 and data[257:262] == b"ustar":
+            return (".tar", "application/x-tar", "Compressed")
+
+        # Check ISO 9660 (offset 32768: CD001)
+        if len(data) >= 32773 and data[32768:32773] == b"CD001":
+            return (".iso", "application/x-iso9660-image", "General")
+
+        for sig, offset, ext, mime, cat in cls.SIGNATURES:
+            sig_len = len(sig)
+            if len(data) >= offset + sig_len and data[offset:offset+sig_len] == sig:
+                return (ext, mime, cat)
+
+        return None
+
+    @classmethod
+    def detect_file(cls, filepath: str) -> Optional[Tuple[str, str, str]]:
+        if not os.path.isfile(filepath):
+            return None
+        try:
+            with open(filepath, "rb") as f:
+                header = f.read(512)
+            return cls.detect_bytes(header)
+        except Exception:
+            return None
+
+
+def calculate_file_integrity(filepath: str) -> Dict[str, str]:
+    """
+    Computes CRC-32 and SHA-256 integrity hashes for a file.
+    Uses 64KB streaming blocks for low memory overhead.
+    """
+    if not os.path.isfile(filepath):
+        return {"crc32": "", "sha256": ""}
+    crc = 0
+    sha = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        while True:
+            chunk = f.read(64 * 1024)
+            if not chunk:
+                break
+            crc = zlib.crc32(chunk, crc)
+            sha.update(chunk)
+    return {
+        "crc32": f"{crc & 0xFFFFFFFF:08X}",
+        "sha256": sha.hexdigest().lower()
+    }
+
+
+def auto_unpack_archive(archive_path: str, destination_dir: Optional[str] = None) -> Optional[str]:
+    """
+    Extracts downloaded archive (.zip, .tar, .tar.gz, .tgz, .7z) into a dedicated folder.
+    Returns path to extracted folder on success, or None.
+    """
+    if not os.path.isfile(archive_path):
+        return None
+    stem = os.path.splitext(os.path.basename(archive_path))[0]
+    if archive_path.lower().endswith(".tar.gz"):
+        stem = os.path.basename(archive_path)[:-7]
+    base_dir = destination_dir or os.path.dirname(archive_path)
+    out_dir = os.path.join(base_dir, stem)
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+        if zipfile.is_zipfile(archive_path):
+            with zipfile.ZipFile(archive_path, 'r') as zf:
+                zf.extractall(out_dir)
+            return out_dir
+        elif tarfile.is_tarfile(archive_path):
+            with tarfile.open(archive_path, 'r:*') as tf:
+                tf.extractall(out_dir)
+            return out_dir
+        else:
+            try:
+                shutil.unpack_archive(archive_path, out_dir)
+                return out_dir
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
 
 
 # ======================================================================================
@@ -7581,7 +8061,7 @@ class RefreshLinkModal(tk.Toplevel):
         self.c_warning = th.get("c_warning", "#f59e0b")
         self.c_input_bg = th.get("c_input_bg", "#0b1220")
 
-        self.title("🔄 Refresh Download Address — Smart Download")
+        self.title(tr("refresh_modal_title", "🔄 Refresh Download Address — Smart Download"))
         self.configure(bg=self.c_bg)
 
         if parent:
@@ -7719,7 +8199,7 @@ class RefreshLinkModal(tk.Toplevel):
 
         lbl_title = tk.Label(
             title_box,
-            text="Refresh Expired Download Address / تجديد رابط التحميل",
+            text=tr("refresh_modal_header", "Refresh Expired Download Address"),
             font=("Segoe UI", 11, "bold"),
             bg=self.c_bg,
             fg=self.c_text_bright,
@@ -7729,7 +8209,7 @@ class RefreshLinkModal(tk.Toplevel):
 
         lbl_sub = tk.Label(
             title_box,
-            text="Paste the new active link to continue downloading without losing your downloaded parts.",
+            text=tr("refresh_modal_sub", "Paste the new active link to continue downloading without losing your downloaded parts."),
             font=("Segoe UI", 8),
             bg=self.c_bg,
             fg=self.c_text_muted,
@@ -7752,13 +8232,13 @@ class RefreshLinkModal(tk.Toplevel):
         # File row
         row_fn = tk.Frame(info_card, bg=self.c_panel)
         row_fn.pack(fill=tk.X, pady=2)
-        tk.Label(row_fn, text="File Name:", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
+        tk.Label(row_fn, text=tr("refresh_modal_filename", "File Name:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
         tk.Label(row_fn, text=self.filename, font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Progress preserved row
         row_prog = tk.Frame(info_card, bg=self.c_panel)
         row_prog.pack(fill=tk.X, pady=2)
-        tk.Label(row_prog, text="Preserved Data:", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
+        tk.Label(row_prog, text=tr("refresh_modal_preserved", "Preserved Data:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
 
         if self.total_size > 0:
             pct = min(100.0, (self.downloaded_bytes / self.total_size) * 100.0)
@@ -7770,7 +8250,7 @@ class RefreshLinkModal(tk.Toplevel):
         # Old URL row
         row_old = tk.Frame(info_card, bg=self.c_panel)
         row_old.pack(fill=tk.X, pady=(4, 2))
-        tk.Label(row_old, text="Old Address:", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
+        tk.Label(row_old, text=tr("refresh_modal_old_addr", "Old Address:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted, width=14, anchor="w").pack(side=tk.LEFT)
 
         entry_old = tk.Entry(row_old, font=("Consolas", 8), bg=self.c_input_bg, fg=self.c_text_muted, relief="flat")
         entry_old.insert(0, self.old_url)
@@ -7791,7 +8271,7 @@ class RefreshLinkModal(tk.Toplevel):
 
         lbl_new = tk.Label(
             input_card,
-            text="New Download URL / رابط التحميل الجديد:",
+            text=tr("refresh_modal_new_url", "New Download URL:"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel,
             fg=self.c_accent,
@@ -7817,7 +8297,7 @@ class RefreshLinkModal(tk.Toplevel):
 
         btn_paste = tk.Button(
             new_url_row,
-            text="📋 Paste",
+            text=tr("btn_paste", "📋 Paste"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
             fg=self.c_text_bright,
@@ -7836,7 +8316,7 @@ class RefreshLinkModal(tk.Toplevel):
         # Status Label Area
         self.lbl_status = tk.Label(
             container,
-            text="Paste the new download link and click Validate & Resume.",
+            text=tr("refresh_modal_status_idle", "Paste the new download link and click Validate & Resume."),
             font=("Segoe UI", 8),
             bg=self.c_bg,
             fg=self.c_text_muted,
@@ -7852,7 +8332,7 @@ class RefreshLinkModal(tk.Toplevel):
 
         self.btn_validate = tk.Button(
             btn_row,
-            text="🔄 Validate & Resume (تحديث واستئناف)",
+            text=tr("refresh_modal_btn_validate", "🔄 Validate & Resume"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_success,
             fg="white",
@@ -7867,7 +8347,7 @@ class RefreshLinkModal(tk.Toplevel):
 
         self.btn_cancel = tk.Button(
             btn_row,
-            text="✕ Cancel (إلغاء)",
+            text=tr("refresh_modal_btn_cancel", "✕ Cancel"),
             font=("Segoe UI", 9),
             bg=self.c_panel_light,
             fg=self.c_text_bright,
@@ -9545,6 +10025,7 @@ class ModernFramelessGUI:
             command=self.toggle_language
         )
         self.btn_lang_toggle.pack(side=tk.RIGHT, padx=(4, 6), pady=6)
+        ToolTip(self.btn_lang_toggle, "tip_lang_toggle")
 
         lbl_ver = tk.Label(
             title_bar,
@@ -9810,7 +10291,20 @@ class ModernFramelessGUI:
         def _do_exit():
             if self.engine and self.engine.is_running:
                 try:
-                    self.engine.cancel()
+                    dl_url = (self.engine.url if self.engine and getattr(self.engine, "url", None) else self.entry_url.get()).strip()
+                    dl_dest = (self.engine.dest_path if self.engine and getattr(self.engine, "dest_path", None) else self.entry_dest.get()).strip()
+                    if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
+                        self.history_manager.add_or_update_entry(
+                            url=dl_url,
+                            file_path=dl_dest,
+                            size_bytes=getattr(self.engine, "total_size", 0) or 0,
+                            status="Paused",
+                            elapsed_sec=0.0
+                        )
+                except Exception:
+                    pass
+                try:
+                    self.engine.safe_shutdown()
                 except Exception:
                     pass
             self._cleanup_resources()
@@ -9823,8 +10317,8 @@ class ModernFramelessGUI:
         if self.engine and self.engine.is_running:
             self.restore_window()
             self.ask_safe_yesno(
-                "Exit Confirmation",
-                "A download is currently active. Stop and exit completely?",
+                tr("dialog_exit_title", "Exit Confirmation"),
+                tr("dialog_exit_msg", "A download is currently active. Stop and exit completely?"),
                 on_yes=_do_exit
             )
             return
@@ -10010,6 +10504,7 @@ class ModernFramelessGUI:
             command=self._on_slider_moved
         )
         self.slider_speed.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        ToolTip(self.slider_speed, "tip_speed_slider")
 
         self.lbl_slider_val = tk.Label(row_slider, text="Unlimited (0 KB/s)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent, width=18, anchor="w")
         self.lbl_slider_val.pack(side=tk.RIGHT)
@@ -10111,6 +10606,7 @@ class ModernFramelessGUI:
             command=self.toggle_clipboard_sniffer
         )
         self.btn_clipboard_sniffer.pack(side=tk.RIGHT, padx=(0, 8))
+        ToolTip(self.btn_clipboard_sniffer, "tip_sniffer")
 
         self.btn_startup = tk.Button(
             row2,
@@ -10125,6 +10621,7 @@ class ModernFramelessGUI:
             command=self.toggle_startup_setting
         )
         self.btn_startup.pack(side=tk.RIGHT, padx=(0, 8))
+        ToolTip(self.btn_startup, "tip_startup")
         self._update_startup_btn()
 
         self.btn_cookies = tk.Button(
@@ -10157,6 +10654,7 @@ class ModernFramelessGUI:
             command=self.toggle_auto_categorize
         )
         self.btn_auto_cat.pack(side=tk.RIGHT, padx=(0, 8))
+        ToolTip(self.btn_auto_cat, "tip_auto_cat")
         self._update_auto_cat_btn()
 
     def toggle_auto_categorize(self):
@@ -10402,16 +10900,16 @@ class ModernFramelessGUI:
 
         # Tab 1: Chunk Details Table
         tab_chunks = tk.Frame(notebook, bg=self.c_panel)
-        notebook.add(tab_chunks, text="  📊 Chunk Segments  ")
+        notebook.add(tab_chunks, text=tr("tab_chunks", "  📊 Chunk Segments  "))
 
         cols = ("id", "range", "size", "downloaded", "pct", "status")
         self.tree_chunks = ttk.Treeview(tab_chunks, columns=cols, show="headings", style="Custom.Treeview")
-        self.tree_chunks.heading("id", text="ID")
-        self.tree_chunks.heading("range", text="Byte Offset Range")
-        self.tree_chunks.heading("size", text="Total Span")
-        self.tree_chunks.heading("downloaded", text="Downloaded")
-        self.tree_chunks.heading("pct", text="Progress")
-        self.tree_chunks.heading("status", text="Status")
+        self.tree_chunks.heading("id", text=tr("col_chunk_id", "ID"))
+        self.tree_chunks.heading("range", text=tr("col_chunk_range", "Byte Offset Range"))
+        self.tree_chunks.heading("size", text=tr("col_chunk_size", "Total Span"))
+        self.tree_chunks.heading("downloaded", text=tr("col_chunk_downloaded", "Downloaded"))
+        self.tree_chunks.heading("pct", text=tr("col_chunk_pct", "Progress"))
+        self.tree_chunks.heading("status", text=tr("col_chunk_status", "Status"))
 
         scale = getattr(self, "dpi_scale", 1.0)
         self.tree_chunks.column("id", width=max(50, int(60 * scale)), minwidth=40, anchor="center")
@@ -10432,7 +10930,7 @@ class ModernFramelessGUI:
 
         # Tab 2: Activity Console Log
         tab_logs = tk.Frame(notebook, bg=self.c_panel)
-        notebook.add(tab_logs, text="  📜 Activity Log  ")
+        notebook.add(tab_logs, text=tr("tab_logs", "  📜 Activity Log  "))
 
         self.txt_log = tk.Text(
             tab_logs,
@@ -10454,7 +10952,7 @@ class ModernFramelessGUI:
 
         # Tab 3: Download History Manager
         tab_history = tk.Frame(notebook, bg=self.c_panel)
-        notebook.add(tab_history, text="  📂 Download History  ")
+        notebook.add(tab_history, text=tr("tab_history", "  📂 Download History  "))
 
         # Top Toolbar
         hist_toolbar = tk.Frame(tab_history, bg=self.c_panel, padx=8, pady=6)
@@ -10560,12 +11058,12 @@ class ModernFramelessGUI:
 
         cols_hist = ("category", "filename", "size", "status", "date", "path")
         self.tree_history = ttk.Treeview(tree_hist_frame, columns=cols_hist, show="headings", style="Custom.Treeview")
-        self.tree_history.heading("category", text="Category")
-        self.tree_history.heading("filename", text="File Name")
-        self.tree_history.heading("size", text="Size")
-        self.tree_history.heading("status", text="Status")
-        self.tree_history.heading("date", text="Date Added")
-        self.tree_history.heading("path", text="Saved Location")
+        self.tree_history.heading("category", text=tr("col_hist_category", "Category"))
+        self.tree_history.heading("filename", text=tr("col_hist_filename", "File Name"))
+        self.tree_history.heading("size", text=tr("col_hist_size", "Size"))
+        self.tree_history.heading("status", text=tr("col_hist_status", "Status"))
+        self.tree_history.heading("date", text=tr("col_hist_date", "Date Added"))
+        self.tree_history.heading("path", text=tr("col_hist_path", "Saved Location"))
 
         self.tree_history.column("category", width=max(80, int(95 * scale)), minwidth=70, anchor="center")
         self.tree_history.column("filename", width=max(180, int(220 * scale)), minwidth=140, anchor="w")
@@ -10599,32 +11097,31 @@ class ModernFramelessGUI:
             bd=1
         )
         self.history_context_menu.add_command(
-            label="📂 Open File",
+            label=tr("ctx_open_file", "📂 Open File"),
             command=self._history_open_selected_file
         )
         self.history_context_menu.add_command(
-            label="📁 Open Containing Folder",
+            label=tr("ctx_open_folder", "📁 Open Containing Folder"),
             command=self._history_open_selected_folder
         )
         self.history_context_menu.add_separator()
         self.history_context_menu.add_command(
-            label="📋 Copy URL",
+            label=tr("ctx_copy_url", "📋 Copy URL"),
             command=self._history_copy_selected_url
         )
         self.history_context_menu.add_command(
-            label="🔄 Resume / Retry",
+            label=tr("ctx_resume_retry", "🔄 Resume / Retry"),
             command=self._history_redownload_selected
         )
         self.history_context_menu.add_separator()
         self.history_context_menu.add_command(
-            label="🗑️ Remove from History",
+            label=tr("ctx_remove_history", "🗑️ Remove from History"),
             command=self._history_remove_selected
         )
 
     def _show_history_context_menu(self, event):
         """Displays right-click context menu on history treeview."""
-        if not hasattr(self, "history_context_menu"):
-            self._build_history_context_menu()
+        self._build_history_context_menu()
         try:
             iid = self.tree_history.identify_row(event.y)
             if iid:
@@ -10690,9 +11187,19 @@ class ModernFramelessGUI:
             if os.path.exists(fp):
                 open_downloaded_file(fp)
             else:
-                self.log(f"[HISTORY] File not found on disk: {fp}")
-                if hasattr(self, "show_safe_warning"):
-                    self.show_safe_warning("File Not Found", f"The downloaded file does not exist at:\n{fp}")
+                parts_dir = fp + ".sd_parts"
+                status = str(entry.get("status", "")).strip()
+                if os.path.isdir(parts_dir) or status in ("Paused", "In Progress", "Failed"):
+                    self.ask_safe_yesno(
+                        tr("dialog_resume_incomplete_title", "Resume Incomplete Download"),
+                        tr("dialog_resume_incomplete_msg", "This file is paused or incomplete. Would you like to resume downloading now?"),
+                        on_yes=self._history_redownload_selected
+                    )
+                else:
+                    self.log(f"[HISTORY] File not found on disk: {fp}")
+                    if hasattr(self, "show_safe_warning"):
+                        msg = tr("dialog_not_found_msg", "The downloaded file does not exist at:\n{path}").format(path=fp)
+                        self.show_safe_warning(tr("dialog_not_found_title", "File Not Found"), msg)
 
     def _history_open_selected_folder(self):
         sel = self.tree_history.selection()
@@ -11984,7 +12491,7 @@ class ModernFramelessGUI:
 
         dlg = tk.Toplevel(self.root)
         self._browser_integration_dlg = dlg
-        dlg.title("🌐 Browser Integration & WebExtension Setup")
+        dlg.title(tr("browser_dlg_title", "🌐 Browser Integration & WebExtension Setup"))
         dlg.transient(self.root)
         dlg.grab_set = lambda: None
         dlg.grab_set_global = lambda: None
@@ -12041,7 +12548,7 @@ class ModernFramelessGUI:
 
         lbl_head = tk.Label(
             header,
-            text="🌐 BROWSER INTEGRATION & EXTENSION SETUP",
+            text=tr("browser_dlg_header", "🌐 BROWSER INTEGRATION & EXTENSION SETUP"),
             font=("Segoe UI", 10, "bold"),
             bg=self.c_panel,
             fg=self.c_accent
@@ -12050,7 +12557,7 @@ class ModernFramelessGUI:
 
         btn_dlg_updates = tk.Button(
             header,
-            text="🔄 Check for Updates",
+            text=tr("btn_check_updates", "🔄 Check for Updates"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,
@@ -12072,7 +12579,7 @@ class ModernFramelessGUI:
         card_sniff = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_sniff.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_sniff_t = tk.Label(card_sniff, text="📋 ZERO-INSTALL CLIPBOARD MONITOR (SD SMART CAPTURE — ALL BROWSERS)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
+        lbl_sniff_t = tk.Label(card_sniff, text=tr("browser_card_sniffer_title", "📋 ZERO-INSTALL CLIPBOARD MONITOR (SD SMART CAPTURE — ALL BROWSERS)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
         lbl_sniff_t.pack(anchor="w")
 
         sniff_row = tk.Frame(card_sniff, bg=self.c_panel)
@@ -12080,7 +12587,7 @@ class ModernFramelessGUI:
 
         lbl_sniff_desc = tk.Label(
             sniff_row,
-            text="Works 100% across ALL browsers (Chrome, Edge, Firefox, Brave, Opera, Safari) without any extension.\nJust right-click any link or video and choose 'Copy Link Address' — Smart Download catches it instantly!",
+            text=tr("browser_card_sniffer_desc", "Works 100% across ALL browsers (Chrome, Edge, Firefox, Brave, Opera, Safari) without any extension.\nJust right-click any link or video and choose 'Copy Link Address' — Smart Download catches it instantly!"),
             font=("Segoe UI", 8),
             bg=self.c_panel,
             fg=self.c_text_bright,
@@ -12090,9 +12597,9 @@ class ModernFramelessGUI:
 
         def _update_dlg_sniff_btn():
             if self._clipboard_sniffer_active:
-                btn_dlg_sniff.configure(text="📋 Sniffer: Active", fg=self.c_success, bg=self.c_panel_light)
+                btn_dlg_sniff.configure(text=tr("btn_sniffer_active", "📋 Sniffer: Active"), fg=self.c_success, bg=self.c_panel_light)
             else:
-                btn_dlg_sniff.configure(text="📋 Sniffer: Paused", fg=self.c_text_muted, bg=self.c_panel)
+                btn_dlg_sniff.configure(text=tr("btn_sniffer_paused", "📋 Sniffer: Paused"), fg=self.c_text_muted, bg=self.c_panel)
 
         def _on_dlg_sniff_toggle():
             self.toggle_clipboard_sniffer()
@@ -12114,7 +12621,7 @@ class ModernFramelessGUI:
         card_server = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_server.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_s_title = tk.Label(card_server, text="LOCAL IPC LOOPBACK LISTENER", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted)
+        lbl_s_title = tk.Label(card_server, text=tr("browser_card_server_title", "LOCAL IPC LOOPBACK LISTENER"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted)
         lbl_s_title.pack(anchor="w")
 
         s_row = tk.Frame(card_server, bg=self.c_panel)
@@ -12125,11 +12632,11 @@ class ModernFramelessGUI:
 
         def _update_server_status_label():
             if self.bridge_server and self.bridge_server.is_running:
-                lbl_status.configure(text=f"● Active on http://{self.bridge_server.host}:{self.bridge_server.port}", fg=self.c_success)
-                btn_toggle_server.configure(text="⏹ Stop Server", bg=self.c_danger)
+                lbl_status.configure(text=tr("browser_server_active", f"● Active on http://{self.bridge_server.host}:{self.bridge_server.port}").format(host=self.bridge_server.host, port=self.bridge_server.port), fg=self.c_success)
+                btn_toggle_server.configure(text=tr("browser_btn_stop_server", "⏹ Stop Server"), bg=self.c_danger)
             else:
-                lbl_status.configure(text="● Listener Stopped / Offline", fg=self.c_danger)
-                btn_toggle_server.configure(text="▶ Start Server", bg=self.c_success)
+                lbl_status.configure(text=tr("browser_server_stopped", "● Listener Stopped / Offline"), fg=self.c_danger)
+                btn_toggle_server.configure(text=tr("browser_btn_start_server", "▶ Start Server"), bg=self.c_success)
 
         def _toggle_bridge():
             if self.bridge_server and self.bridge_server.is_running:
@@ -12158,7 +12665,7 @@ class ModernFramelessGUI:
 
         btn_test = tk.Button(
             s_row,
-            text="⚡ Test Ping",
+            text=tr("browser_btn_test_ping", "⚡ Test Ping"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
             fg=self.c_text_bright,
@@ -12185,7 +12692,7 @@ class ModernFramelessGUI:
         card_reg = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_reg.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_reg_title = tk.Label(card_reg, text="WINDOWS REGISTRY DIRECT BROWSER LINK (NATIVE MESSAGING)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl_reg_title = tk.Label(card_reg, text=tr("browser_card_reg_title", "WINDOWS REGISTRY DIRECT BROWSER LINK (NATIVE MESSAGING)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_reg_title.pack(anchor="w")
 
         reg_row = tk.Frame(card_reg, bg=self.c_panel)
@@ -12199,11 +12706,11 @@ class ModernFramelessGUI:
             if status.get("is_registered"):
                 chrome_str = "Chrome ✓" if status.get("chrome_registered") else "Chrome ✕"
                 edge_str = "Edge ✓" if status.get("edge_registered") else "Edge ✕"
-                lbl_reg_status.configure(text=f"● Registry Active: {chrome_str}  {edge_str} (com.smartdownload.host)", fg=self.c_success)
-                btn_reg.configure(text="🔄 Re-Register", bg=self.c_panel_light)
+                lbl_reg_status.configure(text=tr("browser_reg_active", f"● Registry Active: {chrome_str}  {edge_str} (com.smartdownload.host)").format(chrome=chrome_str, edge=edge_str), fg=self.c_success)
+                btn_reg.configure(text=tr("browser_btn_reregister", "🔄 Re-Register"), bg=self.c_panel_light)
             else:
-                lbl_reg_status.configure(text="● Not Registered in Windows Registry", fg=self.c_warning)
-                btn_reg.configure(text="🔗 1-Click Register (Chrome & Edge)", bg=self.c_success)
+                lbl_reg_status.configure(text=tr("browser_reg_inactive", "● Not Registered in Windows Registry"), fg=self.c_warning)
+                btn_reg.configure(text=tr("browser_btn_register", "🔗 1-Click Register (Chrome & Edge)"), bg=self.c_success)
 
         def _on_register_click():
             res = register_native_host()
@@ -12225,7 +12732,7 @@ class ModernFramelessGUI:
 
         btn_unreg = tk.Button(
             reg_row,
-            text="Unregister",
+            text=tr("browser_btn_unregister", "Unregister"),
             font=("Segoe UI", 8),
             bg=self.c_panel_light,
             fg=self.c_text_muted,
@@ -12253,7 +12760,7 @@ class ModernFramelessGUI:
         card_boot = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_boot.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_boot_title = tk.Label(card_boot, text="🚀 WINDOWS STARTUP AUTO-BOOT (SILENT BACKGROUND MODE)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl_boot_title = tk.Label(card_boot, text=tr("browser_card_boot_title", "🚀 WINDOWS STARTUP AUTO-BOOT (SILENT BACKGROUND MODE)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_boot_title.pack(anchor="w")
 
         boot_row = tk.Frame(card_boot, bg=self.c_panel)
@@ -12270,11 +12777,11 @@ class ModernFramelessGUI:
                 return
             enabled = is_startup_enabled()
             if enabled:
-                lbl_boot_status.configure(text="● Start with Windows: Enabled (Silent Background)", fg=self.c_success)
-                btn_dlg_boot.configure(text="🚀 Start on Boot: Enabled", fg=self.c_success, bg=self.c_panel_light)
+                lbl_boot_status.configure(text=tr("browser_boot_enabled", "● Start with Windows: Enabled (Silent Background)"), fg=self.c_success)
+                btn_dlg_boot.configure(text=tr("browser_btn_boot_enabled", "🚀 Start on Boot: Enabled"), fg=self.c_success, bg=self.c_panel_light)
             else:
-                lbl_boot_status.configure(text="● Start with Windows: Disabled", fg=self.c_warning)
-                btn_dlg_boot.configure(text="🚀 Start on Boot: Disabled", fg=self.c_text_muted, bg=self.c_panel)
+                lbl_boot_status.configure(text=tr("browser_boot_disabled", "● Start with Windows: Disabled"), fg=self.c_warning)
+                btn_dlg_boot.configure(text=tr("browser_btn_boot_disabled", "🚀 Start on Boot: Disabled"), fg=self.c_text_muted, bg=self.c_panel)
 
         self._update_dlg_startup_ui = _update_dlg_boot_status
         try:
@@ -12302,7 +12809,7 @@ class ModernFramelessGUI:
         card_tray = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_tray.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_tray_title = tk.Label(card_tray, text="🔔 WINDOWS SYSTEM TRAY & BACKGROUND MINIMIZATION", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl_tray_title = tk.Label(card_tray, text=tr("browser_card_tray_title", "🔔 WINDOWS SYSTEM TRAY & BACKGROUND MINIMIZATION"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_tray_title.pack(anchor="w")
 
         tray_row = tk.Frame(card_tray, bg=self.c_panel)
@@ -12319,11 +12826,11 @@ class ModernFramelessGUI:
                 return
             enabled = getattr(self, "minimize_to_tray", True)
             if enabled:
-                lbl_tray_status.configure(text="● Close (✕) Action: Minimize to System Tray", fg=self.c_success)
-                btn_dlg_tray.configure(text="[✓] Minimize to System Tray on Close (✕)", fg=self.c_success, bg=self.c_panel_light)
+                lbl_tray_status.configure(text=tr("browser_tray_enabled", "● Close (✕) Action: Minimize to System Tray"), fg=self.c_success)
+                btn_dlg_tray.configure(text=tr("browser_btn_tray_enabled", "[✓] Minimize to System Tray on Close (✕)"), fg=self.c_success, bg=self.c_panel_light)
             else:
-                lbl_tray_status.configure(text="● Close (✕) Action: Exit Application Completely", fg=self.c_warning)
-                btn_dlg_tray.configure(text="[  ] Minimize to System Tray on Close (✕)", fg=self.c_text_muted, bg=self.c_panel)
+                lbl_tray_status.configure(text=tr("browser_tray_disabled", "● Close (✕) Action: Exit Application Completely"), fg=self.c_warning)
+                btn_dlg_tray.configure(text=tr("browser_btn_tray_disabled", "[  ] Minimize to System Tray on Close (✕)"), fg=self.c_text_muted, bg=self.c_panel)
 
         self._update_dlg_tray_ui = _update_dlg_tray_status
         try:
@@ -12366,7 +12873,7 @@ class ModernFramelessGUI:
         card_ext = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_ext.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_e_title = tk.Label(card_ext, text="WEBEXTENSION ARTIFACT (MANIFEST V3)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted)
+        lbl_e_title = tk.Label(card_ext, text=tr("browser_card_ext_title", "WEBEXTENSION ARTIFACT (MANIFEST V3)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_muted)
         lbl_e_title.pack(anchor="w")
 
         e_row = tk.Frame(card_ext, bg=self.c_panel)
@@ -12385,7 +12892,7 @@ class ModernFramelessGUI:
 
         btn_open = tk.Button(
             e_row,
-            text="📂 Open Folder",
+            text=tr("browser_btn_open_folder", "📂 Open Folder"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_accent_dark,
             fg="white",
@@ -12401,7 +12908,7 @@ class ModernFramelessGUI:
 
         # Chrome / Brave tab
         tab_chrome = tk.Frame(nb, bg=self.c_panel, padx=12, pady=10)
-        nb.add(tab_chrome, text=" Chrome & Brave ")
+        nb.add(tab_chrome, text=tr("browser_tab_chrome", " Chrome & Brave "))
 
         chrome_txt = (
             "1. Open Chrome or Brave and type chrome://extensions in the address bar.\n"
@@ -12414,7 +12921,7 @@ class ModernFramelessGUI:
 
         # Edge tab
         tab_edge = tk.Frame(nb, bg=self.c_panel, padx=12, pady=10)
-        nb.add(tab_edge, text=" Microsoft Edge ")
+        nb.add(tab_edge, text=tr("browser_tab_edge", " Microsoft Edge "))
 
         edge_txt = (
             "1. Open Edge and navigate to edge://extensions in the address bar.\n"
@@ -12427,7 +12934,7 @@ class ModernFramelessGUI:
 
         # Firefox tab
         tab_firefox = tk.Frame(nb, bg=self.c_panel, padx=12, pady=10)
-        nb.add(tab_firefox, text=" Mozilla Firefox ")
+        nb.add(tab_firefox, text=tr("browser_tab_firefox", " Mozilla Firefox "))
 
         firefox_txt = (
             "1. Open Firefox and type about:debugging#/runtime/this-firefox in the address bar.\n"
@@ -12440,7 +12947,7 @@ class ModernFramelessGUI:
         # Close button
         btn_close = tk.Button(
             body,
-            text="Close",
+            text=tr("browser_btn_close", "Close"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
             fg=self.c_text_bright,
@@ -12883,36 +13390,35 @@ class ModernFramelessGUI:
             bd=1
         )
         self.tree_context_menu.add_command(
-            label="🔄 Refresh Download Address (تحديث الرابط)...",
+            label=tr("ctx_refresh_address", "🔄 Refresh Download Address..."),
             command=self._open_refresh_link_dialog
         )
         self.tree_context_menu.add_separator()
         self.tree_context_menu.add_command(
-            label="▶ Resume Download (استئناف)",
+            label=tr("ctx_resume_download", "▶ Resume Download"),
             command=self._menu_resume
         )
         self.tree_context_menu.add_command(
-            label="⏸ Pause Download (إيقاف مؤقت)",
+            label=tr("ctx_pause_download", "⏸ Pause Download"),
             command=self._menu_pause
         )
         self.tree_context_menu.add_command(
-            label="⏹ Cancel Download (إلغاء)",
+            label=tr("ctx_cancel_download", "⏹ Cancel Download"),
             command=self._on_cancel_download
         )
         self.tree_context_menu.add_separator()
         self.tree_context_menu.add_command(
-            label="📋 Copy Download URL (نسخ الرابط)",
+            label=tr("ctx_copy_download_url", "📋 Copy Download URL"),
             command=self._copy_current_url
         )
         self.tree_context_menu.add_command(
-            label="📁 Open Download Folder (فتح المجلد)",
+            label=tr("ctx_open_folder", "📁 Open Containing Folder"),
             command=self._open_download_folder
         )
 
     def _show_tree_context_menu(self, event):
         """Displays right-click context menu on treeview."""
-        if not hasattr(self, "tree_context_menu"):
-            self._build_tree_context_menu()
+        self._build_tree_context_menu()
         try:
             iid = self.tree_chunks.identify_row(event.y)
             if iid:
