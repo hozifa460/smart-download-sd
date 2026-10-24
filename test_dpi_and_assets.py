@@ -73,7 +73,11 @@ class TestDPIAndAssets(unittest.TestCase):
             self.assertGreaterEqual(int(gui.canvas_prog.cget("height")), 22)
             self.assertGreaterEqual(int(gui.canvas_chunks.cget("height")), 30)
         finally:
-            gui._on_close()
+            gui._cleanup_resources()
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
     def test_safe_modal_dpi_scaling(self):
         """Verify SafeModalDialog dimensions scale with DPI."""
@@ -142,7 +146,11 @@ class TestDPIAndAssets(unittest.TestCase):
             self.assertGreaterEqual(top.winfo_height(), 450)
             top.destroy()
         finally:
-            gui._on_close()
+            gui._cleanup_resources()
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
     def test_treeview_column_scaling_and_typography(self):
         """Verify treeview columns scale with dpi_scale."""
@@ -154,7 +162,11 @@ class TestDPIAndAssets(unittest.TestCase):
             self.assertEqual(actual_w, expected_range_w)
             self.assertEqual(gui.txt_log.cget("font"), "Consolas 9")
         finally:
-            gui._on_close()
+            gui._cleanup_resources()
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
     def test_throttle_slider_scaling(self):
         """Verify dynamic slider length and width scale with DPI."""
@@ -166,7 +178,11 @@ class TestDPIAndAssets(unittest.TestCase):
             self.assertEqual(int(gui.slider_speed.cget("sliderlength")), expected_len)
             self.assertEqual(int(gui.slider_speed.cget("width")), expected_w)
         finally:
-            gui._on_close()
+            gui._cleanup_resources()
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
     def test_resource_cleanup_on_destroy_event(self):
         """Verify destroying root directly automatically triggers _cleanup_resources and closes bridge server."""
