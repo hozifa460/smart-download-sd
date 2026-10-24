@@ -16,9 +16,11 @@ RELEASE_BODY = r"""# Smart Download (SD) v2.0.0 — Multi-Platform Social Media 
 ---
 
 ### 🌟 English Highlights
-Smart Download (SD) v2.0.0 introduces a major rebrand and architectural upgrade from the legacy Turbo Download Manager Pro. It brings full-featured video downloading from leading social media platforms, a modern high-DPI frameless UI, and a streamlined Windows installer.
+Smart Download (SD) v2.0.0 introduces a major rebrand and architectural upgrade from the legacy Turbo Download Manager Pro. It brings full-featured video downloading from leading social media platforms, a modern high-DPI frameless UI, bilingual localization, and a streamlined Windows installer.
 
 - **Multi-Platform Social Media Downloader**: Effortlessly download high-definition videos and audio from **YouTube, TikTok, Instagram, Facebook, X (formerly Twitter), and Reddit**.
+- **Bilingual Localization & Language Switcher (`🌐 العربية / English`)**: One-click dynamic language toggle between Arabic and English directly on the title bar, with complete bilingual translations, right-to-left layout adaptation, and persistent language preference.
+- **Multiple Download Links Detection Modal**: Intelligent extraction and presentation of multiple download candidates from web pages with interactive multi-selection, master select-all controls, file-type filtering badges, and batch download queuing.
 - **Transparent High-DPI Modern Icon**: Brand new pixel-perfect transparent application icon with full multi-resolution Windows support (16x16 up to 256x256).
 - **Optimized Ultra-Compact Installer**: Optimized payload bundling reduces setup installer file size by over 43% (~56 MB down from ~105 MB).
 - **High-Performance Multi-Segment Engine**: Lightning-fast parallel chunk downloads with dynamic midpoint splitting, rate limiting, and auto-reassembly.
@@ -36,6 +38,8 @@ Smart Download (SD) v2.0.0 introduces a major rebrand and architectural upgrade 
 يمثل الإصدار **Smart Download (SD) v2.0.0** نقلة نوعية وتطويراً شاملاً للهوية والأداء:
 
 - **تحميل الفيديوهات من كافة منصات التواصل الاجتماعي**: دعم التحميل بأعلى جودة وصيغ متعددة من **تيك توك (TikTok)، إنستغرام (Instagram)، فيسبوك (Facebook)، إكس / تويتر (X/Twitter)، ريديت (Reddit)، ويوتيوب (YouTube)**.
+- **تعريب ثنائي اللغة متكامل ومفتاح تبديل فوري (`🌐 العربية / English`)**: زر تبديل ديناميكي فوري بين اللغتين العربية والإنجليزية في شريط العنوان مع تعريب شامل لكافة عناصر الواجهة ودعم اتجاه النصوص وحفظ اللغة المفضلة تلقائياً.
+- **نافذة ذكية لاكتشاف روابط التحميل المتعددة (Multiple Candidates Modal)**: استخراج ذكي لكافة روابط الملفات والوسائط القابلة للتحميل من صفحات الويب، مع إمكانية التحديد المتعدد، واختيار الكل، وفلترة الأنواع، وبدء التحميل الدفعي فوراً.
 - **تحديث ذاتي تلقائي لمحرك `yt-dlp` والبرنامج**: تحديث استخراج الفيديوهات تلقائياً في الخلفية مع نظام فحص وتحديث البرنامج بضغطة زر واحدة.
 - **أيقونة شفافة فائقة الدقة (High-DPI)**: تصميم احترافي حديث بخلفية شفافة يدعم كافة شاشات العرض بدقة كاملة من 16×16 وحتى 256×256 بكسل.
 - **مُثبّت فائق الرشاقة وصغير الحجم**: تقليل حجم ملف التثبيت بنسبة تفوق 43% (من ~105 ميجابايت إلى ~56 ميجابايت) عبر إزالة التكرار وربط التوافق ديناميكياً.

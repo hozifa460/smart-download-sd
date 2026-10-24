@@ -7516,6 +7516,13 @@ class MultipleCandidatesModal(tk.Toplevel):
                 pass
         self.destroy()
 
+    def destroy(self):
+        try:
+            self.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
+        super().destroy()
+
     def grab_set(self):
         pass
 
