@@ -5,6 +5,7 @@ subtitle soft-embedding via FFmpeg, and UI selector helpers.
 import os
 import re
 import sys
+import html
 import subprocess
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
@@ -12,6 +13,7 @@ try:
     import requests
 except ImportError:
     requests = None
+import urllib.request
 
 try:
     import tkinter as tk
@@ -36,34 +38,20 @@ except Exception:
 IS_WINDOWS = sys.platform.startswith("win")
 
 LANG_NAMES: Dict[str, Tuple[str, str]] = {
-    "en": ("English", "الإنجليزية"),
-    "ar": ("Arabic", "العربية"),
-    "es": ("Spanish", "الإسبانية"),
-    "fr": ("French", "الفرنسية"),
-    "de": ("German", "الألمانية"),
-    "it": ("Italian", "الإيطالية"),
-    "pt": ("Portuguese", "البرتغالية"),
-    "ru": ("Russian", "الروسية"),
-    "ja": ("Japanese", "اليابانية"),
-    "ko": ("Korean", "الكورية"),
-    "zh": ("Chinese", "الصينية"),
-    "zh-hans": ("Chinese (Simplified)", "الصينية المبسطة"),
-    "zh-hant": ("Chinese (Traditional)", "الصينية التقليدية"),
-    "hi": ("Hindi", "الهندية"),
-    "tr": ("Turkish", "التركية"),
-    "id": ("Indonesian", "الإندونيسية"),
-    "nl": ("Dutch", "الهولندية"),
-    "pl": ("Polish", "البولندية"),
-    "vi": ("Vietnamese", "الفيتنامية"),
-    "th": ("Thai", "التايلاندية"),
+    "en": ("English", "الإنجليزية"), "ar": ("Arabic", "العربية"), "es": ("Spanish", "الإسبانية"),
+    "fr": ("French", "الفرنسية"), "de": ("German", "الألمانية"), "it": ("Italian", "الإيطالية"),
+    "pt": ("Portuguese", "البرتغالية"), "ru": ("Russian", "الروسية"), "ja": ("Japanese", "اليابانية"),
+    "ko": ("Korean", "الكورية"), "zh": ("Chinese", "الصينية"), "zh-hans": ("Chinese (Simplified)", "الصينية المبسطة"),
+    "zh-hant": ("Chinese (Traditional)", "الصينية التقليدية"), "hi": ("Hindi", "الهندية"),
+    "tr": ("Turkish", "التركية"), "id": ("Indonesian", "الإندونيسية"), "nl": ("Dutch", "الهولندية"),
+    "pl": ("Polish", "البولندية"), "vi": ("Vietnamese", "الفيتنامية"), "th": ("Thai", "التايلاندية"),
 }
 
 ISO_639_2: Dict[str, str] = {
-    "en": "eng", "ar": "ara", "es": "spa", "fr": "fra", "de": "deu",
-    "it": "ita", "pt": "por", "ru": "rus", "ja": "jpn", "ko": "kor",
-    "zh": "chi", "zh-hans": "chi", "zh-hant": "chi", "hi": "hin",
-    "tr": "tur", "id": "ind", "nl": "nld", "pl": "pol", "vi": "vie",
-    "th": "tha", "sv": "swe", "no": "nor", "da": "dan", "fi": "fin",
+    "en": "eng", "ar": "ara", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", "pt": "por",
+    "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi", "zh-hans": "chi", "zh-hant": "chi",
+    "hi": "hin", "tr": "tur", "id": "ind", "nl": "nld", "pl": "pol", "vi": "vie", "th": "tha",
+    "sv": "swe", "no": "nor", "da": "dan", "fi": "fin",
 }
 
 POPULAR_AUTO_LANGS = (
@@ -72,10 +60,7 @@ POPULAR_AUTO_LANGS = (
 
 
 def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Inspects yt-dlp formats dictionary for audio-only streams and groups them by language/dub.
-    Returns sorted list: Original/Default first, then English (en), Arabic (ar), then others alphabetically.
-    """
+    """Groups audio-only formats by language/dub: Original first, then en, ar, others."""
     formats = info.get("formats", []) or []
     audio_formats = [
         f for f in formats
@@ -86,45 +71,39 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not audio_formats:
         return []
 
+    orig_lang = None
+    for f in audio_formats:
+        fn = str(f.get("format_note") or "").lower()
+        lang = str(f.get("language") or "").strip().lower()
+        if "original" in fn or "default" in fn or f.get("language_preference", -1) >= 0:
+            if lang:
+                orig_lang = lang
+                break
+    if not orig_lang:
+        top_lang = str(info.get("language") or "").strip().lower()
+        orig_lang = top_lang or str(audio_formats[0].get("language") or "").strip().lower()
+
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for f in audio_formats:
         lang = str(f.get("language") or "").strip().lower()
         fn = str(f.get("format_note") or "").strip().lower()
         is_orig = (
-            "original" in fn
-            or "default" in fn
+            "original" in fn or "default" in fn
             or f.get("language_preference", -1) >= 0
-            or (f.get("preference", -1) >= 0 and not lang)
+            or (orig_lang and lang == orig_lang) or (not lang and not orig_lang)
         )
-        if is_orig:
-            key = "original"
-        elif lang:
-            key = lang
-        else:
-            matched = "und"
-            for code in LANG_NAMES:
-                if code in fn:
-                    matched = code
-                    break
-            key = matched
+        key = "original" if is_orig else (lang or next((c for c in LANG_NAMES if c in fn), "und"))
         groups.setdefault(key, []).append(f)
 
     if "original" not in groups and groups:
-        first_key = list(groups.keys())[0]
-        groups["original"] = groups.pop(first_key)
-
-    def _audio_quality_key(f: Dict[str, Any]) -> Tuple[int, float]:
-        ext = str(f.get("ext") or "").lower()
-        is_m4a = 1 if ext == "m4a" else 0
-        bitrate = float(f.get("abr") or f.get("tbr") or 0.0)
-        return (is_m4a, bitrate)
+        groups["original"] = groups.pop(next(iter(groups.keys())))
 
     result: List[Dict[str, Any]] = []
     for key, flist in groups.items():
-        best_f = max(flist, key=_audio_quality_key)
+        best_f = max(flist, key=lambda f: (1 if str(f.get("ext") or "").lower() == "m4a" else 0, float(f.get("abr") or f.get("tbr") or 0.0)))
         abr = float(best_f.get("abr") or best_f.get("tbr") or 0.0)
-        lang_code = str(best_f.get("language") or (key if key != "original" else "und")).lower()
         is_orig = (key == "original")
+        lang_code = str(best_f.get("language") or (orig_lang if is_orig and orig_lang else key)).lower()
 
         if is_orig:
             label = "Original (Default)"
@@ -139,28 +118,18 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
             label = f"{lang_code.upper()} - {int(abr)}kbps" if abr > 0 else lang_code.upper()
 
         result.append({
-            "track_id": key,
-            "language": lang_code,
-            "label": label,
-            "format_id": str(best_f.get("format_id") or ""),
-            "url": str(best_f.get("url") or ""),
-            "ext": str(best_f.get("ext") or "m4a"),
-            "acodec": str(best_f.get("acodec") or ""),
-            "abr": abr,
-            "filesize": best_f.get("filesize") or best_f.get("filesize_approx"),
-            "is_original": is_orig,
-            "http_headers": dict(best_f.get("http_headers") or {}),
+            "track_id": key, "language": lang_code, "label": label,
+            "format_id": str(best_f.get("format_id") or ""), "url": str(best_f.get("url") or ""),
+            "ext": str(best_f.get("ext") or "m4a"), "acodec": str(best_f.get("acodec") or ""),
+            "abr": abr, "filesize": best_f.get("filesize") or best_f.get("filesize_approx"),
+            "is_original": is_orig, "http_headers": dict(best_f.get("http_headers") or {}),
         })
 
     def _sort_key(t: Dict[str, Any]) -> Tuple[int, str]:
-        if t["is_original"] or t["track_id"] == "original":
-            return (0, "")
-        lang = t["language"]
-        if lang == "en":
-            return (1, "")
-        if lang == "ar":
-            return (2, "")
-        return (3, lang)
+        if t["is_original"] or t["track_id"] == "original": return (0, "")
+        if t["language"] == "en": return (1, "")
+        if t["language"] == "ar": return (2, "")
+        return (3, t["language"])
 
     return sorted(result, key=_sort_key)
 
@@ -172,105 +141,54 @@ def _pick_best_sub_url(sub_formats: List[Dict[str, Any]]) -> Optional[Tuple[str,
     if not candidates:
         return None
     best = max(candidates, key=lambda f: order.get(str(f.get("ext") or "").lower(), 0))
-    ext = str(best.get("ext") or "vtt").lower()
-    return best["url"], ext
+    return best["url"], str(best.get("ext") or "vtt").lower()
 
 
 def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Extracts manual and auto-translated subtitle tracks from yt-dlp info.
-    Returns list starting with None, then English, Arabic, manual tracks, then auto-captions.
-    """
+    """Extracts manual and auto-translated subtitle tracks: None first, en, ar, manual, auto."""
     tracks: List[Dict[str, Any]] = [{
-        "sub_id": "none",
-        "language": "none",
-        "label": "None / بدون ترجمة",
-        "url": "",
-        "ext": "",
-        "is_auto": False,
+        "sub_id": "none", "language": "none", "label": "None / بدون ترجمة",
+        "url": "", "ext": "", "is_auto": False,
     }]
-
     manual_subs = info.get("subtitles") or {}
     auto_subs = info.get("automatic_captions") or {}
 
-    for lang, flist in manual_subs.items():
-        res = _pick_best_sub_url(flist)
-        if not res:
-            continue
-        url, ext = res
-        lang_norm = lang.lower()
-        if lang_norm == "ar":
-            label = "العربية (Official)"
-        elif lang_norm == "en":
-            label = "English (Official)"
-        elif lang_norm in LANG_NAMES:
-            label = f"{LANG_NAMES[lang_norm][0]} (Official)"
-        else:
-            label = f"{lang.upper()} (Official)"
-
-        tracks.append({
-            "sub_id": lang,
-            "language": lang,
-            "label": label,
-            "url": url,
-            "ext": ext,
-            "is_auto": False,
-        })
-
-    for lang, flist in auto_subs.items():
-        lang_norm = lang.lower()
-        if lang_norm not in POPULAR_AUTO_LANGS and lang not in manual_subs:
-            continue
-        res = _pick_best_sub_url(flist)
-        if not res:
-            continue
-        url, ext = res
-        if lang_norm == "ar":
-            label = "العربية (ترجمة تلقائية)"
-        elif lang_norm == "en":
-            label = "English (Auto-Translated)"
-        elif lang_norm in LANG_NAMES:
-            label = f"{LANG_NAMES[lang_norm][0]} (Auto-Translated)"
-        else:
-            label = f"{lang.upper()} (Auto-Translated)"
-
-        tracks.append({
-            "sub_id": f"{lang}-auto",
-            "language": lang,
-            "label": label,
-            "url": url,
-            "ext": ext,
-            "is_auto": True,
-        })
+    for is_auto, sub_dict in ((False, manual_subs), (True, auto_subs)):
+        for lang, flist in sub_dict.items():
+            lang_norm = lang.lower()
+            if is_auto and lang_norm not in POPULAR_AUTO_LANGS and lang not in manual_subs:
+                continue
+            res = _pick_best_sub_url(flist)
+            if not res:
+                continue
+            url, ext = res
+            if is_auto:
+                suffix = "ترجمة تلقائية" if lang_norm == "ar" else "Auto-Translated"
+            else:
+                suffix = "Official"
+            name = "العربية" if lang_norm == "ar" else ("English" if lang_norm == "en" else LANG_NAMES.get(lang_norm, (lang.upper(), ""))[0])
+            label = f"{name} ({suffix})" if lang_norm != "ar" or not is_auto else f"العربية ({suffix})"
+            tracks.append({
+                "sub_id": f"{lang}-auto" if is_auto else lang,
+                "language": lang, "label": label, "url": url, "ext": ext, "is_auto": is_auto,
+            })
 
     def _sub_sort_key(t: Dict[str, Any]) -> Tuple[int, int, str]:
-        if t["sub_id"] == "none":
-            return (0, 0, "")
+        if t["sub_id"] == "none": return (0, 0, "")
         lang = t["language"].lower()
-        rank = 2 if t["is_auto"] else 1
-        if lang == "en":
-            sub_order = 0
-        elif lang == "ar":
-            sub_order = 1
-        else:
-            sub_order = 2
-        return (rank, sub_order, lang)
+        sub_order = 0 if lang == "en" else (1 if lang == "ar" else 2)
+        return (2 if t["is_auto"] else 1, sub_order, lang)
 
     return sorted(tracks, key=_sub_sort_key)
 
 
 def _format_srt_timestamp(ts: str) -> str:
     """Converts MM:SS.mmm or HH:MM:SS.mmm into standard SRT HH:MM:SS,mmm."""
-    ts = ts.strip()
-    parts = ts.split(":")
+    parts = ts.strip().split(":")
     if len(parts) == 2:
-        h = "00"
-        m = parts[0].zfill(2)
-        s = parts[1]
+        h, m, s = "00", parts[0].zfill(2), parts[1]
     elif len(parts) == 3:
-        h = parts[0].zfill(2)
-        m = parts[1].zfill(2)
-        s = parts[2]
+        h, m, s = parts[0].zfill(2), parts[1].zfill(2), parts[2]
     else:
         return ts
     if "." in s:
@@ -285,20 +203,18 @@ def convert_vtt_to_srt(vtt_text: str) -> str:
     srt_cues: List[str] = []
     cue_index = 1
     timestamp_pat = re.compile(
-        r'((?:\d{1,2}:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((?:\d{1,2}:)?\d{2}:\d{2}\.\d{3})'
+        r'((?:\d+:)?\d{1,2}:\d{2}\.\d+)\s*-->\s*((?:\d+:)?\d{1,2}:\d{2}\.\d+)'
     )
 
     for block in blocks:
         lines = [line.strip() for line in block.splitlines() if line.strip()]
         if not lines:
             continue
-        ts_line_idx = -1
-        ts_match = None
+        ts_line_idx, ts_match = -1, None
         for idx, line in enumerate(lines):
             m = timestamp_pat.search(line)
             if m:
-                ts_line_idx = idx
-                ts_match = m
+                ts_line_idx, ts_match = idx, m
                 break
         if ts_line_idx == -1 or not ts_match:
             continue
@@ -308,7 +224,7 @@ def convert_vtt_to_srt(vtt_text: str) -> str:
         srt_timing = f"{start_ts} --> {end_ts}"
 
         cue_lines = lines[ts_line_idx + 1:]
-        cleaned = [re.sub(r'<[^>]+>', '', cl).strip() for cl in cue_lines]
+        cleaned = [html.unescape(re.sub(r'<[^>]+>', '', cl)).strip() for cl in cue_lines]
         valid_lines = [l for l in cleaned if l]
         if not valid_lines:
             continue
@@ -320,30 +236,31 @@ def convert_vtt_to_srt(vtt_text: str) -> str:
 
 
 def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> Optional[str]:
-    """
-    Downloads subtitle from sub_track URL, converts to standard .srt format if WebVTT,
-    and saves alongside video as <video_stem>.<language>.srt in UTF-8-SIG encoding.
-    """
+    """Downloads subtitle, converts VTT to SRT, and saves alongside video in UTF-8-SIG."""
     if not sub_track or sub_track.get("sub_id") in (None, "none") or not sub_track.get("url"):
         return None
-    if requests is None:
-        return None
-    try:
-        resp = requests.get(sub_track["url"], timeout=15)
-        if resp.status_code != 200:
+    url = sub_track["url"]
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"}
+    raw_text = None
+    if requests is not None:
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                raw_text = resp.content.decode("utf-8", errors="replace")
+        except Exception:
+            raw_text = None
+    if raw_text is None:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw_text = resp.read().decode("utf-8", errors="replace")
+        except Exception:
             return None
-        raw_text = resp.content.decode("utf-8", errors="replace")
 
-        ext = str(sub_track.get("ext") or "").lower()
-        if ext == "vtt" or "WEBVTT" in raw_text[:120]:
-            srt_content = convert_vtt_to_srt(raw_text)
-        else:
-            srt_content = raw_text
-
-        stem = os.path.splitext(video_filepath)[0]
-        lang = sub_track.get("language") or "sub"
-        srt_path = f"{stem}.{lang}.srt"
-
+    ext = str(sub_track.get("ext") or "").lower()
+    srt_content = convert_vtt_to_srt(raw_text) if (ext == "vtt" or "WEBVTT" in raw_text[:120]) else raw_text
+    srt_path = f"{os.path.splitext(video_filepath)[0]}.{sub_track.get('language') or 'sub'}.srt"
+    try:
         with open(srt_path, "w", encoding="utf-8-sig") as f:
             f.write(srt_content)
         return srt_path
@@ -352,110 +269,76 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
 
 
 def embed_subtitle_into_mp4(
-    video_path: str,
-    srt_path: str,
-    lang_code: str,
-    ffmpeg_path: str,
+    video_path: str, srt_path: str, lang_code: str, ffmpeg_path: str,
     on_log: Optional[Callable[[str], None]] = None
 ) -> bool:
     """Muxes .srt into MP4 as soft subtitle stream via FFmpeg, atomically replacing video file."""
     if not ffmpeg_path or not video_path.lower().endswith(".mp4") or not os.path.isfile(srt_path):
         return False
-    iso3 = ISO_639_2.get(lang_code.lower(), lang_code[:3] if len(lang_code) >= 3 else "und")
+    norm_lang = str(lang_code or "und").strip().lower()
+    base_lang = norm_lang.split("-")[0].split("_")[0]
+    iso3 = ISO_639_2.get(norm_lang) or ISO_639_2.get(base_lang) or (base_lang if len(base_lang) == 3 and base_lang.isalpha() else "und")
     temp_mp4 = video_path + ".submux.tmp"
     cmd = [
-        ffmpeg_path,
-        "-y",
-        "-i", video_path,
-        "-i", srt_path,
-        "-c", "copy",
-        "-c:s", "mov_text",
-        "-metadata:s:s:0", f"language={iso3}",
-        temp_mp4
+        ffmpeg_path, "-y", "-i", video_path, "-i", srt_path,
+        "-map", "0", "-map", "1:0", "-c", "copy", "-c:s", "mov_text",
+        "-metadata:s:s:0", f"language={iso3}", temp_mp4
     ]
     try:
         cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=cflags)
         if res.returncode == 0 and os.path.isfile(temp_mp4) and os.path.getsize(temp_mp4) > 0:
             os.replace(temp_mp4, video_path)
-            if on_log:
-                on_log(f"[SUBTITLES] Successfully embedded soft subtitle ({iso3}) into MP4 container.")
+            if on_log: on_log(f"[SUBTITLES] Successfully embedded soft subtitle ({iso3}) into MP4 container.")
             return True
         if os.path.exists(temp_mp4):
-            try:
-                os.remove(temp_mp4)
-            except Exception:
-                pass
+            try: os.remove(temp_mp4)
+            except Exception: pass
         return False
     except Exception as exc:
-        if on_log:
-            on_log(f"[SUBTITLES] FFmpeg soft-muxing skipped: {exc}")
+        if on_log: on_log(f"[SUBTITLES] FFmpeg soft-muxing skipped: {exc}")
         if os.path.exists(temp_mp4):
-            try:
-                os.remove(temp_mp4)
-            except Exception:
-                pass
+            try: os.remove(temp_mp4)
+            except Exception: pass
         return False
 
 
 def handle_subtitles_post_download(
-    stream_info: Any,
-    output_path: str,
-    on_log: Optional[Callable[[str], None]] = None
+    stream_info: Any, output_path: str, on_log: Optional[Callable[[str], None]] = None
 ) -> None:
     """Post-download pipeline: downloads chosen subtitle track and soft-muxes into MP4 if available."""
     sub = getattr(stream_info, "subtitle_track", None)
     if not sub or sub.get("sub_id") in (None, "none") or not sub.get("url"):
         return
     try:
-        if on_log:
-            on_log(f"[SUBTITLES] Downloading subtitle track: {sub.get('label', sub.get('language', 'sub'))}...")
+        if on_log: on_log(f"[SUBTITLES] Downloading subtitle track: {sub.get('label', sub.get('language', 'sub'))}...")
         srt_path = download_subtitle_as_srt(sub, output_path)
         if srt_path and os.path.isfile(srt_path):
-            if on_log:
-                on_log(f"[SUBTITLES] Saved subtitle to {os.path.basename(srt_path)}")
+            if on_log: on_log(f"[SUBTITLES] Saved subtitle to {os.path.basename(srt_path)}")
             ffmpeg_bin = find_ffmpeg_bin()
             if ffmpeg_bin and output_path.lower().endswith(".mp4"):
-                embed_subtitle_into_mp4(
-                    output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log
-                )
+                embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log)
     except Exception as exc:
-        if on_log:
-            on_log(f"[SUBTITLES] Warning: Subtitle handling encountered an issue: {exc}")
+        if on_log: on_log(f"[SUBTITLES] Warning: Subtitle handling encountered an issue: {exc}")
 
 
 def build_audio_subtitle_row(
-    parent_frame: Any,
-    theme: Dict[str, str],
-    audio_tracks: List[Dict[str, Any]],
-    subtitle_tracks: List[Dict[str, Any]]
+    parent_frame: Any, theme: Dict[str, str],
+    audio_tracks: List[Dict[str, Any]], subtitle_tracks: List[Dict[str, Any]]
 ) -> Tuple[Optional[Any], Optional[Any]]:
     """Renders compact themed Audio Track and Subtitles selectors for QualitySelectionModal."""
     if tk is None or ttk is None or (not audio_tracks and not subtitle_tracks):
         return None, None
-
-    c_panel = theme.get("c_panel", "#1e293b")
-    c_border = theme.get("c_border", "#475569")
-    c_text_bright = theme.get("c_text_bright", "#f8fafc")
-
-    card_tracks = tk.Frame(parent_frame, bg=c_panel, padx=10, pady=6, highlightbackground=c_border, highlightthickness=1)
-    card_tracks.pack(fill=tk.X, pady=(0, 10))
-
-    cb_audio: Optional[ttk.Combobox] = None
-    cb_sub: Optional[ttk.Combobox] = None
-
+    c_panel, c_border, c_text_bright = theme.get("c_panel", "#1e293b"), theme.get("c_border", "#475569"), theme.get("c_text_bright", "#f8fafc")
+    card = tk.Frame(parent_frame, bg=c_panel, padx=10, pady=6, highlightbackground=c_border, highlightthickness=1)
+    card.pack(fill=tk.X, pady=(0, 10))
+    cb_audio, cb_sub = None, None
     if audio_tracks:
-        lbl_a = tk.Label(card_tracks, text=tr("lbl_audio_track", "🎙️ Audio / Dubbing:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright)
-        lbl_a.pack(side=tk.LEFT, padx=(0, 4))
-        cb_audio = ttk.Combobox(card_tracks, values=[t.get("label", "") for t in audio_tracks], state="readonly", font=("Segoe UI", 8), width=24)
-        cb_audio.current(0)
-        cb_audio.pack(side=tk.LEFT, padx=(0, 12))
-
+        tk.Label(card, text=tr("lbl_audio_track", "🎙️ Audio / Dubbing:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 4))
+        cb_audio = ttk.Combobox(card, values=[t.get("label", "") for t in audio_tracks], state="readonly", font=("Segoe UI", 8), width=24)
+        cb_audio.current(0); cb_audio.pack(side=tk.LEFT, padx=(0, 12))
     if subtitle_tracks:
-        lbl_s = tk.Label(card_tracks, text=tr("lbl_subtitle_track", "💬 Subtitles:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright)
-        lbl_s.pack(side=tk.LEFT, padx=(0, 4))
-        cb_sub = ttk.Combobox(card_tracks, values=[s.get("label", "") for s in subtitle_tracks], state="readonly", font=("Segoe UI", 8), width=22)
-        cb_sub.current(0)
-        cb_sub.pack(side=tk.LEFT)
-
+        tk.Label(card, text=tr("lbl_subtitle_track", "💬 Subtitles:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 4))
+        cb_sub = ttk.Combobox(card, values=[s.get("label", "") for s in subtitle_tracks], state="readonly", font=("Segoe UI", 8), width=22)
+        cb_sub.current(0); cb_sub.pack(side=tk.LEFT)
     return cb_audio, cb_sub

@@ -385,12 +385,14 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         if on_log:
             on_log(f"[FFMPEG] Merging streams into final file: {os.path.basename(output_path)}...")
 
-        # Construct FFmpeg command
+        # Construct FFmpeg command with explicit stream mapping (video from input 0, audio from input 1)
         cmd = [
             ffmpeg_bin,
             "-y",  # Overwrite output without asking
             "-i", video_path,
             "-i", audio_path,
+            "-map", "0:v:0",
+            "-map", "1:a:0",
             "-c", "copy"  # Fast stream copy without re-encoding
         ]
         if output_path.lower().endswith((".mp4", ".m4v", ".mov")):
@@ -423,6 +425,8 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 "-y",
                 "-i", video_path,
                 "-i", audio_path,
+                "-map", "0:v:0",
+                "-map", "1:a:0",
                 "-c:v", "copy",
                 "-c:a", "aac",
                 "-b:a", "192k"
@@ -447,6 +451,8 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                     "-y",
                     "-i", video_path,
                     "-i", audio_path,
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
                     "-c:v", "libx264",
                     "-preset", "ultrafast",
                     "-c:a", "aac",

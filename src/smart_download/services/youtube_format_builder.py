@@ -402,7 +402,7 @@ class YouTubeFormatBuilderMixin:
                     setattr(option, "audio_format_id", sel_audio.get("format_id", ""))
                 if sel_audio.get("filesize"):
                     option.audio_size = int(sel_audio["filesize"])
-            elif not sel_audio.get("is_original", True):
+            elif not sel_audio.get("is_original", True) and has_ffmpeg():
                 option.is_progressive = False
                 option.audio_url = sel_audio["url"]
                 option.audio_ext = sel_audio.get("ext", "m4a")

@@ -411,6 +411,100 @@ Hello world from <i>smart</i> download!
             except Exception:
                 pass
 
+    def test_extract_audio_tracks_no_duplicate_original(self):
+        """Verifies no duplicate original language track is created when multiple formats exist."""
+        info = {
+            "formats": [
+                {"format_id": "140", "vcodec": "none", "acodec": "mp4a.40.2", "ext": "m4a", "abr": 128, "language": "en", "format_note": "original", "url": "http://140"},
+                {"format_id": "251", "vcodec": "none", "acodec": "opus", "ext": "webm", "abr": 160, "language": "en", "format_note": "medium", "url": "http://251"},
+                {"format_id": "dub-ar", "vcodec": "none", "acodec": "mp4a.40.2", "ext": "m4a", "abr": 128, "language": "ar", "format_note": "Arabic dub", "url": "http://ar"},
+            ]
+        }
+        tracks = extract_audio_tracks(info)
+        track_ids = [t["track_id"] for t in tracks]
+        self.assertEqual(track_ids, ["original", "ar"])
+        self.assertEqual(tracks[0]["format_id"], "140")  # m4a preferred for original
+        self.assertTrue(tracks[0]["is_original"])
+
+    def test_convert_vtt_to_srt_variable_ms_and_html_unescape(self):
+        """Verifies VTT conversion supports 1/2 digit ms timestamps and unescapes HTML entities."""
+        vtt = (
+            "WEBVTT\n\n"
+            "00:00:01.5 --> 00:00:03.50 align:start\n"
+            "Tom &amp; Jerry &quot;quote&#39;s&quot; &lt;show&gt;\n"
+        )
+        srt = convert_vtt_to_srt(vtt)
+        self.assertIn("1\n00:00:01,500 --> 00:00:03,500\nTom & Jerry \"quote's\" <show>", srt)
+
+    def test_embed_subtitle_into_mp4_regional_lang_code(self):
+        """Verifies regional language codes like 'en-US' and 'ar-EG' map to 3-letter ISO tags."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            v_path = os.path.join(tmpdir, "vid.mp4")
+            s_path = os.path.join(tmpdir, "sub.srt")
+            with open(v_path, "wb") as f: f.write(b"mp4")
+            with open(s_path, "wb") as f: f.write(b"srt")
+
+            captured_cmds = []
+            def mock_run(cmd, **kwargs):
+                captured_cmds.append(cmd)
+                out = cmd[-1]
+                with open(out, "wb") as out_f: out_f.write(b"out")
+                res = MagicMock()
+                res.returncode = 0
+                return res
+
+            with patch("subprocess.run", side_effect=mock_run):
+                embed_subtitle_into_mp4(v_path, s_path, "en-US", "ffmpeg")
+                embed_subtitle_into_mp4(v_path, s_path, "ar-EG", "ffmpeg")
+
+            self.assertEqual(len(captured_cmds), 2)
+            self.assertIn("language=eng", captured_cmds[0])
+            self.assertIn("language=ara", captured_cmds[1])
+            self.assertIn("-map", captured_cmds[0])
+
+    def test_progressive_merge_stream_mapping(self):
+        """Verifies merge_video_audio uses explicit stream mapping (-map 0:v:0 -map 1:a:0)."""
+        from smart_download.services.youtube_service import YouTubeResolver
+        with tempfile.TemporaryDirectory() as tmpdir:
+            v_path = os.path.join(tmpdir, "v.mp4")
+            a_path = os.path.join(tmpdir, "a.m4a")
+            out_path = os.path.join(tmpdir, "out.mp4")
+            with open(v_path, "wb") as f: f.write(b"v")
+            with open(a_path, "wb") as f: f.write(b"a")
+
+            captured_cmd = []
+            def mock_run(cmd, **kwargs):
+                captured_cmd.extend(cmd)
+                with open(out_path, "wb") as f: f.write(b"merged")
+                res = MagicMock()
+                res.returncode = 0
+                return res
+
+            with patch("smart_download.services.youtube_service.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("subprocess.run", side_effect=mock_run):
+                YouTubeResolver.merge_video_audio(v_path, a_path, out_path)
+
+            self.assertIn("-map", captured_cmd)
+            v_map_idx = captured_cmd.index("-map")
+            self.assertEqual(captured_cmd[v_map_idx + 1], "0:v:0")
+            a_map_idx = captured_cmd.index("-map", v_map_idx + 2)
+            self.assertEqual(captured_cmd[a_map_idx + 1], "1:a:0")
+
+    def test_build_stream_info_progressive_no_ffmpeg(self):
+        """Verifies progressive stream is NOT upgraded to dual stream if FFmpeg is unavailable."""
+        info = {"id": "1", "title": "Prog", "duration": 60}
+        option = VideoFormatOption(
+            format_id="22", resolution_label="720p", height=720,
+            ext="mp4", filesize_approx=1000, is_progressive=True, video_url="http://vid"
+        )
+        option.selected_audio_track = {
+            "track_id": "ar", "language": "ar", "url": "http://audio_ar", "is_original": False
+        }
+        with patch("smart_download.services.youtube_format_builder.has_ffmpeg", return_value=False):
+            stream_info = self.builder.build_stream_info(info, option)
+            self.assertTrue(stream_info.is_progressive)
+
 
 if __name__ == "__main__":
     unittest.main()
+
