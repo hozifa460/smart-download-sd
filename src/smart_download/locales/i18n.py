@@ -6,7 +6,7 @@ import sys
 import json
 from typing import Dict, List, Optional, Callable, Any
 
-from ..config import get_setting, set_setting
+from ..config import get_setting, set_setting, is_test_environment
 
 _LOCALES_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -51,7 +51,7 @@ class LocalizationManager:
         if env_lang in ("ar", "en"):
             self._current_lang = env_lang
             return
-        if "unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("SD_TESTING"):
+        if is_test_environment():
             saved = get_setting("language", None)
             self._current_lang = saved if saved in ("ar", "en") else "en"
             return

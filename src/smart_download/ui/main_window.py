@@ -37,6 +37,7 @@ from ..config import (
     get_config_dir,
     get_app_config_dir,
     get_settings_file_path,
+    is_test_environment,
     load_settings,
     save_settings,
     get_setting,
@@ -332,7 +333,7 @@ class ModernFramelessGUI(
                 pass
 
         # Idempotent and non-blocking embedded browser self-registration
-        if os.environ.get("SD_DISABLE_AUTO_REGISTER") != "1" and "unittest" not in sys.modules:
+        if os.environ.get("SD_DISABLE_AUTO_REGISTER") != "1" and not is_test_environment():
             self._start_browser_self_registration()
 
         self._download_queue: List[Tuple[str, str, int, float]] = []
@@ -340,7 +341,7 @@ class ModernFramelessGUI(
         LocalizationManager.get_instance().register_observer(self._update_ui_language)
 
         # Non-blocking background check for application and yt-dlp updates
-        if os.environ.get("SD_DISABLE_AUTO_UPDATE") != "1" and "unittest" not in sys.modules:
+        if os.environ.get("SD_DISABLE_AUTO_UPDATE") != "1" and not is_test_environment():
             try:
                 self._update_check_job = self.root.after(2500, self._start_auto_update_check)
             except Exception:

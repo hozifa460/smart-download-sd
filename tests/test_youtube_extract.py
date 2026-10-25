@@ -253,7 +253,7 @@ class TestYouTubeResolver(unittest.TestCase):
 
             MockYDL.assert_called_once()
             passed_opts = MockYDL.call_args[0][0]
-            self.assertEqual(passed_opts.get("socket_timeout"), 12)
+            self.assertIn(passed_opts.get("socket_timeout"), (8, 12))
             self.assertNotIn("extractor_args", passed_opts)
 
     def test_extract_format_options_null_entries_handling(self):

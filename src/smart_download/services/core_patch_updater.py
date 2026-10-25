@@ -476,9 +476,9 @@ def init_core_loader(force: bool = False) -> Optional[str]:
     if getattr(sys, "frozen", False) or force:
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
         candidate_dev_roots.extend([
+            os.path.abspath(os.path.join(exe_dir, "..", "src")),
             os.path.join(exe_dir, "src"),
             exe_dir,
-            os.path.abspath(os.path.join(exe_dir, "..", "src")),
             os.path.abspath(os.path.join(exe_dir, "..", "..", "src")),
         ])
 

@@ -53,6 +53,24 @@ def get_resource_path(relative_path: str) -> str:
     return in_assets if os.path.exists(in_assets) else direct
 
 
+def is_test_environment() -> bool:
+    """Returns True ONLY when running inside an automated test suite."""
+    if getattr(sys, "frozen", False):
+        return False
+    if os.environ.get("SD_TESTING") == "1":
+        return True
+    if "pytest" in sys.modules:
+        return True
+    args = [arg.lower() for arg in sys.argv[:3]] if hasattr(sys, "argv") and sys.argv else []
+    return any(
+        arg.endswith(("pytest", "unittest"))
+        or "unittest" in arg
+        or "pytest" in arg
+        or "test" in os.path.basename(arg)
+        for arg in args
+    )
+
+
 def get_config_dir() -> str:
     """Returns persistent application configuration directory path."""
     cfg_override = os.environ.get("SD_CONFIG_DIR")
@@ -62,7 +80,7 @@ def get_config_dir() -> str:
         except Exception:
             pass
         return cfg_override
-    if "unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("SD_TESTING"):
+    if is_test_environment():
         test_cfg = os.path.join(tempfile.gettempdir(), "sd_test_isolated_cfg")
         try:
             os.makedirs(test_cfg, exist_ok=True)

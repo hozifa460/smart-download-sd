@@ -120,8 +120,10 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             "nocheckcertificate": True,
             "noplaylist": True,
             "extract_flat": False,
-            "socket_timeout": self.socket_timeout,
-            "remote_components": ["ejs:github"],
+            "socket_timeout": min(self.socket_timeout, 8),
+            "youtube_include_dash_manifest": True,
+            "youtube_include_hls_manifest": False,
+            "check_formats": False,
         }
         if cookiefile and os.path.isfile(cookiefile):
             opts["cookiefile"] = cookiefile
@@ -228,8 +230,8 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             )
 
             if not info and (self.cookies_from_browser == "auto" or self.cookies_from_browser is None):
-                if is_auth_error or not is_updater_mocked:
-                    self.log(f"[{tag}] Public extraction failed ({e}). Attempting extraction with browser cookies...")
+                if is_auth_error:
+                    self.log(f"[{tag}] Public extraction encountered authentication requirement ({e}). Attempting extraction with browser cookies...")
                     for b in detect_installed_cookie_browsers():
                         try:
                             self.log(f"[{tag}] Retrying extraction with cookies from '{b}'...")

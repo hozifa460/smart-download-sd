@@ -125,10 +125,12 @@ class TestYouTubeTracks(unittest.TestCase):
         self.assertLess(ar_idx, fr_idx)
 
     def test_extract_audio_tracks_empty(self):
-        """Verifies handling of formats list with no audio-only streams."""
+        """Verifies fallback original track when formats list has no audio-only streams."""
         info = {"formats": [{"format_id": "18", "vcodec": "avc1", "acodec": "mp4a"}]}
         tracks = extract_audio_tracks(info)
-        self.assertEqual(tracks, [])
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(tracks[0]["track_id"], "original")
+        self.assertTrue(tracks[0]["is_original"])
 
     def test_extract_subtitle_tracks_manual_and_auto(self):
         """Verifies subtitle priority, None option first, and format selection."""

@@ -60,7 +60,7 @@ POPULAR_AUTO_LANGS = (
 
 
 def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Groups audio-only formats by language/dub: Original first, then en, ar, others."""
+    """Groups audio-only formats by language/dub: Original first, then en, ar, others. Always >=1 item."""
     formats = info.get("formats", []) or []
     audio_formats = [
         f for f in formats
@@ -69,44 +69,74 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
         and (f.get("url") or "").startswith("http")
     ]
     if not audio_formats:
-        return []
+        top_lang = str(info.get("language") or "und").strip().lower()
+        return [{
+            "track_id": "original", "language": top_lang, "label": tr("audio_original_default", "Original (Default)"),
+            "format_id": "", "url": "", "ext": "m4a", "acodec": "aac", "abr": 0.0,
+            "filesize": None, "is_original": True, "http_headers": {},
+        }]
 
     orig_lang = None
     for f in audio_formats:
         fn = str(f.get("format_note") or "").lower()
         lang = str(f.get("language") or "").strip().lower()
+        if not lang and isinstance(f.get("audio_track"), dict):
+            at = f["audio_track"]
+            lang = str(at.get("language") or "").strip().lower()
+            if not lang and at.get("id"):
+                lang = str(at.get("id")).split(".")[0].strip().lower()
         if "original" in fn or "default" in fn or f.get("language_preference", -1) >= 0:
             if lang:
                 orig_lang = lang
                 break
     if not orig_lang:
         top_lang = str(info.get("language") or "").strip().lower()
-        orig_lang = top_lang or str(audio_formats[0].get("language") or "").strip().lower()
+        first_lang = ""
+        if audio_formats:
+            first_f = audio_formats[0]
+            first_lang = str(first_f.get("language") or "").strip().lower()
+            if not first_lang and isinstance(first_f.get("audio_track"), dict):
+                first_lang = str(first_f["audio_track"].get("language") or "").strip().lower()
+        orig_lang = top_lang or first_lang
 
-    groups: Dict[str, List[Dict[str, Any]]] = {}
+    groups: Dict[str, List[Tuple[Dict[str, Any], str]]] = {}
     for f in audio_formats:
         lang = str(f.get("language") or "").strip().lower()
         fn = str(f.get("format_note") or "").strip().lower()
+        disp_name = ""
+        if isinstance(f.get("audio_track"), dict):
+            at = f["audio_track"]
+            if not lang:
+                lang = str(at.get("language") or "").strip().lower()
+                if not lang and at.get("id"):
+                    lang = str(at.get("id")).split(".")[0].strip().lower()
+            disp_name = str(at.get("display_name") or at.get("name") or "").strip()
+
         is_orig = (
             "original" in fn or "default" in fn
             or f.get("language_preference", -1) >= 0
             or (orig_lang and lang == orig_lang) or (not lang and not orig_lang)
         )
         key = "original" if is_orig else (lang or next((c for c in LANG_NAMES if c in fn), "und"))
-        groups.setdefault(key, []).append(f)
+        groups.setdefault(key, []).append((f, disp_name))
 
     if "original" not in groups and groups:
         groups["original"] = groups.pop(next(iter(groups.keys())))
 
     result: List[Dict[str, Any]] = []
-    for key, flist in groups.items():
-        best_f = max(flist, key=lambda f: (1 if str(f.get("ext") or "").lower() == "m4a" else 0, float(f.get("abr") or f.get("tbr") or 0.0)))
+    for key, f_tuples in groups.items():
+        best_f, best_disp = max(
+            f_tuples,
+            key=lambda t: (1 if str(t[0].get("ext") or "").lower() == "m4a" else 0, float(t[0].get("abr") or t[0].get("tbr") or 0.0))
+        )
         abr = float(best_f.get("abr") or best_f.get("tbr") or 0.0)
         is_orig = (key == "original")
         lang_code = str(best_f.get("language") or (orig_lang if is_orig and orig_lang else key)).lower()
 
         if is_orig:
-            label = "Original (Default)"
+            label = tr("audio_original_default", "Original (Default)")
+        elif best_disp:
+            label = f"{best_disp} ({lang_code}) - {int(abr)}kbps" if abr > 0 else f"{best_disp} ({lang_code})"
         elif lang_code == "ar":
             label = f"العربية (ar) - {int(abr)}kbps" if abr > 0 else "العربية (ar)"
         elif lang_code == "en":
@@ -131,7 +161,15 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
         if t["language"] == "ar": return (2, "")
         return (3, t["language"])
 
-    return sorted(result, key=_sort_key)
+    res = sorted(result, key=_sort_key)
+    if not res:
+        res = [{
+            "track_id": "original", "language": str(info.get("language") or "und").strip().lower(),
+            "label": tr("audio_original_default", "Original (Default)"),
+            "format_id": "", "url": "", "ext": "m4a", "acodec": "aac", "abr": 0.0,
+            "filesize": None, "is_original": True, "http_headers": {},
+        }]
+    return res
 
 
 def _pick_best_sub_url(sub_formats: List[Dict[str, Any]]) -> Optional[Tuple[str, str]]:
