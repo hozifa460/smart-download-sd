@@ -6,7 +6,7 @@ import sys
 import json
 import shutil
 import tempfile
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 APP_NAME = "Smart Download"
 APP_TITLE = "Smart Download (SD)"
@@ -95,8 +95,21 @@ def get_settings_file_path() -> str:
     """Returns absolute path to persistent settings.json."""
     return os.path.join(get_config_dir(), "settings.json")
 
+import threading
+
+_settings_lock = threading.RLock()
+_cached_settings_data: Optional[Dict[str, Any]] = None
+_cached_stat_key: Optional[Tuple[str, int, int]] = None
+
+def _clear_settings_cache():
+    """Explicitly invalidates the in-memory settings cache (useful during unit tests)."""
+    global _cached_settings_data, _cached_stat_key
+    with _settings_lock:
+        _cached_settings_data = None
+        _cached_stat_key = None
+
 def load_settings() -> Dict[str, Any]:
-    """Loads user configuration dictionary from settings.json with robust fallbacks."""
+    """Loads user configuration dictionary from settings.json with mtime-based in-memory caching."""
     path = get_settings_file_path()
     defaults = {
         "minimize_to_tray": True,
@@ -104,25 +117,53 @@ def load_settings() -> Dict[str, Any]:
         "language": "ar",
         "auto_unpack_archives": False,
     }
-    if os.path.isfile(path):
+
+    with _settings_lock:
+        global _cached_settings_data, _cached_stat_key
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    defaults.update(data)
-        except Exception:
-            pass
-    return defaults
+            st = os.stat(path)
+            stat_key = (path, st.st_mtime_ns, st.st_size)
+        except OSError:
+            stat_key = (path, -1, -1)
+
+        if _cached_stat_key == stat_key and _cached_settings_data is not None:
+            return dict(_cached_settings_data)
+
+        cur = dict(defaults)
+        if stat_key[1] != -1:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        cur.update(data)
+            except Exception:
+                pass
+
+        _cached_settings_data = cur
+        _cached_stat_key = stat_key
+        return dict(_cached_settings_data)
 
 def save_settings(settings_dict: Dict[str, Any]) -> bool:
-    """Persists updated configuration dictionary to settings.json."""
+    """Persists updated configuration dictionary to settings.json and refreshes memory cache."""
     path = get_settings_file_path()
     try:
-        cur = load_settings()
-        cur.update(settings_dict)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(cur, f, indent=2)
-        return True
+        with _settings_lock:
+            global _cached_settings_data, _cached_stat_key
+            cur = load_settings()
+            cur.update(settings_dict)
+            parent_dir = os.path.dirname(path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(cur, f, indent=2)
+            try:
+                st = os.stat(path)
+                stat_key = (path, st.st_mtime_ns, st.st_size)
+            except OSError:
+                stat_key = (path, -1, -1)
+            _cached_settings_data = dict(cur)
+            _cached_stat_key = stat_key
+            return True
     except Exception:
         return False
 

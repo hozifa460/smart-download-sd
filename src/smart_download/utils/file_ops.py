@@ -96,7 +96,7 @@ class MagicBytesDetector:
 def calculate_file_integrity(filepath: str) -> Dict[str, str]:
     """
     Computes CRC-32 and SHA-256 integrity hashes for a file.
-    Uses 64KB streaming blocks for low memory overhead.
+    Uses 256KB streaming blocks for low memory overhead and high I/O throughput.
     """
     if not os.path.isfile(filepath):
         return {"crc32": "", "sha256": ""}
@@ -104,7 +104,7 @@ def calculate_file_integrity(filepath: str) -> Dict[str, str]:
     sha = hashlib.sha256()
     with open(filepath, "rb") as f:
         while True:
-            chunk = f.read(64 * 1024)
+            chunk = f.read(256 * 1024)
             if not chunk:
                 break
             crc = zlib.crc32(chunk, crc)

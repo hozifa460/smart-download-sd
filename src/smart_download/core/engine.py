@@ -27,6 +27,7 @@ from ..config import (
 from .rate_limiter import TokenBucketRateLimiter
 from .chunk import DownloadChunk, get_permissive_ssl_context
 from .html_resolver import validate_refresh_url
+from .engine_persistence import EnginePersistenceMixin
 from ..utils.url_utils import (
     is_downloadable_url,
     derive_download_filename,
@@ -39,7 +40,7 @@ from ..utils.file_ops import (
     MagicBytesDetector,
 )
 
-class TurboDownloadEngine:
+class TurboDownloadEngine(EnginePersistenceMixin):
     """
     High-throughput download engine featuring:
     - Dynamic on-the-fly chunk splitting (largest remaining space candidate + midpoint split).
@@ -142,6 +143,9 @@ class TurboDownloadEngine:
         self.last_speed_check_time = 0.0
         self.last_downloaded_bytes = 0
         self.current_speed = 0.0
+        self._accumulated_active_sec = 0.0
+        self._last_active_start_mono: Optional[float] = None
+        self._session_start_bytes: int = 0
 
     def log(self, message: str):
         timestamp = time.strftime("%H:%M:%S")
@@ -358,7 +362,10 @@ class TurboDownloadEngine:
         self._cancel_event.clear()
         self._pause_event.clear()
         self.start_time = time.time()
-        self.last_speed_check_time = time.time()
+        self._last_active_start_mono = time.monotonic()
+        self.last_speed_check_time = time.monotonic()
+        self.last_downloaded_bytes = sum(c.downloaded_bytes for c in self.chunks)
+        self._session_start_bytes = self.last_downloaded_bytes
 
         supervisor_thread = threading.Thread(target=self._supervisor_loop, daemon=True)
         supervisor_thread.start()
@@ -368,6 +375,9 @@ class TurboDownloadEngine:
         if not self.is_running or self.is_paused:
             return
         self.is_paused = True
+        if self._last_active_start_mono is not None:
+            self._accumulated_active_sec += max(0.0, time.monotonic() - self._last_active_start_mono)
+            self._last_active_start_mono = None
         self._pause_event.set()
         self.save_state()
         self.log("Download paused by user.")
@@ -377,7 +387,10 @@ class TurboDownloadEngine:
         if not self.is_running or not self.is_paused:
             return
         self.is_paused = False
+        self._last_active_start_mono = time.monotonic()
         self.last_speed_check_time = time.monotonic()
+        self.last_downloaded_bytes = sum(c.downloaded_bytes for c in self.chunks)
+        self._session_start_bytes = self.last_downloaded_bytes
         self._pause_event.clear()
         self.log("Download resumed.")
 
@@ -386,6 +399,7 @@ class TurboDownloadEngine:
         self.is_running = False
         self._cancel_event.set()
         self._pause_event.clear()
+        self._last_active_start_mono = None
 
         # Abort any blocked socket reads immediately
         with self._lock:
@@ -525,8 +539,22 @@ class TurboDownloadEngine:
             # Perform strict sequential assembly
             self.assemble()
 
-            elapsed = max(0.01, time.time() - self.start_time)
-            avg_speed = (self.total_size / elapsed) if elapsed > 0 else 0
+            active_elapsed = self._accumulated_active_sec
+            if self._last_active_start_mono is not None:
+                active_elapsed += max(0.0, time.monotonic() - self._last_active_start_mono)
+
+            if active_elapsed > 0.001:
+                elapsed = max(0.01, active_elapsed)
+            else:
+                elapsed = max(0.01, time.time() - self.start_time)
+
+            total_downloaded = sum(c.downloaded_bytes for c in self.chunks)
+            if self.total_size > 0:
+                total_downloaded = max(total_downloaded, self.total_size)
+            session_transferred = max(0, total_downloaded - getattr(self, "_session_start_bytes", 0))
+            bytes_for_speed = session_transferred if session_transferred > 0 else (self.total_size if self.total_size > 0 else total_downloaded)
+
+            avg_speed = (bytes_for_speed / elapsed) if elapsed > 0 else 0
             speed_str = f"{avg_speed / (1024*1024):.2f} MB/s" if avg_speed >= 1024*1024 else f"{avg_speed / 1024:.1f} KB/s"
             self.log(f"[SUCCESS] Download finished successfully in {elapsed:.1f}s (Average Speed: {speed_str})!")
 
@@ -615,7 +643,7 @@ class TurboDownloadEngine:
                     with self._lock:
                         self._active_connections.append(resp)
 
-                    BUF_SIZE = 32768
+                    BUF_SIZE = 131072
                     seg_bytes_read = 0
                     expected_seg_bytes = (req_end - cur_offset + 1) if (req_end is not None) else None
 
@@ -794,8 +822,8 @@ class TurboDownloadEngine:
                 part_filepath=part_path
             )
             self.chunks.append(new_chunk)
-            self.save_state()
 
+        self.save_state()
         self.log(f"[SPLIT] Dynamic Split: Chunk #{candidate.chunk_id} split! Spawned Chunk #{new_id} [{split_start:,} - {old_end:,}]")
         self._spawn_worker(new_chunk)
 
@@ -831,151 +859,6 @@ class TurboDownloadEngine:
         if self.on_progress:
             self.on_progress(total_downloaded, self.total_size, self.current_speed, eta_str, active_count)
 
-    def assemble(self):
-        """
-        Strict Non-Corrupt Sequential Assembly:
-        - Strict sorting by start_byte.
-        - Boundary assertions: chunk[0].start_byte == 0, chunk[i].end_byte + 1 == chunk[i+1].start_byte.
-        - On-disk part file size validations.
-        - 64KB streaming buffer merge into target file.
-        - Total assembled size verification.
-        - Pre-allocation and streamlined streaming buffers (inspired by splitter.rs).
-        - Magic bytes container detection (inspired by detector.rs).
-        - Post-download integrity verification (CRC-32 & SHA-256).
-        - Temporary directory cleanup upon successful assembly.
-        """
-        self.log("Beginning strict sequential assembly...")
-
-        with self._lock:
-            sorted_chunks = sorted(self.chunks, key=lambda c: c.start_byte)
-
-        if not sorted_chunks:
-            raise ValueError("No download chunks available for assembly.")
-
-        # Magic bytes detection inspired by AeroArchive Studio (detector.rs)
-        if sorted_chunks and os.path.exists(sorted_chunks[0].part_filepath):
-            try:
-                with open(sorted_chunks[0].part_filepath, "rb") as f0:
-                    head_bytes = f0.read(512)
-                detected = MagicBytesDetector.detect_bytes(head_bytes)
-                if detected:
-                    det_ext, det_mime, det_cat = detected
-                    cur_ext = os.path.splitext(self.destination_path)[1].lower()
-                    if (
-                        cur_ext in ("", ".bin", ".download", ".octet-stream", ".part")
-                        and not self.destination_path.endswith((".video.tmp", ".audio.tmp", ".tmp"))
-                        and det_ext
-                    ):
-                        new_dest = os.path.splitext(self.destination_path)[0] + det_ext
-                        self.log(f"[DETECTOR] Detected true format via magic bytes: {det_ext} ({det_cat}) -> {os.path.basename(new_dest)}")
-                        self.destination_path = new_dest
-                        self.filename = os.path.basename(new_dest)
-            except Exception:
-                pass
-
-        # Boundary assertions
-        if self.supports_ranges and self.total_size > 0:
-            assert sorted_chunks[0].start_byte == 0, (
-                f"Assembly Assertion Failed: Chunk 0 starts at {sorted_chunks[0].start_byte}, expected 0."
-            )
-            for i in range(len(sorted_chunks) - 1):
-                c_cur = sorted_chunks[i]
-                c_next = sorted_chunks[i+1]
-                assert c_cur.end_byte + 1 == c_next.start_byte, (
-                    f"Boundary Gap/Overlap detected between Chunk #{c_cur.chunk_id} "
-                    f"(ends {c_cur.end_byte}) and #{c_next.chunk_id} (starts {c_next.start_byte})!"
-                )
-            assert sorted_chunks[-1].end_byte == self.total_size - 1, (
-                f"Assembly Assertion Failed: Final chunk ends at {sorted_chunks[-1].end_byte}, expected {self.total_size - 1}."
-            )
-
-            # Validate part file size on disk matches expected byte span
-            for c in sorted_chunks:
-                expected_size = c.end_byte - c.start_byte + 1
-                if not os.path.exists(c.part_filepath):
-                    raise FileNotFoundError(f"Missing chunk file: {c.part_filepath}")
-                actual_size = os.path.getsize(c.part_filepath)
-                assert actual_size == expected_size, (
-                    f"Chunk #{c.chunk_id} size mismatch: disk {actual_size:,} bytes != expected {expected_size:,} bytes."
-                )
-
-        # Streamlined 128KB streaming assembly (inspired by splitter.rs join_chunks)
-        BUFFER_SIZE = 128 * 1024
-        total_written = 0
-
-        # Ensure target directory exists
-        dest_dir = os.path.dirname(self.destination_path)
-        if dest_dir:
-            os.makedirs(dest_dir, exist_ok=True)
-
-        with open(self.destination_path, "wb") as out_f:
-            if self.total_size > 0:
-                try:
-                    out_f.truncate(self.total_size)
-                except Exception:
-                    pass
-            for c in sorted_chunks:
-                if not os.path.exists(c.part_filepath):
-                    continue
-                with open(c.part_filepath, "rb") as in_f:
-                    while True:
-                        buf = in_f.read(BUFFER_SIZE)
-                        if not buf:
-                            break
-                        out_f.write(buf)
-                        total_written += len(buf)
-            out_f.flush()
-
-        if self.total_size > 0:
-            assert total_written == self.total_size, (
-                f"Assembly size mismatch: Written {total_written:,} bytes != expected {self.total_size:,} bytes."
-            )
-
-        self.log(f"Assembled and verified {total_written:,} bytes with zero corruption.")
-
-        # Post-download integrity verification (CRC-32 & SHA-256)
-        try:
-            hashes = calculate_file_integrity(self.destination_path)
-            self.log(f"[INTEGRITY] SHA-256: {hashes.get('sha256')} | CRC-32: {hashes.get('crc32')}")
-        except Exception as e:
-            self.log(f"[INTEGRITY] Verification error: {e}")
-
-        # Optional auto-unpack for archive files
-        if get_setting("auto_unpack_archives", False):
-            try:
-                unpacked_to = auto_unpack_archive(self.destination_path)
-                if unpacked_to:
-                    self.log(f"[ARCHIVE] Successfully auto-unpacked to: {unpacked_to}")
-            except Exception as e:
-                self.log(f"[ARCHIVE] Auto-unpack error: {e}")
-
-        # Cleanup part files
-        try:
-            shutil.rmtree(self.temp_dir, ignore_errors=True)
-            self.log("Cleaned up temporary chunk files.")
-        except Exception:
-            pass
-
-    def safe_shutdown(self):
-        """
-        Safely halts all active workers and serializes state into state.json
-        WITHOUT purging temporary chunk files (.sd_parts).
-        Enables seamless download resumption upon next launch.
-        """
-        self.is_running = False
-        self.is_paused = True
-        self._pause_event.set()
-        self._cancel_event.set()
-        with self._lock:
-            for conn in list(self._active_connections):
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-            self._active_connections.clear()
-        self.save_state()
-        self.log("Download state saved safely in .sd_parts. Resume ready.")
-
     def _stop_workers_for_error(self):
         """Closes active socket connections and signals all workers to abort immediately."""
         self._error_abort_event.set()
@@ -986,107 +869,6 @@ class TurboDownloadEngine:
                 except Exception:
                     pass
             self._active_connections.clear()
-
-    def save_state(self) -> bool:
-        """Serializes current download chunk state and progress into state.json within temp_dir."""
-        try:
-            if not getattr(self, "temp_dir", None):
-                return False
-            os.makedirs(self.temp_dir, exist_ok=True)
-            state_file = os.path.join(self.temp_dir, "state.json")
-            with self._lock:
-                chunks_data = []
-                for c in self.chunks:
-                    with c.lock:
-                        disk_bytes = c.downloaded_bytes
-                        if os.path.exists(c.part_filepath):
-                            try:
-                                disk_bytes = os.path.getsize(c.part_filepath)
-                            except Exception:
-                                pass
-                        chunks_data.append({
-                            "chunk_id": c.chunk_id,
-                            "start_byte": c.start_byte,
-                            "end_byte": c.end_byte,
-                            "downloaded_bytes": disk_bytes,
-                            "status": c.status,
-                            "part_filepath": c.part_filepath,
-                            "error_msg": c.error_msg
-                        })
-                data = {
-                    "url": self.url,
-                    "destination_path": self.destination_path,
-                    "total_size": self.total_size,
-                    "supports_ranges": self.supports_ranges,
-                    "has_expired_link": self.has_expired_link,
-                    "filename": self.filename,
-                    "headers": self.headers,
-                    "chunks": chunks_data
-                }
-            tmp_state = state_file + ".tmp"
-            with open(tmp_state, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp_state, state_file)
-            return True
-        except Exception as e:
-            self.log(f"Warning: Failed to save chunk state: {e}")
-            return False
-
-    def load_state(self) -> bool:
-        """Loads and restores download chunks and progress from state.json if present and valid."""
-        try:
-            if not getattr(self, "temp_dir", None):
-                return False
-            state_file = os.path.join(self.temp_dir, "state.json")
-            if not os.path.isfile(state_file):
-                return False
-            with open(state_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            total_size = data.get("total_size", 0)
-            chunks_data = data.get("chunks", [])
-            if not chunks_data:
-                return False
-
-            with self._lock:
-                self.chunks.clear()
-                self.total_size = total_size
-                self.supports_ranges = data.get("supports_ranges", True)
-                self.has_expired_link = data.get("has_expired_link", False)
-                for cd in chunks_data:
-                    part_path = cd.get("part_filepath") or os.path.join(
-                        self.temp_dir, f"{os.path.basename(self.destination_path)}.part_{cd['chunk_id']}"
-                    )
-                    disk_bytes = cd.get("downloaded_bytes", 0)
-                    if os.path.exists(part_path):
-                        try:
-                            actual_disk = os.path.getsize(part_path)
-                            disk_bytes = min(actual_disk, cd["end_byte"] - cd["start_byte"] + 1)
-                        except Exception:
-                            pass
-
-                    expected_span = cd["end_byte"] - cd["start_byte"] + 1
-                    status = cd.get("status", "pending")
-                    if total_size > 0 and disk_bytes >= expected_span:
-                        status = "completed"
-                    elif status == "failed":
-                        status = "pending"
-
-                    chunk = DownloadChunk(
-                        chunk_id=cd["chunk_id"],
-                        start_byte=cd["start_byte"],
-                        end_byte=cd["end_byte"],
-                        downloaded_bytes=disk_bytes,
-                        status=status,
-                        part_filepath=part_path,
-                        error_msg=cd.get("error_msg", "")
-                    )
-                    self.chunks.append(chunk)
-            self.log(f"Restored {len(self.chunks)} chunks from saved state ({sum(c.downloaded_bytes for c in self.chunks):,} bytes downloaded).")
-            return True
-        except Exception as e:
-            self.log(f"Warning: Failed to load chunk state: {e}")
-            return False
 
     def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):
         """
@@ -1143,7 +925,10 @@ class TurboDownloadEngine:
         self._cancel_event.clear()
         self._pause_event.clear()
         self.start_time = time.time()
-        self.last_speed_check_time = time.time()
+        self._last_active_start_mono = time.monotonic()
+        self.last_speed_check_time = time.monotonic()
+        self.last_downloaded_bytes = sum(c.downloaded_bytes for c in self.chunks)
+        self._session_start_bytes = self.last_downloaded_bytes
 
         supervisor_thread = threading.Thread(target=self._supervisor_loop, daemon=True)
         supervisor_thread.start()

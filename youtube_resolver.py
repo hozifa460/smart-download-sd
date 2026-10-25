@@ -21,6 +21,7 @@ from smart_download.services.youtube_service import (
     is_ytdlp_available,
     get_ytdlp_version,
     update_ytdlp_engine,
+    is_ytdlp_extractor_supported,
     has_ffmpeg,
     find_ffmpeg_bin,
     sanitize_filename,
