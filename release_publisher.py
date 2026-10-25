@@ -190,10 +190,32 @@ def main():
     existing_assets = {a["name"]: a for a in fresh_release.get("assets", [])}
     log(f"[*] Existing assets on release: {list(existing_assets.keys())}")
 
-    assets_to_upload = [
-        os.path.abspath(r"dist\SmartDownload.exe"),
-        os.path.abspath(r"dist\SmartDownload-Setup.exe")
-    ]
+    _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+    if os.path.isdir(_src_dir) and _src_dir not in sys.path:
+        sys.path.insert(0, _src_dir)
+    from smart_download.services.core_patch_updater import build_core_patch_zip
+
+    is_full_build = "--full-build" in sys.argv
+
+    # Generate lightweight OTA core patch zip (<150 KB, <0.5s, zero PyInstaller required)
+    os.makedirs("dist", exist_ok=True)
+    core_patch_path = os.path.abspath(r"dist\SmartDownload-CorePatch.zip")
+    log(f"[*] Building lightweight Core Patch archive: {core_patch_path}...")
+    build_core_patch_zip(core_patch_path, version=TAG)
+    log(f"[+] Core Patch built successfully ({os.path.getsize(core_patch_path):,} bytes).")
+
+    if is_full_build:
+        assets_to_upload = [
+            os.path.abspath(r"dist\SmartDownload.exe"),
+            os.path.abspath(r"dist\SmartDownload-Setup.exe"),
+            core_patch_path,
+        ]
+        required_asset_names = {"SmartDownload.exe", "SmartDownload-Setup.exe", "SmartDownload-CorePatch.zip"}
+    else:
+        log("[*] Fast publish mode active (Zero-Rebuild). Only publishing SmartDownload-CorePatch.zip.")
+        log("    To publish full executables, provide the --full-build flag.")
+        assets_to_upload = [core_patch_path]
+        required_asset_names = {"SmartDownload-CorePatch.zip"}
 
     for asset_path in assets_to_upload:
         asset_name = os.path.basename(asset_path)
@@ -236,9 +258,8 @@ def main():
         for a in final_assets:
             log(f" - {a['name']} ({a['size']:,} bytes, state={a.get('state')}) -> {a['browser_download_url']}")
 
-        required_asset_names = {"SmartDownload.exe", "SmartDownload-Setup.exe"}
         uploaded_names = {a["name"]: a for a in final_assets if a.get("state") == "uploaded"}
-        missing = required_asset_names - set(uploaded_names.keys())
+        missing = set(required_asset_names) - set(uploaded_names.keys())
         if missing:
             raise RuntimeError(f"Release verification failed: missing assets {missing}")
     else:

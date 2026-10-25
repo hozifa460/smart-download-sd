@@ -41,6 +41,13 @@ _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
+# Initialize Dynamic Core Loader (Zero-Rebuild Dev Mode & OTA Hot-Patch Plugin)
+try:
+    from smart_download.services.core_patch_updater import init_core_loader
+    init_core_loader()
+except Exception:
+    pass
+
 # Initialize DPI awareness
 from smart_download.utils.dpi import enable_high_dpi_awareness, get_windows_work_area
 enable_high_dpi_awareness()
@@ -175,10 +182,16 @@ from smart_download.services.youtube_service import (
 from smart_download.services.updater_service import (
     parse_version,
     is_newer_version,
+    is_version_ge,
     YtDlpAutoUpdater,
     _ExternalYtDlpFinder,
     AppAutoUpdater,
     get_ytdlp_plugin_dir,
+    build_core_patch_zip,
+    CoreHotPatchUpdater,
+    _ExternalCoreFinder,
+    get_core_plugin_dir,
+    init_core_loader,
 )
 from smart_download.services.browser.bridge_server import BrowserBridgeServer, DEFAULT_BRIDGE_PORT
 from smart_download.services.browser.registry import (

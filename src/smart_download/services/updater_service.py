@@ -286,6 +286,8 @@ class AppAutoUpdater:
             installer_name = "SmartDownload-Setup.exe"
             installer_size = 0
             portable_url = ""
+            core_patch_url = ""
+            core_patch_size = 0
 
             if isinstance(assets, list):
                 for asset in assets:
@@ -300,6 +302,9 @@ class AppAutoUpdater:
                         installer_size = a_size
                     elif a_name.lower() == "smartdownload.exe":
                         portable_url = a_url
+                    elif a_name.lower() == "smartdownload-corepatch.zip":
+                        core_patch_url = a_url
+                        core_patch_size = a_size
 
                 # Fallback if Setup.exe wasn't found but another .exe asset exists
                 if not installer_url:
@@ -326,6 +331,8 @@ class AppAutoUpdater:
                 "release_url": html_url,
                 "installer_url": installer_url,
                 "download_url": installer_url or portable_url,
+                "core_patch_url": core_patch_url,
+                "core_patch_size": core_patch_size,
                 "installer_name": installer_name,
                 "asset_name": installer_name,
                 "installer_size": installer_size,
@@ -444,6 +451,15 @@ class AppAutoUpdater:
         return True
 
 
+from .core_patch_updater import (
+    build_core_patch_zip,
+    CoreHotPatchUpdater,
+    _ExternalCoreFinder,
+    get_core_plugin_dir,
+    init_core_loader,
+    is_version_ge,
+)
+
 __all__ = [
     "APP_NAME",
     "APP_ID",
@@ -460,8 +476,15 @@ __all__ = [
     "_get_verified_ssl_context",
     "parse_version",
     "is_newer_version",
+    "is_version_ge",
     "YtDlpAutoUpdater",
     "_ExternalYtDlpFinder",
     "AppAutoUpdater",
+    "build_core_patch_zip",
+    "CoreHotPatchUpdater",
+    "_ExternalCoreFinder",
+    "get_core_plugin_dir",
+    "init_core_loader",
 ]
+
 

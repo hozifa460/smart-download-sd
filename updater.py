@@ -9,6 +9,12 @@ _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
+try:
+    from smart_download.services.core_patch_updater import init_core_loader
+    init_core_loader()
+except Exception:
+    pass
+
 from smart_download.services.updater_service import *
 from smart_download.services.updater_service import (
     APP_NAME,
@@ -26,8 +32,14 @@ from smart_download.services.updater_service import (
     _ExternalYtDlpFinder,
     parse_version,
     is_newer_version,
+    is_version_ge,
     YtDlpAutoUpdater,
     AppAutoUpdater,
+    build_core_patch_zip,
+    CoreHotPatchUpdater,
+    _ExternalCoreFinder,
+    get_core_plugin_dir,
+    init_core_loader,
 )
 
 if __name__ == "__main__":
