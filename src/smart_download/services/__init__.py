@@ -63,6 +63,15 @@ from .youtube_service import (
     SUPPORTED_COOKIE_BROWSERS,
     detect_installed_cookie_browsers,
 )
+from .youtube_tracks import (
+    extract_audio_tracks,
+    extract_subtitle_tracks,
+    convert_vtt_to_srt,
+    download_subtitle_as_srt,
+    embed_subtitle_into_mp4,
+    handle_subtitles_post_download,
+    build_audio_subtitle_row,
+)
 from .browser import (
     BrowserBridgeServer,
     DEFAULT_BRIDGE_PORT,
@@ -141,6 +150,13 @@ __all__ = [
     "format_filesize",
     "SUPPORTED_COOKIE_BROWSERS",
     "detect_installed_cookie_browsers",
+    "extract_audio_tracks",
+    "extract_subtitle_tracks",
+    "convert_vtt_to_srt",
+    "download_subtitle_as_srt",
+    "embed_subtitle_into_mp4",
+    "handle_subtitles_post_download",
+    "build_audio_subtitle_row",
     "BrowserBridgeServer",
     "DEFAULT_BRIDGE_PORT",
     "register_native_host",

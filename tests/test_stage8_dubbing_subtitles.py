@@ -1,0 +1,416 @@
+"""
+Unit tests for Stage 8: YouTube Multi-Language Audio Dubbing & Subtitle Selection/Embedding.
+Tests extract_audio_tracks, extract_subtitle_tracks, convert_vtt_to_srt, download_subtitle_as_srt,
+embed_subtitle_into_mp4, build_stream_info overrides, and QualitySelectionModal track integration.
+"""
+import os
+import tempfile
+import unittest
+from unittest.mock import MagicMock, patch
+
+from smart_download.services.youtube_models import (
+    VideoFormatOption,
+    YouTubeStreamInfo,
+)
+from smart_download.services.youtube_format_builder import YouTubeFormatBuilderMixin
+from smart_download.services.youtube_tracks import (
+    extract_audio_tracks,
+    extract_subtitle_tracks,
+    convert_vtt_to_srt,
+    download_subtitle_as_srt,
+    embed_subtitle_into_mp4,
+    handle_subtitles_post_download,
+)
+
+
+class DummyBuilder(YouTubeFormatBuilderMixin):
+    pass
+
+
+class TestYouTubeTracks(unittest.TestCase):
+    """Test suite for audio dubbing and subtitle track extraction and processing."""
+
+    def setUp(self):
+        self.builder = DummyBuilder()
+
+    def test_extract_audio_tracks_sorting_and_selection(self):
+        """Verifies multi-language audio formats grouping, m4a preference, and sort order."""
+        info = {
+            "formats": [
+                # Video only - must be ignored
+                {
+                    "format_id": "137",
+                    "vcodec": "avc1.640028",
+                    "acodec": "none",
+                    "url": "https://googlevideo.com/video137",
+                },
+                # Original English track (m4a, 128kbps)
+                {
+                    "format_id": "140-orig",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "abr": 128.0,
+                    "ext": "m4a",
+                    "language": "en",
+                    "format_note": "original",
+                    "url": "https://googlevideo.com/audio140_orig",
+                    "http_headers": {"User-Agent": "Test"},
+                },
+                # Original webm track (higher bitrate, but m4a preferred)
+                {
+                    "format_id": "251-orig",
+                    "vcodec": "none",
+                    "acodec": "opus",
+                    "abr": 160.0,
+                    "ext": "webm",
+                    "language": "en",
+                    "format_note": "original",
+                    "url": "https://googlevideo.com/audio251_orig",
+                },
+                # Spanish dub
+                {
+                    "format_id": "140-es",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "abr": 128.0,
+                    "ext": "m4a",
+                    "language": "es",
+                    "format_note": "Spanish dub",
+                    "url": "https://googlevideo.com/audio140_es",
+                },
+                # Arabic dub
+                {
+                    "format_id": "140-ar",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "abr": 128.0,
+                    "ext": "m4a",
+                    "language": "ar",
+                    "format_note": "Arabic dub",
+                    "url": "https://googlevideo.com/audio140_ar",
+                },
+                # French dub
+                {
+                    "format_id": "140-fr",
+                    "vcodec": "none",
+                    "acodec": "mp4a.40.2",
+                    "abr": 128.0,
+                    "ext": "m4a",
+                    "language": "fr",
+                    "format_note": "French dub",
+                    "url": "https://googlevideo.com/audio140_fr",
+                },
+            ]
+        }
+
+        tracks = extract_audio_tracks(info)
+        self.assertGreaterEqual(len(tracks), 4)
+
+        # 1. Original/Default must be first
+        self.assertTrue(tracks[0]["is_original"])
+        self.assertEqual(tracks[0]["track_id"], "original")
+        self.assertEqual(tracks[0]["ext"], "m4a")  # preferred over webm
+        self.assertEqual(tracks[0]["url"], "https://googlevideo.com/audio140_orig")
+        self.assertIn("Original", tracks[0]["label"])
+
+        # 2. Arabic must precede Spanish and French (en, ar, others)
+        lang_order = [t["language"] for t in tracks[1:]]
+        self.assertIn("ar", lang_order)
+        self.assertIn("es", lang_order)
+        self.assertIn("fr", lang_order)
+        ar_idx = lang_order.index("ar")
+        es_idx = lang_order.index("es")
+        fr_idx = lang_order.index("fr")
+        self.assertLess(ar_idx, es_idx)
+        self.assertLess(ar_idx, fr_idx)
+
+    def test_extract_audio_tracks_empty(self):
+        """Verifies handling of formats list with no audio-only streams."""
+        info = {"formats": [{"format_id": "18", "vcodec": "avc1", "acodec": "mp4a"}]}
+        tracks = extract_audio_tracks(info)
+        self.assertEqual(tracks, [])
+
+    def test_extract_subtitle_tracks_manual_and_auto(self):
+        """Verifies subtitle priority, None option first, and format selection."""
+        info = {
+            "subtitles": {
+                "en": [
+                    {"ext": "srv3", "url": "https://example.com/en.srv3"},
+                    {"ext": "vtt", "url": "https://example.com/en.vtt"},
+                ],
+                "ar": [
+                    {"ext": "vtt", "url": "https://example.com/ar.vtt"},
+                    {"ext": "srt", "url": "https://example.com/ar.srt"},
+                ],
+                "de": [
+                    {"ext": "vtt", "url": "https://example.com/de.vtt"},
+                ]
+            },
+            "automatic_captions": {
+                "es": [
+                    {"ext": "vtt", "url": "https://example.com/es_auto.vtt"},
+                ],
+                "unsupported_rare_lang": [
+                    {"ext": "vtt", "url": "https://example.com/rare.vtt"},
+                ]
+            }
+        }
+
+        subs = extract_subtitle_tracks(info)
+
+        # Index 0 must be 'none'
+        self.assertEqual(subs[0]["sub_id"], "none")
+        self.assertIn("None", subs[0]["label"])
+
+        # Arabic manual picked SRT over VTT
+        ar_track = next(s for s in subs if s["language"] == "ar" and not s["is_auto"])
+        self.assertEqual(ar_track["ext"], "srt")
+        self.assertEqual(ar_track["url"], "https://example.com/ar.srt")
+        self.assertIn("Official", ar_track["label"])
+
+        # English manual picked VTT over SRV3
+        en_track = next(s for s in subs if s["language"] == "en" and not s["is_auto"])
+        self.assertEqual(en_track["ext"], "vtt")
+        self.assertEqual(en_track["url"], "https://example.com/en.vtt")
+
+        # Spanish auto caption is present
+        es_auto = next((s for s in subs if s["language"] == "es" and s["is_auto"]), None)
+        self.assertIsNotNone(es_auto)
+        self.assertTrue(es_auto["is_auto"])
+
+        # Rare unsupported auto caption excluded
+        rare = next((s for s in subs if s["language"] == "unsupported_rare_lang"), None)
+        self.assertIsNone(rare)
+
+    def test_convert_vtt_to_srt(self):
+        """Verifies clean conversion of WebVTT timestamps, tags, and indices into SRT."""
+        vtt_input = """WEBVTT
+Kind: captions
+Language: en
+
+01:05.250 --> 01:08.500 align:start position:0%
+Hello world from <i>smart</i> download!
+
+00:02:15.100 --> 00:02:18.200
+<c.yellow>Second subtitle line</c>
+"""
+        srt = convert_vtt_to_srt(vtt_input)
+        self.assertIn("1\n00:01:05,250 --> 00:01:08,500\nHello world from smart download!", srt)
+        self.assertIn("2\n00:02:15,100 --> 00:02:18,200\nSecond subtitle line", srt)
+        self.assertNotIn("WEBVTT", srt)
+        self.assertNotIn("align:start", srt)
+        self.assertNotIn("<c.yellow>", srt)
+
+    def test_download_subtitle_as_srt_mock(self):
+        """Verifies downloading subtitle and writing UTF-8-SIG encoded .srt file."""
+        sub_track = {
+            "sub_id": "ar",
+            "language": "ar",
+            "url": "https://example.com/ar.vtt",
+            "ext": "vtt"
+        }
+        mock_vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nمرحبا بك في Smart Download\n"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_file = os.path.join(tmpdir, "test_video.mp4")
+            with open(video_file, "wb") as vf:
+                vf.write(b"fake_mp4_bytes")
+
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.content = mock_vtt.encode("utf-8")
+
+            with patch("requests.get", return_value=mock_resp):
+                out_srt = download_subtitle_as_srt(sub_track, video_file)
+
+            self.assertIsNotNone(out_srt)
+            self.assertTrue(os.path.isfile(out_srt))
+            self.assertTrue(out_srt.endswith("test_video.ar.srt"))
+
+            # Check UTF-8-SIG encoding (BOM)
+            with open(out_srt, "rb") as f:
+                content_bytes = f.read()
+                self.assertTrue(content_bytes.startswith(b"\xef\xbb\xbf"))
+
+            with open(out_srt, "r", encoding="utf-8-sig") as f:
+                content = f.read()
+                self.assertIn("00:00:01,000 --> 00:00:04,000", content)
+                self.assertIn("مرحبا بك في Smart Download", content)
+
+    def test_download_subtitle_none_returns_none(self):
+        """Verifies None or 'none' sub_id returns None without network call."""
+        res1 = download_subtitle_as_srt(None, "dummy.mp4")
+        res2 = download_subtitle_as_srt({"sub_id": "none"}, "dummy.mp4")
+        self.assertIsNone(res1)
+        self.assertIsNone(res2)
+
+    def test_build_stream_info_with_audio_dub(self):
+        """Verifies build_stream_info overrides audio URL and ext when dubbing is chosen."""
+        info = {
+            "id": "vid123",
+            "title": "Multilingual Video",
+            "duration": 300,
+            "webpage_url": "https://www.youtube.com/watch?v=vid123",
+        }
+        option = VideoFormatOption(
+            format_id="137+140",
+            resolution_label="1080p (Full HD)",
+            height=1080,
+            ext="mp4",
+            filesize_approx=150000000,
+            is_progressive=False,
+            video_url="https://googlevideo.com/video137",
+            audio_url="https://googlevideo.com/audio140_en",
+            audio_ext="m4a",
+            audio_size=10000000,
+        )
+
+        # Select Arabic dub
+        option.selected_audio_track = {
+            "track_id": "ar",
+            "language": "ar",
+            "url": "https://googlevideo.com/audio_dub_ar",
+            "ext": "m4a",
+            "filesize": 12000000,
+            "is_original": False,
+        }
+        # Select English subtitle
+        option.selected_subtitle_track = {
+            "sub_id": "en",
+            "language": "en",
+            "url": "https://example.com/sub_en.vtt",
+            "ext": "vtt",
+        }
+
+        stream_info = self.builder.build_stream_info(info, option)
+        self.assertEqual(stream_info.audio_url, "https://googlevideo.com/audio_dub_ar")
+        self.assertEqual(stream_info.audio_language, "ar")
+        self.assertFalse(stream_info.is_progressive)
+        self.assertEqual(stream_info.subtitle_track, option.selected_subtitle_track)
+
+    def test_build_stream_info_progressive_upgraded_for_dub(self):
+        """Verifies progressive stream is upgraded to dual-stream merge if non-original dub is picked."""
+        info = {
+            "id": "prog123",
+            "title": "Progressive Video",
+            "duration": 180,
+            "webpage_url": "https://www.youtube.com/watch?v=prog123",
+        }
+        option = VideoFormatOption(
+            format_id="22",
+            resolution_label="720p (HD)",
+            height=720,
+            ext="mp4",
+            filesize_approx=50000000,
+            is_progressive=True,
+            video_url="https://googlevideo.com/prog22",
+        )
+
+        option.selected_audio_track = {
+            "track_id": "ar",
+            "language": "ar",
+            "url": "https://googlevideo.com/audio_ar",
+            "ext": "m4a",
+            "is_original": False,
+        }
+
+        stream_info = self.builder.build_stream_info(info, option)
+        # Should now be split dual-stream for merging with dubbed audio
+        self.assertFalse(stream_info.is_progressive)
+        self.assertEqual(stream_info.audio_url, "https://googlevideo.com/audio_ar")
+        self.assertEqual(stream_info.audio_language, "ar")
+
+    def test_embed_subtitle_into_mp4_mock(self):
+        """Verifies FFmpeg command construction and atomic replacement for soft-embedding."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "movie.mp4")
+            srt_path = os.path.join(tmpdir, "movie.ara.srt")
+            with open(video_path, "wb") as vf:
+                vf.write(b"mp4_sample")
+            with open(srt_path, "wb") as sf:
+                sf.write(b"1\n00:00:01,000 --> 00:00:02,000\nSub\n")
+
+            def mock_run(cmd, **kwargs):
+                # Simulate creating target file
+                out_path = cmd[-1]
+                with open(out_path, "wb") as out_f:
+                    out_f.write(b"mp4_with_subtitles")
+                res = MagicMock()
+                res.returncode = 0
+                return res
+
+            with patch("subprocess.run", side_effect=mock_run):
+                ok = embed_subtitle_into_mp4(video_path, srt_path, "ar", "ffmpeg")
+                self.assertTrue(ok)
+                self.assertTrue(os.path.isfile(video_path))
+                self.assertTrue(os.path.isfile(srt_path))  # External srt preserved
+
+    def test_quality_modal_tracks_selection(self):
+        """Verifies QualitySelectionModal displays audio/sub comboboxes and attaches selections."""
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+        except Exception:
+            return  # Headless environment
+        try:
+            from smart_download.ui.modals.quality_modal import QualitySelectionModal
+            audio_tracks = [
+                {"track_id": "original", "language": "en", "label": "Original (Default)", "url": "http://audio_orig", "is_original": True},
+                {"track_id": "ar", "language": "ar", "label": "العربية (ar) - 128kbps", "url": "http://audio_ar", "is_original": False},
+            ]
+            sub_tracks = [
+                {"sub_id": "none", "language": "none", "label": "None / بدون ترجمة", "url": "", "is_auto": False},
+                {"sub_id": "ar", "language": "ar", "label": "العربية (Official)", "url": "http://sub_ar", "is_auto": False},
+            ]
+            opt = VideoFormatOption(
+                format_id="22",
+                resolution_label="720p (HD)",
+                height=720,
+                ext="mp4",
+                filesize_approx=1000000,
+                is_progressive=True,
+                video_url="http://vid22"
+            )
+            confirmed_opt = []
+            def on_confirm(selected_opt, dest):
+                confirmed_opt.append(selected_opt)
+
+            theme = {
+                "c_bg": "#0f172a", "c_panel": "#1e293b", "c_panel_light": "#334155",
+                "c_border": "#475569", "c_accent": "#38bdf8", "c_accent_dark": "#0284c7",
+                "c_success": "#10b981", "c_text_bright": "#f8fafc", "c_text_muted": "#94a3b8",
+                "c_input_bg": "#090d16"
+            }
+            modal = QualitySelectionModal(
+                parent=root,
+                video_title="Test Video",
+                duration=120,
+                options=[opt],
+                default_dest_path="test.mp4",
+                theme=theme,
+                on_confirm=on_confirm,
+                audio_tracks=audio_tracks,
+                subtitle_tracks=sub_tracks
+            )
+            self.assertIsNotNone(modal.cb_audio)
+            self.assertIsNotNone(modal.cb_sub)
+            self.assertEqual(modal.cb_audio.get(), "Original (Default)")
+            self.assertEqual(modal.cb_sub.get(), "None / بدون ترجمة")
+
+            modal.cb_audio.current(1)
+            modal.cb_sub.current(1)
+
+            modal._on_download()
+            self.assertEqual(len(confirmed_opt), 1)
+            self.assertEqual(confirmed_opt[0].selected_audio_track["track_id"], "ar")
+            self.assertEqual(confirmed_opt[0].selected_subtitle_track["sub_id"], "ar")
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+
+if __name__ == "__main__":
+    unittest.main()

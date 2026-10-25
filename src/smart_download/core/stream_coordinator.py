@@ -292,6 +292,7 @@ class StreamDownloadCoordinator:
                             if self.on_error:
                                 self.on_error(f"MP3 transcoding error: {ex}")
                     else:
+                        self._process_subtitles(path)
                         if self.on_complete:
                             self.on_complete(path, size, elapsed)
 
@@ -485,6 +486,7 @@ class StreamDownloadCoordinator:
 
             self.log(f"[{tag}] Phase 2/2: Merging video and audio streams into final container...")
             YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log)
+            self._process_subtitles(self.destination_path)
 
             elapsed = max(0.01, time.time() - self.start_time)
             final_size = os.path.getsize(self.destination_path)
@@ -522,4 +524,13 @@ class StreamDownloadCoordinator:
                                     shutil.rmtree(parts_dir, ignore_errors=True)
                                 except Exception:
                                     pass
+
+    def _process_subtitles(self, target_path: str):
+        sub = getattr(self.stream_info, "subtitle_track", None)
+        if sub and sub.get("sub_id") not in (None, "none") and sub.get("url"):
+            try:
+                from ..services.youtube_tracks import handle_subtitles_post_download
+                handle_subtitles_post_download(self.stream_info, target_path, on_log=self.log)
+            except Exception as e:
+                self.log(f"[SUBTITLES] Warning: {e}")
 

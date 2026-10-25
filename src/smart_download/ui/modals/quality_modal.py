@@ -38,7 +38,9 @@ class QualitySelectionModal(tk.Toplevel):
         on_confirm: Callable[[VideoFormatOption, str], None],
         on_cancel: Optional[Callable[[], None]] = None,
         on_open_in_main: Optional[Callable[[VideoFormatOption, str], None]] = None,
-        parent_app: Optional[Any] = None
+        parent_app: Optional[Any] = None,
+        audio_tracks: Optional[List[Dict[str, Any]]] = None,
+        subtitle_tracks: Optional[List[Dict[str, Any]]] = None
     ):
         super().__init__(parent)
         self.video_title = str(video_title or "YouTube Video")
@@ -50,6 +52,10 @@ class QualitySelectionModal(tk.Toplevel):
         self.on_cancel = on_cancel
         self.on_open_in_main = on_open_in_main
         self.parent_app = parent_app
+        self.audio_tracks = audio_tracks or []
+        self.subtitle_tracks = subtitle_tracks or []
+        self.cb_audio = None
+        self.cb_sub = None
 
         self.selected_option: Optional[VideoFormatOption] = self.options[0] if self.options else None
         self._confirmed = False
@@ -220,6 +226,13 @@ class QualitySelectionModal(tk.Toplevel):
 
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
         self.tree.bind("<Double-Button-1>", self._on_tree_double_click)
+
+        # Audio & Subtitle selection row
+        if self.audio_tracks or self.subtitle_tracks:
+            from ...services.youtube_tracks import build_audio_subtitle_row
+            self.cb_audio, self.cb_sub = build_audio_subtitle_row(
+                body, self.theme, self.audio_tracks, self.subtitle_tracks
+            )
 
         # Destination path card
         card_dest = tk.Frame(body, bg=c_panel, padx=12, pady=8, highlightbackground=c_border, highlightthickness=1)
@@ -407,9 +420,22 @@ class QualitySelectionModal(tk.Toplevel):
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, chosen)
 
+    def _attach_selected_tracks(self):
+        if not self.selected_option:
+            return
+        if self.audio_tracks and self.cb_audio:
+            idx = self.cb_audio.current()
+            if 0 <= idx < len(self.audio_tracks):
+                self.selected_option.selected_audio_track = self.audio_tracks[idx]
+        if self.subtitle_tracks and self.cb_sub:
+            idx = self.cb_sub.current()
+            if 0 <= idx < len(self.subtitle_tracks):
+                self.selected_option.selected_subtitle_track = self.subtitle_tracks[idx]
+
     def _on_download(self):
         if not self.selected_option:
             return
+        self._attach_selected_tracks()
         final_dest = self.entry_dest.get().strip()
         if not final_dest:
             if self.dest_path:
@@ -433,6 +459,7 @@ class QualitySelectionModal(tk.Toplevel):
     def _on_open_in_main(self):
         if not self.selected_option:
             return
+        self._attach_selected_tracks()
         final_dest = self.entry_dest.get().strip()
         if not final_dest:
             if self.dest_path:

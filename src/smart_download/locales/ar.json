@@ -235,5 +235,8 @@
   "modal_status_connecting": "الحالة: جارٍ الاتصال...",
   "modal_status_downloading": "الحالة: جارٍ التحميل...",
   "modal_status_complete": "✅ اكتمل التحميل بنجاح!",
-  "modal_status_paused": "الحالة: متوقف مؤقتاً"
+  "modal_status_paused": "الحالة: متوقف مؤقتاً",
+  "lbl_audio_track": "🎙️ لغة الصوت (الدبلجة):",
+  "lbl_subtitle_track": "💬 الترجمة (Subtitles):",
+  "sub_none": "بدون ترجمة (None)"
 }

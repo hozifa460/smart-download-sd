@@ -382,6 +382,36 @@ class YouTubeFormatBuilderMixin:
 
         res_str = option.resolution_label if (option.resolution_label and "Vertical" in option.resolution_label) else (f"{option.height}p" if option.height > 0 else "Audio Only")
 
+        sel_audio = getattr(option, "selected_audio_track", None)
+        sub_track = getattr(option, "selected_subtitle_track", None)
+        audio_lang = sel_audio.get("language") if sel_audio else None
+
+        if sel_audio and sel_audio.get("url"):
+            if option.is_audio_only:
+                option.video_url = sel_audio["url"]
+                option.video_headers = sel_audio.get("http_headers", {})
+                if sel_audio.get("ext"):
+                    option.ext = sel_audio["ext"]
+                if sel_audio.get("filesize"):
+                    option.filesize_approx = int(sel_audio["filesize"])
+            elif not option.is_progressive:
+                option.audio_url = sel_audio["url"]
+                option.audio_ext = sel_audio.get("ext", "m4a")
+                option.audio_headers = sel_audio.get("http_headers", {})
+                if hasattr(option, "audio_format_id"):
+                    setattr(option, "audio_format_id", sel_audio.get("format_id", ""))
+                if sel_audio.get("filesize"):
+                    option.audio_size = int(sel_audio["filesize"])
+            elif not sel_audio.get("is_original", True):
+                option.is_progressive = False
+                option.audio_url = sel_audio["url"]
+                option.audio_ext = sel_audio.get("ext", "m4a")
+                option.audio_headers = sel_audio.get("http_headers", {})
+                if hasattr(option, "audio_format_id"):
+                    setattr(option, "audio_format_id", sel_audio.get("format_id", ""))
+                if sel_audio.get("filesize"):
+                    option.audio_size = int(sel_audio["filesize"])
+
         if option.is_audio_only:
             out_fn = f"{clean_title}.{option.ext}"
             return YouTubeStreamInfo(
@@ -401,7 +431,9 @@ class YouTubeFormatBuilderMixin:
                 duration=duration,
                 thumbnail_url=thumbnail,
                 is_audio_only=True,
-                platform=platform
+                platform=platform,
+                subtitle_track=sub_track,
+                audio_language=audio_lang,
             )
         elif option.is_progressive or not option.audio_url:
             out_fn = f"{clean_title}.{option.ext}"
@@ -422,7 +454,9 @@ class YouTubeFormatBuilderMixin:
                 duration=duration,
                 thumbnail_url=thumbnail,
                 is_audio_only=False,
-                platform=platform
+                platform=platform,
+                subtitle_track=sub_track,
+                audio_language=audio_lang,
             )
         else:
             out_fn = f"{clean_title}.{option.ext}"
@@ -444,6 +478,8 @@ class YouTubeFormatBuilderMixin:
                 duration=duration,
                 thumbnail_url=thumbnail,
                 is_audio_only=False,
-                platform=platform
+                platform=platform,
+                subtitle_track=sub_track,
+                audio_language=audio_lang,
             )
 

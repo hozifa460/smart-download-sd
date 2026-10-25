@@ -19,6 +19,7 @@ from smart_download.services.youtube_service import (
     extract_media_platform,
     sanitize_filename,
 )
+from smart_download.services.youtube_tracks import extract_audio_tracks, extract_subtitle_tracks
 from ..modals.quality_modal import QualitySelectionModal
 from ..modals.confirm_modal import DownloadConfirmationModal
 
@@ -77,6 +78,8 @@ class YouTubeDownloadControllerMixin:
                     cookies_file=getattr(self, "cookies_file", "")
                 )
                 info, options = resolver.extract_format_options(url)
+                audio_tracks = extract_audio_tracks(info)
+                subtitle_tracks = extract_subtitle_tracks(info)
 
                 if self._yt_cancel_event.is_set():
                     self.log(f"[{tag}] Quality analysis cancelled.")
@@ -249,7 +252,9 @@ class YouTubeDownloadControllerMixin:
                             on_confirm=_on_confirm,
                             on_cancel=_on_cancel,
                             on_open_in_main=_on_open_in_main,
-                            parent_app=self
+                            parent_app=self,
+                            audio_tracks=audio_tracks,
+                            subtitle_tracks=subtitle_tracks
                         )
                     except Exception as e:
                         self._quality_modal = None

@@ -378,6 +378,8 @@ class VideoFormatOption:
     audio_ext: str = "m4a"
     audio_size: int = 0
     note: str = ""                      # Human-readable note e.g. "60 FPS • Lossless Merge (FFmpeg)"
+    selected_audio_track: Optional[Dict[str, Any]] = None
+    selected_subtitle_track: Optional[Dict[str, Any]] = None
 
 
 def format_filesize(num_bytes: int) -> str:
@@ -417,6 +419,8 @@ class YouTubeStreamInfo:
     thumbnail_url: str = ""
     is_audio_only: bool = False
     platform: str = "YouTube"
+    subtitle_track: Optional[Dict[str, Any]] = None
+    audio_language: Optional[str] = None
 
 
 # Clean alias
