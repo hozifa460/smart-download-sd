@@ -118,6 +118,7 @@ from smart_download.core.html_resolver import (
     validate_refresh_url,
 )
 from smart_download.core.engine import TurboDownloadEngine
+from smart_download.core.engine_workers import EngineWorkersMixin
 from smart_download.core.stream_coordinator import StreamDownloadCoordinator
 from smart_download.core.history import DownloadHistoryManager
 
@@ -144,6 +145,7 @@ from smart_download.services.startup_service import (
 from smart_download.services.single_instance import notify_running_instance
 from smart_download.services.youtube_service import (
     YouTubeResolver,
+    YouTubeFormatBuilderMixin,
     MediaResolver,
     is_youtube_url,
     is_social_media_url,
@@ -169,6 +171,7 @@ from smart_download.services.updater_service import (
     parse_version,
     is_newer_version,
     YtDlpAutoUpdater,
+    _ExternalYtDlpFinder,
     AppAutoUpdater,
     get_ytdlp_plugin_dir,
 )
@@ -180,10 +183,22 @@ from smart_download.services.browser.registry import (
     register_browser_extensions,
     unregister_browser_extensions,
     is_registered as is_browser_registered,
+    is_extension_registered,
     get_status as get_browser_reg_status,
+    compute_unpacked_extension_id,
+
+    get_project_root,
+    get_default_extension_origins,
+    generate_host_manifest,
+    generate_launcher_batch,
 )
 
-# Re-export UI
+# Re-export UI & Controllers
+from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+from smart_download.ui.controllers.media_download_controller import MediaDownloadControllerMixin
+from smart_download.ui.controllers.window_controller import WindowChromeMixin
+from smart_download.ui.controllers.lifecycle_controller import WindowLifecycleMixin
+from smart_download.ui.controllers.browser_controller import BrowserControllerMixin
 from smart_download.ui.components.base_modal import SafeModalDialog
 from smart_download.ui.components.tooltip import ToolTip
 from smart_download.ui.modals.toasts import FetchingLinkToast, StartupWelcomeToast
@@ -192,6 +207,7 @@ from smart_download.ui.modals.confirm_modal import (
     DownloadConfirmationModal,
     DownloadConfirmationDialog,
     DownloadConfirmModal,
+    ConfirmModalLogicMixin,
 )
 from smart_download.ui.modals.candidates_modal import MultipleCandidatesModal
 from smart_download.ui.modals.refresh_modal import RefreshLinkModal, RefreshLinkDialog
@@ -205,6 +221,7 @@ from smart_download.ui.main_window import (
     DownloaderApp,
     SmartDownloadGUI,
 )
+
 
 import types
 

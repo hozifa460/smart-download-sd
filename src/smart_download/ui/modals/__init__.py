@@ -4,6 +4,7 @@ from .confirm_modal import (
     DownloadConfirmationModal,
     DownloadConfirmationDialog,
     DownloadConfirmModal,
+    ConfirmModalLogicMixin,
 )
 from .candidates_modal import MultipleCandidatesModal
 from .refresh_modal import RefreshLinkModal, RefreshLinkDialog
@@ -16,8 +17,10 @@ __all__ = [
     "DownloadConfirmationModal",
     "DownloadConfirmationDialog",
     "DownloadConfirmModal",
+    "ConfirmModalLogicMixin",
     "MultipleCandidatesModal",
     "RefreshLinkModal",
     "RefreshLinkDialog",
     "AppUpdateModal",
 ]
+

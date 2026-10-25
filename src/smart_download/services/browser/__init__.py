@@ -14,7 +14,17 @@ from .registry import (
     register_browser_extensions,
     unregister_browser_extensions,
     is_registered,
+    is_extension_registered,
     get_status,
+    compute_unpacked_extension_id,
+    get_project_root,
+    get_default_extension_origins,
+    generate_host_manifest,
+    generate_launcher_batch,
+    HOST_NAME,
+    HOST_DESCRIPTION,
+    CHROME_REG_KEY,
+    EDGE_REG_KEY,
 )
 
 handle_native_message = handle_payload
@@ -37,5 +47,16 @@ __all__ = [
     "register_browser_extensions",
     "unregister_browser_extensions",
     "is_registered",
+    "is_extension_registered",
     "get_status",
+    "compute_unpacked_extension_id",
+    "get_project_root",
+    "get_default_extension_origins",
+    "generate_host_manifest",
+    "generate_launcher_batch",
+    "HOST_NAME",
+    "HOST_DESCRIPTION",
+    "CHROME_REG_KEY",
+    "EDGE_REG_KEY",
 ]
+

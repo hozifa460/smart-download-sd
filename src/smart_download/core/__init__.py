@@ -8,6 +8,7 @@ from .html_resolver import (
     validate_refresh_url,
 )
 from .engine import TurboDownloadEngine
+from .engine_workers import EngineWorkersMixin
 from .stream_coordinator import StreamDownloadCoordinator
 from .history import DownloadHistoryManager
 
@@ -21,6 +22,7 @@ __all__ = [
     "resolve_real_download_url",
     "validate_refresh_url",
     "TurboDownloadEngine",
+    "EngineWorkersMixin",
     "StreamDownloadCoordinator",
     "DownloadHistoryManager",
 ]

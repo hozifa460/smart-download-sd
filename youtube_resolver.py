@@ -26,6 +26,7 @@ from smart_download.services.youtube_service import (
     find_ffmpeg_bin,
     sanitize_filename,
     YouTubeResolver,
+    YouTubeFormatBuilderMixin,
     MediaResolver,
     YouTubeStreamInfo,
     MediaStreamInfo,

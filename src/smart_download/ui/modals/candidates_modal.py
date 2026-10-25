@@ -183,7 +183,7 @@ class MultipleCandidatesModal(tk.Toplevel):
         master_bar = tk.Frame(body, bg=self.c_panel, padx=10, pady=6, highlightbackground=self.c_border, highlightthickness=1)
         master_bar.pack(fill=tk.X, pady=(0, 8))
 
-        self.var_select_all = tk.BooleanVar(value=True)
+        self.var_select_all = tk.BooleanVar(master=self, value=True)
         self.chk_select_all = tk.Checkbutton(
             master_bar,
             text=tr("multi_select_all"),
@@ -291,7 +291,7 @@ class MultipleCandidatesModal(tk.Toplevel):
         self.candidate_vars.clear()
 
         for idx, cand in enumerate(self.candidates):
-            var = tk.BooleanVar(value=True)
+            var = tk.BooleanVar(master=self, value=True)
             self.candidate_vars.append(var)
 
             fn = cand.get("filename") or derive_download_filename(cand.get("url", ""))

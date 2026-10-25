@@ -120,6 +120,9 @@ def prepare_payload():
         reg_script = os.path.join(BASE_DIR, "register_browser.py")
     if os.path.isfile(reg_script):
         shutil.copy2(reg_script, os.path.join(PAYLOAD_DIR, "register_browser.py"))
+    hm_script = os.path.join(BASE_DIR, "src", "smart_download", "services", "browser", "host_manifest.py")
+    if os.path.isfile(hm_script):
+        shutil.copy2(hm_script, os.path.join(PAYLOAD_DIR, "host_manifest.py"))
 
     print(f"[+] Installer payload prepared at: {PAYLOAD_DIR}")
 

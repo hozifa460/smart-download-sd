@@ -29,11 +29,13 @@ from .updater_service import (
     parse_version,
     is_newer_version,
     YtDlpAutoUpdater,
+    _ExternalYtDlpFinder,
     AppAutoUpdater,
     get_ytdlp_plugin_dir,
 )
 from .youtube_service import (
     YouTubeResolver,
+    YouTubeFormatBuilderMixin,
     MediaResolver,
     is_youtube_url,
     is_social_media_url,
@@ -64,7 +66,13 @@ from .browser import (
     register_browser_extensions,
     unregister_browser_extensions,
     is_registered,
+    is_extension_registered,
     get_status,
+    compute_unpacked_extension_id,
+    get_project_root,
+    get_default_extension_origins,
+    generate_host_manifest,
+    generate_launcher_batch,
 )
 
 __all__ = [
@@ -96,9 +104,11 @@ __all__ = [
     "parse_version",
     "is_newer_version",
     "YtDlpAutoUpdater",
+    "_ExternalYtDlpFinder",
     "AppAutoUpdater",
     "get_ytdlp_plugin_dir",
     "YouTubeResolver",
+    "YouTubeFormatBuilderMixin",
     "MediaResolver",
     "is_youtube_url",
     "is_social_media_url",
@@ -127,5 +137,11 @@ __all__ = [
     "register_browser_extensions",
     "unregister_browser_extensions",
     "is_registered",
+    "is_extension_registered",
     "get_status",
+    "compute_unpacked_extension_id",
+    "get_project_root",
+    "get_default_extension_origins",
+    "generate_host_manifest",
+    "generate_launcher_batch",
 ]
