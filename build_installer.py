@@ -14,6 +14,9 @@ import shutil
 import subprocess
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.join(BASE_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 DIST_DIR = os.path.join(BASE_DIR, "dist")
 PAYLOAD_DIR = os.path.join(BASE_DIR, "installer_payload")
 
@@ -104,12 +107,17 @@ def prepare_payload():
         shutil.copytree(src_ext, dest_ext)
 
     # 4. Host launcher batch and registration script
-    import register_browser as rb
+    try:
+        from smart_download.services.browser import registry as rb
+    except ImportError:
+        import register_browser as rb
     rb.generate_launcher_batch(os.path.join(PAYLOAD_DIR, "sd_host.bat"))
     src_json = os.path.join(BASE_DIR, "com.smartdownload.host.json")
     if os.path.isfile(src_json):
         shutil.copy2(src_json, os.path.join(PAYLOAD_DIR, "com.smartdownload.host.json"))
-    reg_script = os.path.join(BASE_DIR, "register_browser.py")
+    reg_script = os.path.join(BASE_DIR, "src", "smart_download", "services", "browser", "registry.py")
+    if not os.path.isfile(reg_script):
+        reg_script = os.path.join(BASE_DIR, "register_browser.py")
     if os.path.isfile(reg_script):
         shutil.copy2(reg_script, os.path.join(PAYLOAD_DIR, "register_browser.py"))
 

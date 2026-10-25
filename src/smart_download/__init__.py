@@ -20,7 +20,11 @@ from .config import (
 from .locales.i18n import LocalizationManager, tr, get_current_language, set_current_language
 from .core.engine import TurboDownloadEngine
 from .core.chunk import DownloadChunk, get_permissive_ssl_context
-from .ui.main_window import ModernFramelessGUI, main
+try:
+    from .ui.main_window import ModernFramelessGUI, main
+except Exception:
+    ModernFramelessGUI = None  # type: ignore
+    main = None  # type: ignore
 
 __all__ = [
     "__version__",

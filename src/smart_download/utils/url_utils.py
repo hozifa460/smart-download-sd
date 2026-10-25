@@ -410,3 +410,23 @@ def parse_speed_limit(val_str: Any) -> float:
     except ValueError:
         return 0.0
 
+
+def format_speed(speed: Any, allow_unlimited: bool = False) -> str:
+    """Format speed value in bytes/sec into a human-readable string (e.g. '0 B/s', '500 B/s', '1.0 KB/s', '2.50 MB/s', '1.00 GB/s')."""
+    try:
+        val = float(speed)
+    except (TypeError, ValueError):
+        val = 0.0
+
+    if val <= 0:
+        return "Unlimited" if allow_unlimited else "0 B/s"
+
+    if val >= 1024 * 1024 * 1024:
+        return f"{val / (1024 * 1024 * 1024):.2f} GB/s"
+    if val >= 1024 * 1024:
+        return f"{val / (1024 * 1024):.2f} MB/s"
+    if val >= 1024:
+        return f"{val / 1024:.1f} KB/s"
+    return f"{val:.0f} B/s"
+
+

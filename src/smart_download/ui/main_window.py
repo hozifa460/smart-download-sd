@@ -73,6 +73,7 @@ from ..utils.url_utils import (
     is_potential_html_url,
     parse_filename_from_cd_header,
     parse_speed_limit,
+    format_speed,
 )
 from ..utils.file_ops import (
     MagicBytesDetector,
@@ -202,6 +203,7 @@ class ModernFramelessGUI:
         self.cookies_browser: str = str(get_setting("cookies_browser", "auto") or "auto")
         self.cookies_file: str = str(get_setting("cookies_file", "") or "")
         self.engine: Optional[Union[TurboDownloadEngine, StreamDownloadCoordinator]] = None
+        self.speed_limit: float = 0.0
         self._yt_cancel_event = threading.Event()
         self._quality_modal: Optional[tk.Toplevel] = None
         self._confirm_modal: Optional[tk.Toplevel] = None
@@ -1106,6 +1108,7 @@ class ModernFramelessGUI:
         if os.path.isfile(png_path):
             try:
                 from PIL import Image, ImageTk
+                icon_dim = max(20, int(20 * getattr(self, "dpi_scale", 1.0)))
                 with Image.open(png_path) as im:
                     raw_icon = im.resize((icon_dim, icon_dim), Image.Resampling.LANCZOS)
                     self._title_icon_photo = ImageTk.PhotoImage(raw_icon)
@@ -1891,6 +1894,8 @@ class ModernFramelessGUI:
             self.lbl_active_limit.configure(text=active_disp, fg=self.c_warning)
             bytes_sec = kb_val * 1024.0
 
+        self.speed_limit = bytes_sec
+
         # Sync entry box without triggering infinite callback
         self.entry_custom_speed.delete(0, tk.END)
         self.entry_custom_speed.insert(0, str(kb_val))
@@ -1930,6 +1935,7 @@ class ModernFramelessGUI:
 
         kb_val = max(0.0, kb_val)
         bytes_sec = kb_val * 1024.0 if kb_val > 0 else 0.0
+        self.speed_limit = bytes_sec
 
         if bytes_sec <= 0:
             self.lbl_active_limit.configure(text=tr("lbl_current_unlimited", "● Current: Unlimited"), fg=self.c_success)

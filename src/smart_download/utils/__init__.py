@@ -9,6 +9,7 @@ from .url_utils import (
     is_potential_html_url,
     parse_filename_from_cd_header,
     parse_speed_limit,
+    format_speed,
 )
 from .file_ops import (
     MagicBytesDetector,
@@ -20,7 +21,16 @@ from .file_ops import (
     open_downloaded_file,
     open_containing_folder,
 )
-from .tk_helpers import _detach_photo_tk, _detach_widget_tk_refs, _drain_bg_tk_callbacks
+
+try:
+    from .tk_helpers import _detach_photo_tk, _detach_widget_tk_refs, _drain_bg_tk_callbacks
+except Exception:
+    def _detach_photo_tk(photo=None):  # type: ignore
+        pass
+    def _detach_widget_tk_refs(widget=None):  # type: ignore
+        pass
+    def _drain_bg_tk_callbacks():  # type: ignore
+        pass
 
 __all__ = [
     "enable_high_dpi_awareness",
@@ -35,6 +45,7 @@ __all__ = [
     "is_potential_html_url",
     "parse_filename_from_cd_header",
     "parse_speed_limit",
+    "format_speed",
     "MagicBytesDetector",
     "calculate_file_integrity",
     "auto_unpack_archive",
