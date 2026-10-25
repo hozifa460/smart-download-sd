@@ -90,7 +90,11 @@ from smart_download.utils.url_utils import (
     is_potential_html_url,
     parse_filename_from_cd_header,
     parse_speed_limit,
+    format_speed,
 )
+from smart_download.utils.speed_utils import parse_speed_limit as parse_speed_limit_direct, format_speed as format_speed_direct
+from smart_download.utils.magic_detector import MagicBytesDetector as MagicBytesDetector_direct
+from smart_download.utils.archive_utils import calculate_file_integrity as calculate_file_integrity_direct, auto_unpack_archive as auto_unpack_archive_direct
 from smart_download.utils.file_ops import (
     MagicBytesDetector,
     calculate_file_integrity,
@@ -118,6 +122,7 @@ from smart_download.core.html_resolver import (
     validate_refresh_url,
 )
 from smart_download.core.engine import TurboDownloadEngine
+from smart_download.core.engine_resumer import EngineResumerMixin
 from smart_download.core.engine_workers import EngineWorkersMixin
 from smart_download.core.stream_coordinator import StreamDownloadCoordinator
 from smart_download.core.history import DownloadHistoryManager
@@ -196,9 +201,25 @@ from smart_download.services.browser.registry import (
 # Re-export UI & Controllers
 from smart_download.ui.controllers.download_controller import DownloadControllerMixin
 from smart_download.ui.controllers.media_download_controller import MediaDownloadControllerMixin
-from smart_download.ui.controllers.window_controller import WindowChromeMixin
+from smart_download.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+from smart_download.ui.controllers.batch_download_controller import BatchDownloadControllerMixin
+from smart_download.ui.controllers.link_refresh_controller import LinkRefreshControllerMixin
+from smart_download.ui.controllers.settings_controller import SettingsControllerMixin
+from smart_download.ui.controllers.locale_controller import LocaleControllerMixin
+from smart_download.ui.controllers.speed_limiter_controller import SpeedLimiterControllerMixin
+from smart_download.ui.controllers.dialog_controller import DialogControllerMixin
 from smart_download.ui.controllers.lifecycle_controller import WindowLifecycleMixin
+from smart_download.ui.controllers.toast_controller import ToastControllerMixin
+from smart_download.ui.controllers.update_controller import UpdateControllerMixin
+from smart_download.ui.controllers.theme_controller import ThemeControllerMixin
+from smart_download.ui.controllers.dispatch_controller import DispatchControllerMixin
+from smart_download.ui.controllers.window_controller import WindowChromeMixin
 from smart_download.ui.controllers.browser_controller import BrowserControllerMixin
+from smart_download.ui.panels.metrics_panel import MetricsPanelMixin
+from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
+from smart_download.ui.panels.controls_panel import ControlsPanelMixin
+from smart_download.ui.panels.inputs_panel import InputsPanelMixin
+from smart_download.ui.panels.history_panel import HistoryPanelMixin
 from smart_download.ui.components.base_modal import SafeModalDialog
 from smart_download.ui.components.tooltip import ToolTip
 from smart_download.ui.modals.toasts import FetchingLinkToast, StartupWelcomeToast

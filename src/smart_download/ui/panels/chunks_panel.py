@@ -1,87 +1,27 @@
 """
-ChunksPanelMixin: Dynamic chunk visualization, performance metrics card,
-tabbed consoles, and chunk-tree context actions.
+ChunksPanelMixin: Dynamic chunk visualization, tabbed consoles, and chunk-tree context actions.
 """
 import os
 import sys
 import subprocess
-from typing import List, Optional, Any, Dict
+from typing import List, Any
 
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = None  # type: ignore
+    ttk = None  # type: ignore
 
-from ...locales.i18n import tr
-from ...core.chunk import DownloadChunk
+from smart_download.i18n import tr
+from .metrics_panel import MetricsPanelMixin
 
 
-class ChunksPanelMixin:
+class ChunksPanelMixin(MetricsPanelMixin):
     """
-    Mixin providing real-time metrics, chunk segment visualization,
-    tab container (chunks, activity log, history), and chunk actions.
+    Mixin providing chunk segment visualization, tab container (chunks, activity log, history),
+    and chunk tree context actions. Inherits MetricsPanelMixin.
     """
-
-    def _build_metrics_card(self, parent):
-        """Overall progress bar and 4 real-time metric cards."""
-        card = tk.Frame(parent, bg=self.c_panel, padx=14, pady=10, relief="flat", highlightbackground=self.c_border, highlightthickness=1)
-        card.pack(fill=tk.X, pady=(0, 10))
-
-        # Main Progress Canvas
-        prog_height = max(22, int(24 * getattr(self, "dpi_scale", 1.0)))
-        self.canvas_prog = tk.Canvas(card, height=prog_height, bg=self.c_input_bg, highlightthickness=0)
-        self.canvas_prog.pack(fill=tk.X, pady=(0, 10))
-        self._draw_main_progress(0.0)
-
-        # 4 Metric Cards Grid
-        grid_frame = tk.Frame(card, bg=self.c_panel)
-        grid_frame.pack(fill=tk.X)
-        for i in range(4):
-            grid_frame.columnconfigure(i, weight=1, uniform="metric")
-
-        # 1. Download Speed
-        self.card_speed = self._create_metric_box(grid_frame, 0, tr("metric_speed"), "0.0 KB/s")
-        self.lbl_t_speed = self.card_speed.master.lbl_t
-        # 2. Downloaded / Total
-        self.card_size = self._create_metric_box(grid_frame, 1, tr("metric_total_size"), "0 B / 0 B (0%)")
-        self.lbl_t_size = self.card_size.master.lbl_t
-        # 3. ETA
-        self.card_eta = self._create_metric_box(grid_frame, 2, tr("metric_eta"), "--:--:--")
-        self.lbl_t_eta = self.card_eta.master.lbl_t
-        # 4. Connections
-        self.card_threads = self._create_metric_box(grid_frame, 3, tr("metric_threads"), "0 / 0 Threads")
-        self.lbl_t_threads = self.card_threads.master.lbl_t
-
-    def _create_metric_box(self, parent, col, title, initial_value):
-        frame = tk.Frame(parent, bg=self.c_bg, padx=10, pady=8, highlightbackground=self.c_border, highlightthickness=1)
-        frame.grid(row=0, column=col, padx=4, sticky="nsew")
-
-        lbl_t = tk.Label(frame, text=title, font=("Segoe UI", 8, "bold"), bg=self.c_bg, fg=self.c_text_muted)
-        lbl_t.pack(anchor="w")
-        frame.lbl_t = lbl_t
-
-        lbl_v = tk.Label(frame, text=initial_value, font=("Segoe UI", 11, "bold"), bg=self.c_bg, fg=self.c_text_bright)
-        lbl_v.pack(anchor="w", pady=(2, 0))
-        frame.lbl_v = lbl_v
-        return lbl_v
-
-    def _draw_main_progress(self, pct: float):
-        self.canvas_prog.delete("all")
-        w = self.canvas_prog.winfo_width()
-        if w <= 1:
-            w = self.width - 64
-        h = self.canvas_prog.winfo_height() or max(22, int(24 * getattr(self, "dpi_scale", 1.0)))
-
-        # Background track
-        self.canvas_prog.create_rectangle(0, 0, w, h, fill=self.c_input_bg, outline=self.c_border)
-
-        # Progress fill
-        fill_w = max(0.0, min(float(w), (pct / 100.0) * float(w)))
-        if fill_w > 0:
-            self.canvas_prog.create_rectangle(0, 0, fill_w, h, fill=self.c_accent_dark, outline="")
-            self.canvas_prog.create_line(0, 1, fill_w, 1, fill=self.c_accent)
-
-        # Percentage text overlay
-        text_color = "white" if fill_w > (w * 0.45) else self.c_text_bright
-        self.canvas_prog.create_text(w // 2, h // 2, text=f"{pct:.1f}%", font=("Segoe UI", 9, "bold"), fill=text_color)
 
     def _build_chunk_visualizer_card(self, parent):
         """Visual TDM-style horizontal segmented chunk block visualizer."""
@@ -109,7 +49,7 @@ class ChunksPanelMixin:
             return
         w = canvas.winfo_width()
         if w <= 1:
-            w = self.width - 64
+            w = getattr(self, "width", 800) - 64
         h = canvas.winfo_height() or max(30, int(32 * getattr(self, "dpi_scale", 1.0)))
 
         # Cache lightweight visual signature to eliminate redundant 4x/sec canvas redraws
@@ -127,12 +67,18 @@ class ChunksPanelMixin:
 
         canvas.delete("all")
 
+        c_input_bg = getattr(self, "c_input_bg", "#090d16")
+        c_border = getattr(self, "c_border", "#475569")
+        c_text_muted = getattr(self, "c_text_muted", "#94a3b8")
+        c_success = getattr(self, "c_success", "#10b981")
+        c_accent = getattr(self, "c_accent", "#38bdf8")
+
         # Background track
-        canvas.create_rectangle(0, 0, w, h, fill=self.c_input_bg, outline=self.c_border)
+        canvas.create_rectangle(0, 0, w, h, fill=c_input_bg, outline=c_border)
 
         if not chunks or not self.engine or self.engine.total_size <= 0:
             msg = "Waiting to start..." if not self.engine else "Single-stream / unknown size"
-            canvas.create_text(w // 2, h // 2, text=msg, font=("Segoe UI", 8), fill=self.c_text_muted)
+            canvas.create_text(w // 2, h // 2, text=msg, font=("Segoe UI", 8), fill=c_text_muted)
             return
 
         total_size = self.engine.total_size
@@ -151,11 +97,11 @@ class ChunksPanelMixin:
 
             # Segment downloaded portion
             if done_x > start_x:
-                fill_color = self.c_success if status == "completed" else self.c_accent
+                fill_color = c_success if status == "completed" else c_accent
                 canvas.create_rectangle(start_x, 2, done_x, h - 2, fill=fill_color, outline="")
 
             # Chunk divider line
-            canvas.create_line(end_x, 0, end_x, h, fill=self.c_border, width=1)
+            canvas.create_line(end_x, 0, end_x, h, fill=c_border, width=1)
 
             # Chunk label if wide enough
             if chunk_w > 36:
@@ -482,7 +428,8 @@ class ChunksPanelMixin:
             try:
                 self.root.clipboard_clear()
                 self.root.clipboard_append(url)
-                self.log(f"Copied download URL to clipboard: {url}")
+                if hasattr(self, "log") and callable(self.log):
+                    self.log(f"Copied download URL to clipboard: {url}")
             except Exception:
                 pass
 
@@ -498,4 +445,8 @@ class ChunksPanelMixin:
                 else:
                     subprocess.Popen(["xdg-open", folder])
             except Exception as e:
-                self.log(f"Failed to open folder: {e}")
+                if hasattr(self, "log") and callable(self.log):
+                    self.log(f"Failed to open folder: {e}")
+
+
+__all__ = ["ChunksPanelMixin", "MetricsPanelMixin"]

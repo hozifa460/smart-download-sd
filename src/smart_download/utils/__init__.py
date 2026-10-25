@@ -1,5 +1,6 @@
 from .dpi import enable_high_dpi_awareness, get_windows_work_area
 from .clipboard import _win32_clipboard_get, get_clipboard_text
+from .speed_utils import parse_speed_limit, format_speed
 from .url_utils import (
     COMMON_DOWNLOAD_EXTENSIONS,
     WEB_SCRIPT_EXTENSIONS,
@@ -8,13 +9,10 @@ from .url_utils import (
     derive_download_filename,
     is_potential_html_url,
     parse_filename_from_cd_header,
-    parse_speed_limit,
-    format_speed,
 )
+from .magic_detector import MagicBytesDetector
+from .archive_utils import calculate_file_integrity, auto_unpack_archive
 from .file_ops import (
-    MagicBytesDetector,
-    calculate_file_integrity,
-    auto_unpack_archive,
     get_file_category_and_icon,
     CATEGORY_SUBFOLDERS,
     resolve_categorized_path,

@@ -1,24 +1,16 @@
 """
-Window management, title bar chrome, event loop dispatch, and lifecycle controller mixin for Smart Download (SD).
+Window management, title bar chrome, and geometry controller mixin for Smart Download (SD).
 """
 import os
-import sys
-import threading
 import ctypes
-from typing import Optional, Callable, Dict, Any
 
 try:
     import tkinter as tk
-    from tkinter import ttk, messagebox
 except Exception:
     tk = None  # type: ignore
-    ttk = None  # type: ignore
-    messagebox = None  # type: ignore
 
 from smart_download.i18n import LocalizationManager, tr
 from smart_download.config import get_resource_path, APP_VERSION
-from smart_download.utils import _detach_photo_tk, _drain_bg_tk_callbacks
-from smart_download.ui.components.base_modal import SafeModalDialog
 from smart_download.ui.components.tooltip import ToolTip
 from smart_download.services import (
     IS_WINDOWS,
@@ -34,12 +26,13 @@ from smart_download.services import (
     SW_SHOW,
 )
 
-
 from .lifecycle_controller import WindowLifecycleMixin
+from .theme_controller import ThemeControllerMixin
+from .dispatch_controller import DispatchControllerMixin
 
 
-class WindowChromeMixin(WindowLifecycleMixin):
-    """Provides window setup, custom frameless title bar dragging, safe modals, and teardown."""
+class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLifecycleMixin):
+    """Provides window setup, custom frameless title bar dragging, and window geometry."""
 
     def _setup_window(self):
         """Configures frameless window, centering, and dragging."""
@@ -176,62 +169,6 @@ class WindowChromeMixin(WindowLifecycleMixin):
             self.root.focus_force()
         except Exception:
             pass
-
-    def _init_theme(self):
-        """Palette and styling definitions."""
-        self.c_bg = "#0f172a"          # Slate 900
-        self.c_panel = "#1e293b"       # Slate 800
-        self.c_panel_light = "#334155" # Slate 700
-        self.c_border = "#475569"      # Slate 600
-        self.c_accent = "#38bdf8"      # Sky 400
-        self.c_accent_dark = "#0284c7" # Sky 600
-        self.c_success = "#10b981"     # Emerald 500
-        self.c_warning = "#f59e0b"     # Amber 500
-        self.c_danger = "#ef4444"      # Red 500
-        self.c_text_bright = "#f8fafc" # Slate 50
-        self.c_text_muted = "#94a3b8"  # Slate 400
-        self.c_input_bg = "#090d16"
-
-        self.root.configure(bg=self.c_bg)
-
-        # TTK Styles
-        self.style = ttk.Style(self.root)
-        self.style.theme_use("clam")
-
-        # Treeview styling
-        self.style.configure(
-            "Custom.Treeview",
-            background=self.c_panel,
-            foreground=self.c_text_bright,
-            fieldbackground=self.c_panel,
-            borderwidth=0,
-            rowheight=max(26, int(28 * getattr(self, "dpi_scale", 1.0))),
-            font=("Segoe UI", 9)
-        )
-        self.style.configure(
-            "Custom.Treeview.Heading",
-            background=self.c_panel_light,
-            foreground=self.c_accent,
-            font=("Segoe UI", 9, "bold"),
-            relief="flat"
-        )
-        self.style.map("Custom.Treeview.Heading", background=[('active', self.c_border)])
-        self.style.map("Custom.Treeview", background=[('selected', self.c_accent_dark)])
-
-        # Notebook tabs
-        self.style.configure("Custom.TNotebook", background=self.c_panel, borderwidth=0)
-        self.style.configure(
-            "Custom.TNotebook.Tab",
-            background=self.c_panel_light,
-            foreground=self.c_text_bright,
-            padding=[14, 5],
-            font=("Segoe UI", 9, "bold")
-        )
-        self.style.map(
-            "Custom.TNotebook.Tab",
-            background=[("selected", self.c_accent_dark)],
-            foreground=[("selected", self.c_text_bright)]
-        )
 
     def _build_title_bar(self, parent):
         """Constructs the custom dark draggable title bar."""
@@ -386,31 +323,6 @@ class WindowChromeMixin(WindowLifecycleMixin):
         except Exception:
             pass
 
-    def log(self, message: str):
-        """Appends message to activity log console."""
-        if getattr(self, "_closing", False):
-            return
-        job_box = [None]
-        def _append():
-            try:
-                if hasattr(self, "_log_jobs") and job_box[0] in self._log_jobs:
-                    self._log_jobs.remove(job_box[0])
-                if not getattr(self, "_closing", False) and hasattr(self, "txt_log"):
-                    if hasattr(self, "root") and self.root and self.root.winfo_exists():
-                        if self.txt_log.winfo_exists():
-                            self.txt_log.insert(tk.END, message + "\n")
-                            self.txt_log.see(tk.END)
-            except Exception:
-                pass
-        try:
-            if not getattr(self, "_closing", False) and hasattr(self, "root") and self.root and self.root.winfo_exists():
-                j = self.root.after(0, _append)
-                job_box[0] = j
-                if hasattr(self, "_log_jobs"):
-                    self._log_jobs.append(j)
-        except Exception:
-            pass
-
     def is_window_hidden_or_minimized(self) -> bool:
         """Determines if the main application window is minimized, iconic, withdrawn, or hidden."""
         if getattr(self, "_start_hidden", False):
@@ -436,23 +348,10 @@ class WindowChromeMixin(WindowLifecycleMixin):
             pass
         return False
 
-    def dispatch_to_main_thread(self, fn: Callable, *args, **kwargs):
-        """Safely queues a callable to be executed on the Tkinter main thread."""
-        if hasattr(self, "_gui_dispatch_queue"):
-            self._gui_dispatch_queue.put((fn, args, kwargs))
-        if threading.current_thread() == threading.main_thread():
-            self._drain_dispatch_queue()
 
-    def _drain_dispatch_queue(self):
-        """Executes all pending dispatch tasks on the main thread."""
-        _drain_bg_tk_callbacks()
-        if hasattr(self, "_gui_dispatch_queue"):
-            while not self._gui_dispatch_queue.empty():
-                try:
-                    action, a_args, a_kwargs = self._gui_dispatch_queue.get_nowait()
-                    action(*a_args, **a_kwargs)
-                except Exception:
-                    pass
-        _drain_bg_tk_callbacks()
-
-__all__ = ['WindowChromeMixin', 'WindowLifecycleMixin']
+__all__ = [
+    'WindowChromeMixin',
+    'WindowLifecycleMixin',
+    'ThemeControllerMixin',
+    'DispatchControllerMixin',
+]

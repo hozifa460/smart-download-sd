@@ -1,0 +1,123 @@
+"""
+Speed limiter controller mixin for Smart Download (SD).
+"""
+try:
+    import tkinter as tk
+except Exception:
+    tk = None  # type: ignore
+
+from smart_download.i18n import tr
+
+
+class SpeedLimiterControllerMixin:
+    """Provides bandwidth speed limit configuration, presets, and dynamic slider throttling."""
+
+    def _on_slider_moved(self, val_str):
+        """Dynamic slider movement throttles engine in real-time."""
+        try:
+            kb_val = int(float(val_str))
+        except ValueError:
+            return
+
+        c_success = getattr(self, "c_success", "#10b981")
+        c_warning = getattr(self, "c_warning", "#f59e0b")
+
+        if kb_val <= 0:
+            if hasattr(self, "lbl_slider_val") and self.lbl_slider_val:
+                self.lbl_slider_val.configure(text=f"{tr('lbl_unlimited', 'Unlimited')} (0 KB/s)", fg=c_success)
+            if hasattr(self, "lbl_active_limit") and self.lbl_active_limit:
+                self.lbl_active_limit.configure(text=tr("lbl_current_unlimited", "● Current: Unlimited"), fg=c_success)
+            if hasattr(self, "limit_preset_var") and self.limit_preset_var:
+                self.limit_preset_var.set("Unlimited")
+            bytes_sec = 0.0
+        else:
+            if kb_val >= 1024:
+                disp = f"{kb_val / 1024.0:.1f} MB/s ({kb_val:,} KB/s)"
+                active_disp = tr("lbl_current_limit", "● Current: {limit}").format(limit=f"{kb_val / 1024.0:.2f} MB/s")
+            else:
+                disp = f"{kb_val} KB/s"
+                active_disp = tr("lbl_current_limit", "● Current: {limit}").format(limit=f"{kb_val} KB/s")
+            if hasattr(self, "lbl_slider_val") and self.lbl_slider_val:
+                self.lbl_slider_val.configure(text=disp, fg=c_warning)
+            if hasattr(self, "lbl_active_limit") and self.lbl_active_limit:
+                self.lbl_active_limit.configure(text=active_disp, fg=c_warning)
+            bytes_sec = kb_val * 1024.0
+
+        self.speed_limit = bytes_sec
+
+        # Sync entry box without triggering infinite callback
+        if hasattr(self, "entry_custom_speed") and tk and self.entry_custom_speed:
+            self.entry_custom_speed.delete(0, tk.END)
+            self.entry_custom_speed.insert(0, str(kb_val))
+
+        engine = getattr(self, "engine", None)
+        if engine and getattr(engine, "is_running", False):
+            engine.set_speed_limit(bytes_sec)
+
+    def _on_preset_selected(self, event=None):
+        if not hasattr(self, "limit_preset_var") or not self.limit_preset_var:
+            return
+        val = self.limit_preset_var.get()
+        mapping = {
+            "Unlimited": 0,
+            "128 KB/s": 128,
+            "256 KB/s": 256,
+            "512 KB/s": 512,
+            "1.0 MB/s": 1024,
+            "2.0 MB/s": 2048,
+            "5.0 MB/s": 5120,
+            "10.0 MB/s": 10240,
+            "20.0 MB/s": 20480,
+        }
+        if val in mapping:
+            target_kb = mapping[val]
+            if hasattr(self, "entry_custom_speed") and tk:
+                self.entry_custom_speed.delete(0, tk.END)
+                self.entry_custom_speed.insert(0, str(target_kb))
+            if hasattr(self, "slider_speed"):
+                self.slider_speed.set(target_kb)
+            self._apply_speed_limit()
+        elif val == "Custom":
+            if hasattr(self, "entry_custom_speed"):
+                self.entry_custom_speed.focus_set()
+
+    def _apply_speed_limit(self):
+        """Applies speed limit dynamically to active engine."""
+        try:
+            kb_val = float(self.entry_custom_speed.get().strip())
+        except ValueError:
+            if hasattr(self, "show_safe_warning") and callable(self.show_safe_warning):
+                self.show_safe_warning("Invalid Speed", "Please enter a valid numeric speed limit in KB/s.")
+            return
+
+        kb_val = max(0.0, kb_val)
+        bytes_sec = kb_val * 1024.0 if kb_val > 0 else 0.0
+        self.speed_limit = bytes_sec
+
+        if bytes_sec <= 0:
+            if hasattr(self, "lbl_active_limit"):
+                self.lbl_active_limit.configure(text=tr("lbl_current_unlimited", "● Current: Unlimited"), fg=self.c_success)
+            if hasattr(self, "lbl_slider_val"):
+                self.lbl_slider_val.configure(text=f"{tr('lbl_unlimited', 'Unlimited')} (0 KB/s)", fg=self.c_success)
+            if hasattr(self, "limit_preset_var"):
+                self.limit_preset_var.set("Unlimited")
+            if hasattr(self, "slider_speed"):
+                self.slider_speed.set(0)
+        else:
+            if bytes_sec >= 1024 * 1024:
+                disp = f"{bytes_sec / (1024*1024):.2f} MB/s"
+            else:
+                disp = f"{bytes_sec / 1024:.0f} KB/s"
+            if hasattr(self, "lbl_active_limit"):
+                self.lbl_active_limit.configure(text=tr("lbl_current_limit", "● Current: {limit}").format(limit=disp), fg=self.c_warning)
+            if hasattr(self, "lbl_slider_val"):
+                self.lbl_slider_val.configure(text=disp, fg=self.c_warning)
+            if hasattr(self, "slider_speed"):
+                self.slider_speed.set(min(20480, int(kb_val)))
+
+        engine = getattr(self, "engine", None)
+        if engine and getattr(engine, "is_running", False):
+            engine.set_speed_limit(bytes_sec)
+
+
+__all__ = ["SpeedLimiterControllerMixin"]
