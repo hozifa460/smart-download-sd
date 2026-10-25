@@ -62,7 +62,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         on_chunk_update: Optional[Callable] = None,
         on_log: Optional[Callable] = None,
         on_complete: Optional[Callable] = None,
-        on_error: Optional[Callable] = None
+        on_error: Optional[Callable] = None,
+        pre_probed_info: Optional[Dict[str, Any]] = None
     ):
         self.url = url
         self.destination_path = destination_path
@@ -94,13 +95,35 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         self.content_type: str = ""
         self.filename = os.path.basename(destination_path)
         self.temp_dir = destination_path + ".sd_parts"
-        for legacy_d in [destination_path + ".tdm_parts", destination_path + ".idm_parts"]:
-            if os.path.isdir(legacy_d) and not os.path.exists(self.temp_dir):
-                try:
-                    os.replace(legacy_d, self.temp_dir)
-                    break
-                except Exception:
-                    pass
+        for leg in (destination_path + ".tdm_parts", destination_path + ".idm_parts"):
+            if os.path.isdir(leg) and not os.path.exists(self.temp_dir):
+                try: os.replace(leg, self.temp_dir); break
+                except Exception: pass
+
+        self.pre_probed_info = dict(pre_probed_info) if pre_probed_info else None
+        self._has_pre_probed = False
+        if self.pre_probed_info:
+            p_ts = self.pre_probed_info.get("timestamp")
+            is_fresh = (p_ts is None) or ((time.monotonic() - float(p_ts)) < 30.0)
+            p_size = self.pre_probed_info.get("total_size") or self.pre_probed_info.get("size") or 0
+            if is_fresh and p_size > 0:
+                p_url = self.pre_probed_info.get("url") or self.pre_probed_info.get("real_url")
+                if p_url:
+                    self.url = p_url
+                    if self.is_googlevideo_url(self.url):
+                        self.is_googlevideo = True
+                        self.max_connections = min(self.max_connections, 1)
+                        self.allow_dynamic_split = False
+                self.total_size = int(p_size)
+                self.supports_ranges = bool(self.pre_probed_info.get("supports_ranges", True))
+                self.content_type = str(self.pre_probed_info.get("content_type") or "")
+                p_fn = self.pre_probed_info.get("filename")
+                if p_fn:
+                    self.filename = p_fn
+                    if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
+                        self.destination_path = os.path.join(self.destination_path, self.filename)
+                        self.temp_dir = self.destination_path + ".sd_parts"
+                self._has_pre_probed = True
 
         self.chunks: List[DownloadChunk] = []
         self.active_workers: List[threading.Thread] = []
@@ -140,10 +163,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         if bytes_per_sec <= 0:
             self.log("Speed limit set to: Unlimited")
         else:
-            if bytes_per_sec >= 1024 * 1024:
-                self.log(f"Speed limit set to: {bytes_per_sec / (1024*1024):.2f} MB/s")
-            else:
-                self.log(f"Speed limit set to: {bytes_per_sec / 1024:.1f} KB/s")
+            spd = f"{bytes_per_sec / (1024*1024):.2f} MB/s" if bytes_per_sec >= 1024*1024 else f"{bytes_per_sec / 1024:.1f} KB/s"
+            self.log(f"Speed limit set to: {spd}")
 
     def get_chunks_snapshot(self) -> List[DownloadChunk]:
         """Returns a thread-safe snapshot copy of the current chunk list."""
@@ -277,33 +298,26 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             except Exception:
                 pass
 
-        # Update destination path if filename discovered
         if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
             self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
             self.temp_dir = self.destination_path + ".sd_parts"
-            for legacy_d in [self.destination_path + ".tdm_parts", self.destination_path + ".idm_parts"]:
-                if os.path.isdir(legacy_d) and not os.path.exists(self.temp_dir):
-                    try:
-                        os.replace(legacy_d, self.temp_dir)
-                        break
-                    except Exception:
-                        pass
+            for leg in (self.destination_path + ".tdm_parts", self.destination_path + ".idm_parts"):
+                if os.path.isdir(leg) and not os.path.exists(self.temp_dir):
+                    try: os.replace(leg, self.temp_dir); break
+                    except Exception: pass
 
         # HTML response safety net: abort if server returned an HTML page instead of a binary file
         fn_to_check = self.filename or os.path.basename(self.destination_path)
         dest_ext = os.path.splitext(fn_to_check)[1].lower() if fn_to_check else ""
-        if getattr(self, "content_type", "") == "text/html":
-            if not dest_ext or dest_ext == ".bin":
-                raise RuntimeError("Server returned a web page (HTML), not a file")
+        if getattr(self, "content_type", "") == "text/html" and (not dest_ext or dest_ext == ".bin"):
+            raise RuntimeError("Server returned a web page (HTML), not a file")
 
         if self.supports_ranges and self.total_size > 0:
-            size_mb = self.total_size / (1024 * 1024)
-            self.log(f"Server supports HTTP 206 Multi-threading! Total Size: {size_mb:.2f} MB ({self.total_size:,} bytes).")
+            self.log(f"Server supports HTTP 206 Multi-threading! Total Size: {self.total_size / (1024*1024):.2f} MB ({self.total_size:,} bytes).")
+        elif self.total_size > 0:
+            self.log(f"Server does not support HTTP Range requests. Size: {self.total_size:,} bytes. Single-stream fallback active.")
         else:
-            if self.total_size > 0:
-                self.log(f"Server does not support HTTP Range requests. Size: {self.total_size:,} bytes. Single-stream fallback active.")
-            else:
-                self.log("Server does not support HTTP Range requests and size is dynamic/unknown. Single-stream fallback active.")
+            self.log("Server does not support HTTP Range requests and size is dynamic/unknown. Single-stream fallback active.")
 
     def start(self):
         """Launches the download supervisor thread."""
@@ -354,10 +368,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         # Abort any blocked socket reads immediately
         with self._lock:
             for conn in self._active_connections:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+                try: conn.close()
+                except Exception: pass
             self._active_connections.clear()
 
         self.log("Download cancelled by user.")
@@ -385,7 +397,16 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                     is_resuming = True
 
             if not is_resuming:
-                self.probe()
+                if not getattr(self, "_has_pre_probed", False):
+                    self.probe()
+                else:
+                    if os.path.isdir(self.destination_path) or self.destination_path.endswith(("/", "\\")):
+                        self.destination_path = os.path.join(self.destination_path, self.filename or "download.bin")
+                        self.temp_dir = self.destination_path + ".sd_parts"
+                    if self.supports_ranges and self.total_size > 0:
+                        self.log(f"Server supports HTTP 206 Multi-threading! Total Size: {self.total_size / (1024*1024):.2f} MB ({self.total_size:,} bytes).")
+                    else:
+                        self.log(f"Server does not support HTTP Range requests. Size: {self.total_size:,} bytes. Single-stream fallback active.")
 
                 if os.path.exists(self.temp_dir):
                     shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -447,7 +468,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
 
             # Scheduling & Dynamic Splitting Loop
             while self.is_running and not self._cancel_event.is_set():
-                time.sleep(0.08)
+                ramp_up = (self.supports_ranges and not self.is_googlevideo and len(self.chunks) < self.max_connections)
+                time.sleep(0.02 if ramp_up else 0.08)
 
                 if self.is_paused:
                     continue

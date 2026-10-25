@@ -108,7 +108,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             except Exception:
                 pass
 
-            self._start_download_with_engine(real_url, final_dest, max_conn, bytes_limit, modal=None)
+            self._start_download_with_engine(real_url, final_dest, max_conn, bytes_limit, modal=None, pre_probed_info=info)
 
         self._resolve_real_url_async(url, on_resolved=_on_resolved)
 
@@ -118,7 +118,8 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         dest: str,
         max_conn: int = 8,
         bytes_limit: float = 0.0,
-        modal: Optional[Any] = None
+        modal: Optional[Any] = None,
+        pre_probed_info: Optional[Dict[str, Any]] = None
     ):
         """Starts download engine, optionally bridging metrics and controls to a standalone modal."""
         if self.engine and self.engine.is_running:
@@ -193,6 +194,9 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     pass
             self._engine_error_cb(err)
 
+        if not pre_probed_info:
+            pre_probed_info = getattr(modal, "probed_info", None) if modal else getattr(self, "_last_probed_info", None)
+
         self.engine = TurboDownloadEngine(
             url=url,
             destination_path=dest,
@@ -202,7 +206,8 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             on_chunk_update=self._engine_chunk_update_cb,
             on_log=self.log,
             on_complete=_comb_complete,
-            on_error=_comb_error
+            on_error=_comb_error,
+            pre_probed_info=pre_probed_info
         )
         if modal and hasattr(modal, "attach_engine"):
             modal.attach_engine(self.engine)
@@ -278,21 +283,28 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         self.log("[CANCEL] Operation cancelled by user.")
 
     def _engine_progress_cb(self, downloaded: int, total: int, speed: float, eta: str, active_chunks: int):
+        self._last_prog_args = (downloaded, total, speed, eta, active_chunks)
+        if getattr(self, "_prog_update_pending", False):
+            return
+        self._prog_update_pending = True
+
         def _update():
-            # Percentage
-            pct = (downloaded / total * 100.0) if total > 0 else 0.0
+            self._prog_update_pending = False
+            args = getattr(self, "_last_prog_args", None)
+            if not args:
+                return
+            d, t, sp, et, ac = args
+            pct = (d / t * 100.0) if t > 0 else 0.0
             self._draw_main_progress(pct)
 
-            # Speed
-            if speed >= 1024 * 1024:
-                speed_str = f"{speed / (1024*1024):.2f} MB/s"
-            elif speed >= 1024:
-                speed_str = f"{speed / 1024:.1f} KB/s"
+            if sp >= 1024 * 1024:
+                speed_str = f"{sp / (1024*1024):.2f} MB/s"
+            elif sp >= 1024:
+                speed_str = f"{sp / 1024:.1f} KB/s"
             else:
-                speed_str = f"{int(speed)} B/s"
+                speed_str = f"{int(sp)} B/s"
             self.card_speed.configure(text=speed_str)
 
-            # Size
             def _fmt_size(b):
                 if b >= 1024 * 1024 * 1024:
                     return f"{b / (1024**3):.2f} GB"
@@ -302,37 +314,41 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     return f"{b / 1024:.1f} KB"
                 return f"{b} B"
 
-            if total > 0:
-                size_str = f"{_fmt_size(downloaded)} / {_fmt_size(total)} ({pct:.1f}%)"
-            else:
-                size_str = f"{_fmt_size(downloaded)} (Streaming...)"
+            size_str = f"{_fmt_size(d)} / {_fmt_size(t)} ({pct:.1f}%)" if t > 0 else f"{_fmt_size(d)} (Streaming...)"
             self.card_size.configure(text=size_str)
+            self.card_eta.configure(text=et)
 
-            # ETA
-            self.card_eta.configure(text=eta)
-
-            # Active Threads
-            if hasattr(self.engine, "get_chunks_snapshot"):
-                total_chunks = len(self.engine.get_chunks_snapshot())
-            elif self.engine:
-                total_chunks = len(self.engine.chunks)
-            else:
-                total_chunks = 0
-            self.card_threads.configure(text=f"{active_chunks} Active ({total_chunks} Total)")
+            total_chunks = len(self.engine.get_chunks_snapshot()) if hasattr(self.engine, "get_chunks_snapshot") else (len(self.engine.chunks) if self.engine else 0)
+            self.card_threads.configure(text=f"{ac} Active ({total_chunks} Total)")
 
         try:
             if self.root.winfo_exists():
                 self.root.after(0, _update)
+            else:
+                self._prog_update_pending = False
         except Exception:
-            pass
+            self._prog_update_pending = False
 
     def _engine_chunk_update_cb(self):
-        # Triggered on chunk state transitions or splits
+        if getattr(self, "_chunk_ui_update_pending", False) or getattr(self, "_chunk_update_pending", False):
+            return
+        self._chunk_ui_update_pending = True
+        self._chunk_update_pending = True
+
+        def _do_chunk():
+            self._chunk_ui_update_pending = False
+            self._chunk_update_pending = False
+            self._refresh_chunk_displays()
+
         try:
             if self.root.winfo_exists():
-                self.root.after(0, self._refresh_chunk_displays)
+                self.root.after(0, _do_chunk)
+            else:
+                self._chunk_ui_update_pending = False
+                self._chunk_update_pending = False
         except Exception:
-            pass
+            self._chunk_ui_update_pending = False
+            self._chunk_update_pending = False
 
     def _gui_refresh_tick(self):
         """Periodic tick ensuring smooth chunk visualization animation and processing queued thread tasks."""

@@ -103,6 +103,7 @@ class BrowserControllerMixin:
                     real_url = info.get("url") or url
                     if info.get("resolved"):
                         self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
+                    self._last_probed_info = dict(info)
 
                     downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
                     cur_d = self.entry_dest.get().strip()

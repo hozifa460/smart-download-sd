@@ -78,6 +78,7 @@ class StreamDownloadCoordinator:
         self._is_running = False
         self._is_paused = False
         self.start_time = 0.0
+        self._active_engines: List[TurboDownloadEngine] = []
 
         # Aggregated stream metrics for smooth progress visualization
         self._v_total_size = max(0, self.stream_info.video_size)
@@ -98,12 +99,17 @@ class StreamDownloadCoordinator:
         return self.get_chunks_snapshot()
 
     def get_chunks_snapshot(self) -> List[DownloadChunk]:
-        """Returns a thread-safe snapshot copy of the active engine chunk list."""
+        """Returns a thread-safe snapshot copy of the active engines chunk list."""
         with self._lock:
-            if self.current_engine:
-                with self.current_engine._lock:
-                    return list(self.current_engine.chunks)
-            return []
+            res: List[DownloadChunk] = []
+            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
+            for eng in targets:
+                try:
+                    with eng._lock:
+                        res.extend(eng.chunks)
+                except Exception:
+                    pass
+            return res
 
     @property
     def total_size(self) -> int:
@@ -127,8 +133,10 @@ class StreamDownloadCoordinator:
     def set_speed_limit(self, bytes_per_sec: float):
         with self._lock:
             self.rate_limit = bytes_per_sec
-            if self.current_engine:
-                self.current_engine.set_speed_limit(bytes_per_sec)
+            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
+            for eng in targets:
+                try: eng.set_speed_limit(bytes_per_sec)
+                except Exception: pass
 
     def start(self):
         self._is_running = True
@@ -142,28 +150,38 @@ class StreamDownloadCoordinator:
     def pause(self):
         with self._lock:
             self._is_paused = True
-            if self.current_engine:
-                self.current_engine.pause()
+            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
+            for eng in targets:
+                try: eng.pause()
+                except Exception: pass
 
     def resume(self):
         with self._lock:
             self._is_paused = False
-            if self.current_engine:
-                self.current_engine.resume()
+            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
+            for eng in targets:
+                try: eng.resume()
+                except Exception: pass
 
     def cancel(self):
         with self._lock:
             self._is_running = False
             self._cancel_event.set()
-            if self.current_engine:
-                self.current_engine.cancel()
+            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
+            for eng in targets:
+                try: eng.cancel()
+                except Exception: pass
 
     def safe_shutdown(self):
         with self._lock:
             self._is_running = False
             self._cancel_event.set()
-            if self.current_engine and hasattr(self.current_engine, "safe_shutdown"):
-                self.current_engine.safe_shutdown()
+            targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
+            for eng in targets:
+                try:
+                    if hasattr(eng, "safe_shutdown"): eng.safe_shutdown()
+                    else: eng.cancel()
+                except Exception: pass
 
     def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):
         with self._lock:
@@ -297,6 +315,7 @@ class StreamDownloadCoordinator:
                 )
                 with self._lock:
                     self.current_engine = engine
+                    self._active_engines = [engine]
                     if self._is_paused:
                         engine.pause()
                 engine.start()
@@ -309,30 +328,84 @@ class StreamDownloadCoordinator:
             video_tmp = self.destination_path + ".video.tmp"
             audio_tmp = self.destination_path + ".audio.tmp"
 
-            # 1. Download Video Stream
             self._active_phase = 1
             plat = getattr(self.stream_info, "platform", "Media")
             tag = plat.upper().replace(" / X", "")
-            self.log(f"[{tag}] Phase 1/3: Downloading Video Stream ({self.stream_info.video_resolution})...")
+            self.log(f"[{tag}] Phase 1/2: Downloading Video & Audio streams in parallel ({self.stream_info.video_resolution})...")
             v_completed = threading.Event()
+            a_completed = threading.Event()
             v_error: List[str] = []
+            a_error: List[str] = []
+
+            self._v_speed = 0.0
+            self._a_speed = 0.0
+            self._v_active = 0
+            self._a_active = 0
+
+            def _report_combined():
+                with self._lock:
+                    combined_total = max(1, self._v_total_size + self._a_total_size)
+                    combined_dl = min(combined_total, self._v_downloaded + self._a_downloaded)
+                    combined_speed = self._v_speed + self._a_speed
+                    combined_active = self._v_active + self._a_active
+                rem_bytes = max(0, combined_total - combined_dl)
+                if combined_speed > 1024 and rem_bytes > 0:
+                    eta_sec = int(rem_bytes / combined_speed)
+                    eta_str = f"{eta_sec // 3600:02d}:{(eta_sec % 3600) // 60:02d}:{eta_sec % 60:02d}"
+                else:
+                    eta_str = "--:--:--"
+                if self.on_progress:
+                    self.on_progress(combined_dl, combined_total, combined_speed, eta_str, combined_active)
 
             def _on_v_complete(path, size, elapsed):
-                if size > 0:
-                    self._v_total_size = size
+                with self._lock:
+                    if size > 0: self._v_total_size = size
+                    self._v_downloaded = self._v_total_size
+                    self._v_speed = 0.0
+                    self._v_active = 0
+                    if not a_completed.is_set():
+                        self.current_engine = a_engine
                 v_completed.set()
+                _report_combined()
 
             def _on_v_error(err):
                 v_error.append(err)
                 v_completed.set()
+                a_completed.set()
+                try: a_engine.cancel()
+                except Exception: pass
 
             def _on_v_progress(downloaded, total, speed, eta, active):
-                self._v_downloaded = downloaded
-                if total > 0:
-                    self._v_total_size = total
-                combined_total = max(1, self._v_total_size + self._a_total_size)
-                if self.on_progress:
-                    self.on_progress(self._v_downloaded, combined_total, speed, eta, active)
+                with self._lock:
+                    self._v_downloaded = downloaded
+                    if total > 0: self._v_total_size = total
+                    self._v_speed = speed
+                    self._v_active = active
+                _report_combined()
+
+            def _on_a_complete(path, size, elapsed):
+                with self._lock:
+                    if size > 0: self._a_total_size = size
+                    self._a_downloaded = self._a_total_size
+                    self._a_speed = 0.0
+                    self._a_active = 0
+                a_completed.set()
+                _report_combined()
+
+            def _on_a_error(err):
+                a_error.append(err)
+                a_completed.set()
+                v_completed.set()
+                try: v_engine.cancel()
+                except Exception: pass
+
+            def _on_a_progress(downloaded, total, speed, eta, active):
+                with self._lock:
+                    self._a_downloaded = downloaded
+                    if total > 0: self._a_total_size = total
+                    self._a_speed = speed
+                    self._a_active = active
+                _report_combined()
 
             is_v_gv = self.is_youtube_stream or TurboDownloadEngine.is_googlevideo_url(self.stream_info.video_url)
             v_conn = min(self.max_connections, 1) if is_v_gv else self.max_connections
@@ -352,43 +425,6 @@ class StreamDownloadCoordinator:
                 on_complete=_on_v_complete,
                 on_error=_on_v_error
             )
-            with self._lock:
-                self.current_engine = v_engine
-                if self._is_paused:
-                    v_engine.pause()
-            v_engine.start()
-
-            while not v_completed.is_set() and not self._cancel_event.is_set():
-                time.sleep(0.1)
-
-            if self._cancel_event.is_set():
-                return
-            if v_error:
-                raise RuntimeError(f"Video stream download error: {v_error[0]}")
-
-            # 2. Download Audio Stream
-            self._active_phase = 2
-            self.log(f"[{tag}] Phase 2/3: Video stream downloaded. Downloading Audio Stream...")
-            a_completed = threading.Event()
-            a_error: List[str] = []
-
-            def _on_a_complete(path, size, elapsed):
-                if size > 0:
-                    self._a_total_size = size
-                a_completed.set()
-
-            def _on_a_error(err):
-                a_error.append(err)
-                a_completed.set()
-
-            def _on_a_progress(downloaded, total, speed, eta, active):
-                self._a_downloaded = downloaded
-                if total > 0:
-                    self._a_total_size = total
-                combined_total = max(1, self._v_total_size + self._a_total_size)
-                combined_dl = min(combined_total, self._v_total_size + self._a_downloaded)
-                if self.on_progress:
-                    self.on_progress(combined_dl, combined_total, speed, eta, active)
 
             is_a_gv = self.is_youtube_stream or TurboDownloadEngine.is_googlevideo_url(self.stream_info.audio_url)
             a_conn = min(self.max_connections, 1) if is_a_gv else max(1, self.max_connections // 2)
@@ -408,27 +444,46 @@ class StreamDownloadCoordinator:
                 on_complete=_on_a_complete,
                 on_error=_on_a_error
             )
+
             with self._lock:
-                self.current_engine = a_engine
+                self.current_engine = v_engine
+                self._active_engines = [v_engine, a_engine]
                 if self._is_paused:
+                    v_engine.pause()
                     a_engine.pause()
+            v_engine.start()
             a_engine.start()
 
-            while not a_completed.is_set() and not self._cancel_event.is_set():
-                time.sleep(0.1)
+            while not (v_completed.is_set() and a_completed.is_set()) and not self._cancel_event.is_set():
+                if v_error or a_error:
+                    break
+                time.sleep(0.05)
+
+            def _drain_workers():
+                for eng in (v_engine, a_engine):
+                    for w in list(getattr(eng, "active_workers", [])):
+                        if w.is_alive() and w != threading.current_thread():
+                            w.join(timeout=0.15)
 
             if self._cancel_event.is_set():
+                v_engine.cancel(); a_engine.cancel(); _drain_workers()
                 return
+            if v_error:
+                a_engine.cancel(); _drain_workers()
+                raise RuntimeError(f"Video stream download error: {v_error[0]}")
             if a_error:
+                v_engine.cancel(); _drain_workers()
                 raise RuntimeError(f"Audio stream download error: {a_error[0]}")
 
             # 3. Merge Phase via FFmpeg
             self._active_phase = 3
+            with self._lock:
+                self._active_engines.clear()
             combined_total = max(1, self._v_total_size + self._a_total_size)
             if self.on_progress:
                 self.on_progress(combined_total, combined_total, 0.0, "Merging...", 0)
 
-            self.log(f"[{tag}] Phase 3/3: Merging video and audio streams into final container...")
+            self.log(f"[{tag}] Phase 2/2: Merging video and audio streams into final container...")
             YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log)
 
             elapsed = max(0.01, time.time() - self.start_time)

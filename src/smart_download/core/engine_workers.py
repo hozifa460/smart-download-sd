@@ -275,51 +275,68 @@ class EngineWorkersMixin(EngineResumerMixin):
         6. New connection spawned immediately on new chunk.
         """
         with self._lock:
-            if not self.allow_dynamic_split or self.is_googlevideo:
+            if not self.allow_dynamic_split or self.is_googlevideo or not getattr(self, "supports_ranges", False):
                 return
 
-            active_count = sum(1 for c in self.chunks if c.status == "active")
-            if active_count >= self.max_connections:
-                return
+        while True:
+            if self._cancel_event.is_set() or not getattr(self, "is_running", False):
+                break
+            new_chunk = None
+            candidate = None
+            split_start = 0
+            old_end = 0
+            new_id = 0
+            with self._lock:
+                active_or_pending = sum(1 for c in self.chunks if c.status in ("active", "pending"))
+                if active_or_pending >= self.max_connections:
+                    break
 
-            candidates = [
-                c for c in self.chunks
-                if c.status == "active" and c.remaining_bytes >= self.min_split_threshold
-            ]
-            if not candidates:
-                return
+                candidates = [
+                    c for c in self.chunks
+                    if c.status in ("active", "pending") and c.remaining_bytes >= self.min_split_threshold * 2
+                ]
+                if not candidates:
+                    candidates = [
+                        c for c in self.chunks
+                        if c.status in ("active", "pending") and c.remaining_bytes >= self.min_split_threshold
+                    ]
+                if not candidates:
+                    break
 
-            # Select candidate with the largest remaining byte range
-            candidate = max(candidates, key=lambda c: c.remaining_bytes)
+                # Select candidate with the largest remaining byte range
+                candidate = max(candidates, key=lambda c: c.remaining_bytes)
 
-            with candidate.lock:
-                remaining = candidate.end_byte - (candidate.start_byte + candidate.downloaded_bytes) + 1
-                half = remaining // 2
-                if remaining < self.min_split_threshold or half < 32768 or candidate.status != "active":
-                    return
+                with candidate.lock:
+                    remaining = candidate.end_byte - (candidate.start_byte + candidate.downloaded_bytes) + 1
+                    half = remaining // 2
+                    if remaining < self.min_split_threshold or half < 32768 or candidate.status not in ("active", "pending"):
+                        break
 
-                split_start = candidate.start_byte + candidate.downloaded_bytes + half
-                old_end = candidate.end_byte
+                    split_start = candidate.start_byte + candidate.downloaded_bytes + half
+                    old_end = candidate.end_byte
 
-                # Candidate's new end is adjusted atomically
-                candidate.end_byte = split_start - 1
+                    # Candidate's new end is adjusted atomically
+                    candidate.end_byte = split_start - 1
 
-            # Create the new chunk atomically inside self._lock
-            new_id = len(self.chunks)
-            part_path = os.path.join(self.temp_dir, f"{os.path.basename(self.destination_path)}.part_{new_id}")
-            new_chunk = DownloadChunk(
-                chunk_id=new_id,
-                start_byte=split_start,
-                end_byte=old_end,
-                downloaded_bytes=0,
-                status="pending",
-                part_filepath=part_path
-            )
-            self.chunks.append(new_chunk)
+                # Create the new chunk atomically inside self._lock
+                new_id = len(self.chunks)
+                part_path = os.path.join(self.temp_dir, f"{os.path.basename(self.destination_path)}.part_{new_id}")
+                new_chunk = DownloadChunk(
+                    chunk_id=new_id,
+                    start_byte=split_start,
+                    end_byte=old_end,
+                    downloaded_bytes=0,
+                    status="pending",
+                    part_filepath=part_path
+                )
+                self.chunks.append(new_chunk)
 
-        self.save_state()
-        self.log(f"[SPLIT] Dynamic Split: Chunk #{candidate.chunk_id} split! Spawned Chunk #{new_id} [{split_start:,} - {old_end:,}]")
-        self._spawn_worker(new_chunk)
+            if new_chunk and candidate:
+                self.save_state()
+                self.log(f"[SPLIT] Fast Ramp-Up Split: Chunk #{candidate.chunk_id} split! Spawned Chunk #{new_id} [{split_start:,} - {old_end:,}]")
+                self._spawn_worker(new_chunk)
+            else:
+                break
 
     def _update_progress_metrics(self):
         """Computes smoothed transfer speed, ETA, and progress metrics."""

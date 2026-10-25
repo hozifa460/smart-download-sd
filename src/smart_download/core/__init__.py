@@ -6,6 +6,7 @@ from .html_resolver import (
     _HtmlLinkCandidateParser,
     resolve_real_download_url,
     validate_refresh_url,
+    clear_probe_cache,
 )
 from .engine import TurboDownloadEngine
 from .engine_resumer import EngineResumerMixin
@@ -22,6 +23,7 @@ __all__ = [
     "_HtmlLinkCandidateParser",
     "resolve_real_download_url",
     "validate_refresh_url",
+    "clear_probe_cache",
     "TurboDownloadEngine",
     "EngineResumerMixin",
     "EngineWorkersMixin",

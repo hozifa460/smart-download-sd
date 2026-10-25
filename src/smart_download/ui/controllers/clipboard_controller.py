@@ -278,6 +278,7 @@ class ClipboardControllerMixin:
                         return
 
                     real_url = info.get("url") or url
+                    self._last_probed_info = dict(info)
                     if info.get("resolved"):
                         self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
 
@@ -361,13 +362,13 @@ class ClipboardControllerMixin:
                 else:
                     act_dest = os.path.join(dest_dir, resolved_fn)
                 self.log(f"[CLIPBOARD] Download started in standalone window: {os.path.basename(act_dest)} (Threads: {max_conn}, Speed Limit: {bytes_limit} B/s)")
-                self._start_download_with_engine(resolved_url, act_dest, max_conn, bytes_limit, modal=modal)
+                self._start_download_with_engine(resolved_url, act_dest, max_conn, bytes_limit, modal=modal, pre_probed_info=info)
 
             if is_potential_html_url(url):
                 self._resolve_real_url_async(url, on_resolved=_proceed_start, modal_to_close=modal)
             else:
                 self.log(f"[CLIPBOARD] Download started in standalone window: {os.path.basename(final_dest)} (Threads: {max_conn}, Speed Limit: {bytes_limit} B/s)")
-                self._start_download_with_engine(url, final_dest, max_conn, bytes_limit, modal=modal)
+                self._start_download_with_engine(url, final_dest, max_conn, bytes_limit, modal=modal, pre_probed_info=getattr(self, "_last_probed_info", None))
 
         def _on_open_in_main(final_dest: str, max_conn: int, bytes_limit: float):
             self._confirm_modal = None

@@ -180,6 +180,7 @@ class YtDlpAutoUpdater:
             if "youtube_resolver" in sys.modules:
                 try:
                     setattr(sys.modules["youtube_resolver"], "_YTDLP_EXTRACTORS_CACHE", None)
+                    setattr(sys.modules["youtube_resolver"], "_CACHED_YTDLP_EXTRACTORS", None)
                 except Exception:
                     pass
 
@@ -224,6 +225,7 @@ class YtDlpAutoUpdater:
             if "youtube_resolver" in sys.modules:
                 try:
                     setattr(sys.modules["youtube_resolver"], "_YTDLP_EXTRACTORS_CACHE", None)
+                    setattr(sys.modules["youtube_resolver"], "_CACHED_YTDLP_EXTRACTORS", None)
                 except Exception:
                     pass
 

@@ -119,6 +119,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             "skip_download": True,
             "nocheckcertificate": True,
             "noplaylist": True,
+            "extract_flat": False,
             "socket_timeout": self.socket_timeout,
             "remote_components": ["ejs:github"],
         }

@@ -8,6 +8,8 @@ import ssl
 import urllib.request
 import urllib.parse
 import urllib.error
+import time
+import threading
 from html.parser import HTMLParser
 from typing import List, Dict, Optional, Tuple, Any
 
@@ -53,11 +55,46 @@ class _HtmlLinkCandidateParser(HTMLParser):
                     self.raw_candidates.append(v.strip())
 
 
+_PROBE_CACHE_LOCK = threading.Lock()
+_PROBE_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_PROBE_CACHE_TTL = 30.0
+
+
+def clear_probe_cache():
+    """Clears in-memory probe cache (used in testing and maintenance)."""
+    with _PROBE_CACHE_LOCK:
+        _PROBE_CACHE.clear()
+
+
+def _store_probe_cache(orig_url: str, res_dict: Dict[str, Any]):
+    if hasattr(urllib.request.urlopen, "_mock_name"):
+        return
+    now = time.monotonic()
+    entry = dict(res_dict)
+    entry["timestamp"] = now
+    with _PROBE_CACHE_LOCK:
+        if orig_url:
+            _PROBE_CACHE[orig_url] = (now, entry)
+        final_u = res_dict.get("url")
+        if final_u and final_u != orig_url:
+            _PROBE_CACHE[final_u] = (now, entry)
+
+
+def _path_filename(u: str) -> str:
+    try:
+        p = urllib.parse.urlsplit(u).path
+        b = os.path.basename(urllib.parse.unquote(p.rstrip("/")))
+        return b if b and b not in (".", "..") else ""
+    except Exception:
+        return ""
+
+
 def resolve_real_download_url(
     url: str,
     headers: Optional[Dict[str, str]] = None,
     ssl_context: Optional[ssl.SSLContext] = None,
-    timeout: float = 10.0
+    timeout: float = 10.0,
+    force_refresh: bool = False
 ) -> Dict[str, Any]:
     """
     Probes a candidate download URL to verify whether it returns a direct downloadable file
@@ -77,6 +114,18 @@ def resolve_real_download_url(
     Guaranteed never to raise exceptions.
     """
     clean_url = str(url or "").strip()
+    if force_refresh:
+        with _PROBE_CACHE_LOCK:
+            _PROBE_CACHE.pop(clean_url, None)
+    elif not hasattr(urllib.request.urlopen, "_mock_name"):
+        with _PROBE_CACHE_LOCK:
+            cached = _PROBE_CACHE.get(clean_url)
+            if cached:
+                ts, cached_dict = cached
+                if (time.monotonic() - ts) < _PROBE_CACHE_TTL:
+                    return dict(cached_dict)
+                else:
+                    _PROBE_CACHE.pop(clean_url, None)
     result: Dict[str, Any] = {
         "url": clean_url,
         "is_html": False,
@@ -118,27 +167,23 @@ def resolve_real_download_url(
             cl = resp.headers.get("Content-Length")
             size = int(cl) if cl and cl.isdigit() else 0
             cd = resp.headers.get("Content-Disposition", "")
-            filename = parse_filename_from_cd_header(cd)
-            if not filename:
-                try:
-                    p = urllib.parse.urlsplit(final_url).path
-                    base_p = os.path.basename(urllib.parse.unquote(p.rstrip("/")))
-                    if base_p and base_p not in (".", ".."):
-                        filename = base_p
-                except Exception:
-                    pass
+            filename = parse_filename_from_cd_header(cd) or _path_filename(final_url)
 
             is_html = content_type in ("text/html", "application/xhtml+xml")
             if not is_html:
-                return {
+                ar = resp.headers.get("Accept-Ranges", "").lower()
+                direct_res = {
                     "url": final_url,
                     "is_html": False,
                     "resolved": False,
                     "content_type": content_type,
                     "size": size,
                     "filename": filename or derive_download_filename(final_url),
+                    "supports_ranges": (ar == "bytes") and (size > 0),
                     "error": ""
                 }
+                _store_probe_cache(clean_url, direct_res)
+                return direct_res
 
             # Response is HTML. Read up to 512 KB of body for link extraction.
             raw_body = resp.read(512 * 1024)
@@ -288,87 +333,50 @@ def resolve_real_download_url(
 
     probe_headers = dict(custom_headers)
     for cand_url in top_candidates:
-        # Probe with HEAD
-        head_ok = False
-        try:
-            h_req = urllib.request.Request(cand_url, method="HEAD", headers=probe_headers)
-            with urllib.request.urlopen(h_req, timeout=timeout, context=ctx) as c_resp:
-                c_final = c_resp.geturl() or cand_url
-                c_ct = (c_resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-                c_cl = c_resp.headers.get("Content-Length")
-                c_size = int(c_cl) if c_cl and c_cl.isdigit() else 0
-                c_cd = c_resp.headers.get("Content-Disposition", "")
-                c_fn = parse_filename_from_cd_header(c_cd)
-                if not c_fn:
-                    try:
-                        c_p = urllib.parse.urlsplit(c_final).path
-                        c_base = os.path.basename(urllib.parse.unquote(c_p.rstrip("/")))
-                        if c_base and c_base not in (".", ".."):
-                            c_fn = c_base
-                    except Exception:
-                        pass
-
-                if c_ct and c_ct not in ("text/html", "application/xhtml+xml"):
-                    return {
-                        "url": c_final,
-                        "is_html": False,
-                        "resolved": True,
-                        "content_type": c_ct,
-                        "size": c_size,
-                        "filename": c_fn or derive_download_filename(c_final),
-                        "error": "",
-                        "candidates": all_candidates,
-                        "page_title": extractor_title
-                    }
-                if not c_ct:
-                    head_ok = False
-                else:
-                    head_ok = True
-        except Exception:
-            head_ok = False
-
-        # Fallback to GET Range: bytes=0-0
-        if not head_ok:
+        for use_range in (False, True):
             try:
-                g_headers = dict(probe_headers)
-                g_headers["Range"] = "bytes=0-0"
-                g_req = urllib.request.Request(cand_url, headers=g_headers)
-                with urllib.request.urlopen(g_req, timeout=timeout, context=ctx) as c_resp:
+                p_hdrs = dict(probe_headers)
+                if use_range:
+                    p_hdrs["Range"] = "bytes=0-0"
+                    c_req = urllib.request.Request(cand_url, headers=p_hdrs)
+                else:
+                    c_req = urllib.request.Request(cand_url, method="HEAD", headers=p_hdrs)
+                with urllib.request.urlopen(c_req, timeout=timeout, context=ctx) as c_resp:
                     c_final = c_resp.geturl() or cand_url
                     c_ct = (c_resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-                    c_cr = c_resp.headers.get("Content-Range", "")
                     c_size = 0
-                    if "/" in c_cr:
-                        tot = c_cr.split("/")[-1].strip()
-                        if tot.isdigit():
-                            c_size = int(tot)
+                    if use_range:
+                        c_cr = c_resp.headers.get("Content-Range", "")
+                        if "/" in c_cr and c_cr.split("/")[-1].strip().isdigit():
+                            c_size = int(c_cr.split("/")[-1].strip())
                     if c_size == 0:
                         c_cl = c_resp.headers.get("Content-Length")
                         c_size = int(c_cl) if c_cl and c_cl.isdigit() else 0
-
                     c_cd = c_resp.headers.get("Content-Disposition", "")
-                    c_fn = parse_filename_from_cd_header(c_cd)
-                    if not c_fn:
-                        try:
-                            c_p = urllib.parse.urlsplit(c_final).path
-                            c_base = os.path.basename(urllib.parse.unquote(c_p.rstrip("/")))
-                            if c_base and c_base not in (".", ".."):
-                                c_fn = c_base
-                        except Exception:
-                            pass
+                    c_fn = parse_filename_from_cd_header(c_cd) or _path_filename(c_final)
 
                     if c_ct and c_ct not in ("text/html", "application/xhtml+xml"):
-                        return {
+                        cand_res = {
                             "url": c_final,
                             "is_html": False,
                             "resolved": True,
                             "content_type": c_ct,
                             "size": c_size,
                             "filename": c_fn or derive_download_filename(c_final),
-                            "error": ""
+                            "supports_ranges": True,
+                            "error": "",
+                            "candidates": all_candidates,
+                            "page_title": extractor_title
                         }
+                        _store_probe_cache(clean_url, cand_res)
+                        return cand_res
+                    if not use_range and not c_ct:
+                        continue
+                    break
             except Exception:
-                pass
+                if not use_range:
+                    continue
+                break
 
     return result
 

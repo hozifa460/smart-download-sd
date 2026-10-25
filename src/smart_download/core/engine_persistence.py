@@ -5,6 +5,8 @@ for TurboDownloadEngine.
 import os
 import json
 import shutil
+import hashlib
+import zlib
 from typing import List, Optional, Dict, Any
 
 from ..config import get_setting
@@ -94,9 +96,11 @@ class EnginePersistenceMixin:
                         f"Chunk #{c.chunk_id} size mismatch: disk {actual_size:,} bytes != expected {expected_size:,} bytes."
                     )
 
-        # Streamlined 256KB streaming assembly (inspired by splitter.rs join_chunks)
+        # Streamlined 256KB streaming assembly with on-the-fly zero-extra-read hashing
         STREAM_BUFFER_SIZE = 256 * 1024
         total_written = 0
+        sha256_hash = hashlib.sha256()
+        crc_val = 0
 
         # Ensure target directory exists
         dest_dir = os.path.dirname(self.destination_path)
@@ -118,6 +122,8 @@ class EnginePersistenceMixin:
                         if not buf:
                             break
                         out_f.write(buf)
+                        sha256_hash.update(buf)
+                        crc_val = zlib.crc32(buf, crc_val)
                         total_written += len(buf)
             out_f.flush()
 
@@ -129,12 +135,10 @@ class EnginePersistenceMixin:
 
         self.log(f"Assembled and verified {total_written:,} bytes with zero corruption.")
 
-        # Post-download integrity verification (CRC-32 & SHA-256)
-        try:
-            hashes = calculate_file_integrity(self.destination_path)
-            self.log(f"[INTEGRITY] SHA-256: {hashes.get('sha256')} | CRC-32: {hashes.get('crc32')}")
-        except Exception as e:
-            self.log(f"[INTEGRITY] Verification error: {e}")
+        # Post-download integrity verification (CRC-32 & SHA-256) computed on the fly without extra disk read
+        crc32_str = f"{crc_val & 0xFFFFFFFF:08x}"
+        sha256_str = sha256_hash.hexdigest()
+        self.log(f"[INTEGRITY] SHA-256: {sha256_str} | CRC-32: {crc32_str}")
 
         # Optional auto-unpack for archive files
         if get_setting("auto_unpack_archives", False):
@@ -183,12 +187,13 @@ class EnginePersistenceMixin:
                 return False
             os.makedirs(self.temp_dir, exist_ok=True)
             state_file = os.path.join(self.temp_dir, "state.json")
+            is_actively_running = getattr(self, "is_running", False) and not getattr(self, "is_paused", False)
             with self._lock:
                 chunks_data = []
                 for c in self.chunks:
                     with c.lock:
                         disk_bytes = c.downloaded_bytes
-                        if os.path.exists(c.part_filepath):
+                        if not is_actively_running and os.path.exists(c.part_filepath):
                             try:
                                 disk_bytes = os.path.getsize(c.part_filepath)
                             except Exception:

@@ -58,11 +58,15 @@ class MetricsPanelMixin:
     def _draw_main_progress(self, pct: float):
         if not hasattr(self, "canvas_prog") or not self.canvas_prog:
             return
-        self.canvas_prog.delete("all")
         w = self.canvas_prog.winfo_width()
         if w <= 1:
             w = getattr(self, "width", 800) - 64
         h = self.canvas_prog.winfo_height() or max(22, int(24 * getattr(self, "dpi_scale", 1.0)))
+        sig = (w, h, round(pct, 1))
+        if getattr(self, "_last_main_prog_sig", None) == sig:
+            return
+        self._last_main_prog_sig = sig
+        self.canvas_prog.delete("all")
 
         c_input_bg = getattr(self, "c_input_bg", "#090d16")
         c_border = getattr(self, "c_border", "#475569")

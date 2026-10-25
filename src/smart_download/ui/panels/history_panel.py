@@ -74,12 +74,12 @@ class HistoryPanelMixin:
             except Exception:
                 pass
 
-    def _refresh_history_table(self):
+    def _refresh_history_table(self, force: bool = False):
         """Refreshes tree_history items according to selected filter."""
         if threading.current_thread() != threading.main_thread():
             if hasattr(self, "root") and self.root and self.root.winfo_exists():
                 try:
-                    self.root.after(0, self._refresh_history_table)
+                    self.root.after(0, lambda: self._refresh_history_table(force))
                 except Exception:
                     pass
             return
@@ -90,6 +90,11 @@ class HistoryPanelMixin:
         if hasattr(self, "combo_history_filter"):
             cat_filter = self.combo_history_filter.get() or "All Categories"
         entries = self.history_manager.get_entries(category_filter=cat_filter)
+
+        sig = (cat_filter, len(entries), tuple((e.get("id"), e.get("status"), e.get("size_bytes")) for e in entries[:25]))
+        if not force and getattr(self, "_last_hist_sig", None) == sig:
+            return
+        self._last_hist_sig = sig
 
         cur_sel = self.tree_history.selection()
         selected_id = cur_sel[0] if cur_sel else None

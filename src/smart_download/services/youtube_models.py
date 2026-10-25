@@ -166,7 +166,8 @@ def is_social_media_url(url: str) -> bool:
     return False
 
 
-_YTDLP_EXTRACTORS_CACHE = None
+_CACHED_YTDLP_EXTRACTORS: Optional[Tuple[Any, ...]] = None
+_YTDLP_EXTRACTORS_CACHE: Optional[Tuple[Any, ...]] = None
 
 
 def is_ytdlp_available() -> bool:
@@ -191,20 +192,41 @@ def update_ytdlp_engine(
     return YtDlpAutoUpdater(on_log=on_log).update(force=force)
 
 
+def _is_direct_download_url(url: str) -> bool:
+    """Fast-path check for direct downloadable files without touching yt_dlp extractors."""
+    try:
+        from ..utils.url_utils import COMMON_DOWNLOAD_EXTENSIONS
+    except Exception:
+        COMMON_DOWNLOAD_EXTENSIONS = {
+            ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz",
+            ".exe", ".msi", ".iso", ".dmg", ".pkg", ".deb", ".rpm", ".apk",
+            ".bin", ".pdf", ".docx", ".xlsx", ".pptx", ".epub", ".txt",
+            ".mp4", ".mp3", ".mkv", ".webm", ".avi", ".mov", ".flv"
+        }
+    clean_url = url.split("?")[0].split("#")[0].lower()
+    path_part = clean_url.split("://", 1)[-1].partition("/")[2]
+    if any(clean_url.endswith(ext) or path_part.endswith(ext) for ext in COMMON_DOWNLOAD_EXTENSIONS):
+        return True
+    return clean_url.endswith((".tar.gz", ".tar.bz2", ".tar.xz"))
+
+
 def is_ytdlp_extractor_supported(url: str) -> bool:
     """
     Checks whether yt-dlp has a dedicated extractor matching the URL (excluding generic).
     Cached lazily for fast subsequent checks.
     """
-    global _YTDLP_EXTRACTORS_CACHE
+    global _CACHED_YTDLP_EXTRACTORS, _YTDLP_EXTRACTORS_CACHE
     if not is_ytdlp_available() or not url:
+        return False
+    if _is_direct_download_url(url):
         return False
     try:
         with YtDlpAutoUpdater._lock:
             import yt_dlp
-            if _YTDLP_EXTRACTORS_CACHE is None:
-                _YTDLP_EXTRACTORS_CACHE = yt_dlp.extractor.gen_extractors()
-            extractors = _YTDLP_EXTRACTORS_CACHE
+            if _CACHED_YTDLP_EXTRACTORS is None and _YTDLP_EXTRACTORS_CACHE is None:
+                _CACHED_YTDLP_EXTRACTORS = tuple(yt_dlp.extractor.gen_extractors())
+                _YTDLP_EXTRACTORS_CACHE = _CACHED_YTDLP_EXTRACTORS
+            extractors = _CACHED_YTDLP_EXTRACTORS or _YTDLP_EXTRACTORS_CACHE
         for ie in extractors:
             if ie.suitable(url) and ie.IE_NAME != 'generic':
                 return True
@@ -223,6 +245,8 @@ def is_media_url(url: str, check_ytdlp_extractors: bool = False) -> bool:
     u = url.strip()
     if is_youtube_url(u) or is_social_media_url(u):
         return True
+    if _is_direct_download_url(u):
+        return False
     if check_ytdlp_extractors:
         return is_ytdlp_extractor_supported(u)
     return False
