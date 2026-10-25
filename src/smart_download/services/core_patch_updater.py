@@ -29,6 +29,7 @@ from .updater_service import (
     parse_version,
     is_newer_version,
 )
+from ..utils.archive_utils import _safe_extract_zip
 
 
 def get_core_plugin_dir(base_dir: Optional[str] = None) -> str:
@@ -401,12 +402,7 @@ class CoreHotPatchUpdater:
 
             try:
                 with zipfile.ZipFile(zip_path, "r") as zf:
-                    stage_abs = os.path.abspath(stage_dir)
-                    for member in zf.infolist():
-                        dest_file = os.path.abspath(os.path.join(stage_abs, member.filename))
-                        if not (dest_file == stage_abs or dest_file.startswith(stage_abs + os.sep)):
-                            raise ValueError(f"Zip Slip path traversal attempt: {member.filename}")
-                    zf.extractall(stage_dir)
+                    _safe_extract_zip(zf, stage_dir)
 
                 if not self.is_plugin_valid(stage_dir):
                     raise ValueError("Core patch archive is missing essential smart_download modules or core_version.json.")

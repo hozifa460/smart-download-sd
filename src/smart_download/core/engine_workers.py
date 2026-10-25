@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any
 
 from .chunk import DownloadChunk
 from .engine_resumer import EngineResumerMixin
+from ..utils.url_utils import parse_filename_from_cd_header
 
 
 class EngineWorkersMixin(EngineResumerMixin):
@@ -38,16 +39,7 @@ class EngineWorkersMixin(EngineResumerMixin):
 
     def _parse_filename_from_cd(self, cd: str) -> Optional[str]:
         """Extracts clean filename from Content-Disposition header, ignoring parameters."""
-        if not cd:
-            return None
-        parts = cd.split(";")
-        for p in parts:
-            p = p.strip()
-            if p.lower().startswith("filename="):
-                raw = p[9:].strip("\"' ")
-                if raw:
-                    return os.path.basename(raw)
-        return None
+        return parse_filename_from_cd_header(cd)
 
     def _create_request(self, method: Optional[str] = None) -> urllib.request.Request:
         """Constructs an HTTP request pre-populated with standard headers and custom headers."""
@@ -80,6 +72,10 @@ class EngineWorkersMixin(EngineResumerMixin):
         retry_count = 0
 
         while retry_count < max_retries and not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
+            while self._pause_event.is_set() and not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
+                time.sleep(0.1)
+            if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
+                return
             resp = None
             seg_bytes_read = 0
             try:
@@ -224,6 +220,12 @@ class EngineWorkersMixin(EngineResumerMixin):
             except Exception as e:
                 if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
                     return
+                if self._pause_event.is_set():
+                    while self._pause_event.is_set() and not self._cancel_event.is_set() and not self._error_abort_event.is_set() and self.is_running:
+                        time.sleep(0.1)
+                    if self._cancel_event.is_set() or self._error_abort_event.is_set() or not self.is_running:
+                        return
+                    continue
                 if isinstance(e, urllib.error.HTTPError):
                     e.close()
                     self.last_http_status = e.code

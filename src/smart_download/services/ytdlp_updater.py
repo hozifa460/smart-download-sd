@@ -386,7 +386,7 @@ class YtDlpAutoUpdater:
                     if ".." in norm_name.split("/"):
                         continue
                     dest_path = os.path.abspath(os.path.join(abs_staging, *norm_name.split("/")))
-                    if not dest_path.startswith(abs_staging):
+                    if os.path.splitdrive(dest_path)[0].lower() != os.path.splitdrive(abs_staging)[0].lower() or not (dest_path == abs_staging or dest_path.startswith(abs_staging + os.sep)):
                         continue
                     if member.is_dir() or norm_name.endswith("/"):
                         os.makedirs(dest_path, exist_ok=True)

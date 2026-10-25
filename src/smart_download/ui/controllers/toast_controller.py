@@ -133,6 +133,7 @@ class ToastControllerMixin:
                 self._fetching_toast = None
                 if hasattr(self, "clear_last_clipboard_url") and callable(self.clear_last_clipboard_url):
                     self.clear_last_clipboard_url()
+                self._is_resolving_start = False
                 try:
                     self.btn_start.configure(state="normal")
                     self.btn_pause.configure(state="disabled")

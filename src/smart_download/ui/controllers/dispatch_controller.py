@@ -28,6 +28,9 @@ class DispatchControllerMixin:
                     if hasattr(self, "root") and self.root and self.root.winfo_exists():
                         if self.txt_log.winfo_exists():
                             self.txt_log.insert(tk.END, message + "\n")
+                            line_count = int(self.txt_log.index("end-1c").split(".")[0])
+                            if line_count > 500:
+                                self.txt_log.delete("1.0", f"{line_count - 500}.0")
                             self.txt_log.see(tk.END)
             except Exception:
                 pass

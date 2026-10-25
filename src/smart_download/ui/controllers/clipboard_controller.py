@@ -127,12 +127,21 @@ class ClipboardControllerMixin:
         """Asynchronously probes and resolves a candidate download URL, handling HTML landing pages."""
         if show_toast:
             try:
-                self._show_fetching_toast(url)
+                def _on_toast_cancel():
+                    self._is_resolving_start = False
+                    try:
+                        self.btn_start.configure(state="normal")
+                    except Exception:
+                        pass
+                self._show_fetching_toast(url, on_cancel=_on_toast_cancel)
             except Exception:
                 pass
 
         def _worker():
-            info = resolve_real_download_url(url, ssl_context=getattr(self, "ssl_context", None))
+            try:
+                info = resolve_real_download_url(url, ssl_context=getattr(self, "ssl_context", None))
+            except Exception as e:
+                info = {"url": url, "error": str(e), "resolved": False}
 
             def _dispatch():
                 try:
@@ -144,6 +153,11 @@ class ClipboardControllerMixin:
 
                 if info.get("is_html") and not info.get("resolved"):
                     if len(candidates) > 1:
+                        self._is_resolving_start = False
+                        try:
+                            self.btn_start.configure(state="normal")
+                        except Exception:
+                            pass
                         self.clear_last_clipboard_url()
                         if modal_to_close:
                             try:
@@ -156,6 +170,7 @@ class ClipboardControllerMixin:
                         self._show_multiple_candidates_dialog(url, candidates, page_title=info.get("page_title", ""))
                         return
 
+                    self._is_resolving_start = False
                     self.clear_last_clipboard_url()
                     if modal_to_close:
                         try:
@@ -182,6 +197,11 @@ class ClipboardControllerMixin:
                     return
 
                 if len(candidates) > 1:
+                    self._is_resolving_start = False
+                    try:
+                        self.btn_start.configure(state="normal")
+                    except Exception:
+                        pass
                     self.clear_last_clipboard_url()
                     if modal_to_close:
                         try:

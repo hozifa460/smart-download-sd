@@ -191,21 +191,38 @@ def is_downloadable_url(url: Any) -> bool:
     return False
 
 
+WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+}
+
+
 def clean_download_filename(name: str, max_length: int = 180) -> str:
     """
     Cleans a filename extracted from a URL/query parameter:
-    - Removes invalid filesystem characters: < > : " / \\ | ? * and control chars
-    - Preserves underscores, hyphens, alphanumeric characters, and Unicode
+    - Removes invalid filesystem characters: < > : " / \\ | ? * and control chars (\\x00-\\x1f)
     - Strips leading/trailing spaces and dots
+    - Protects against Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    - Preserves underscores, hyphens, alphanumeric characters, and Unicode
     """
     if not name:
         return ""
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', name).strip(" .")
     cleaned = re.sub(r'\s+', ' ', cleaned).strip(" .")
+    if not cleaned:
+        return ""
     if len(cleaned) > max_length:
         base, ext = os.path.splitext(cleaned)
-        base = base[:max_length - len(ext)].rstrip(" .")
+        base = base[:max(1, max_length - len(ext))].rstrip(" .")
         cleaned = base + ext
+    stem = cleaned.split(".")[0]
+    if stem.upper() in WINDOWS_RESERVED_NAMES:
+        cleaned = f"_{cleaned}"
+        if len(cleaned) > max_length:
+            base, ext = os.path.splitext(cleaned)
+            base = base[:max(1, max_length - len(ext))].rstrip(" .")
+            cleaned = base + ext
     return cleaned
 
 
@@ -331,17 +348,23 @@ def parse_filename_from_cd_header(cd_header: str) -> Optional[str]:
             raw = m_star.group(1).strip("\"' ")
             fn = urllib.parse.unquote(raw)
             if fn:
-                base = os.path.basename(fn)
+                norm_fn = fn.replace("\\", "/")
+                base = os.path.basename(norm_fn)
                 if base and base not in (".", ".."):
-                    return base
+                    cleaned = clean_download_filename(base)
+                    if cleaned:
+                        return cleaned
 
         m_std = re.search(r'filename\s*=\s*(?:"([^"]+)"|([^;\s\r\n]+))', cd_header, re.IGNORECASE)
         if m_std:
             raw = m_std.group(1) or m_std.group(2)
             if raw:
-                base = os.path.basename(raw.strip("\"' "))
+                norm_raw = raw.strip("\"' ").replace("\\", "/")
+                base = os.path.basename(norm_raw)
                 if base and base not in (".", ".."):
-                    return base
+                    cleaned = clean_download_filename(base)
+                    if cleaned:
+                        return cleaned
     except Exception:
         pass
     return None
@@ -363,6 +386,7 @@ __all__ = [
     "is_social_media_url",
     "is_media_url",
     "extract_media_platform",
+    "WINDOWS_RESERVED_NAMES",
 ]
 
 

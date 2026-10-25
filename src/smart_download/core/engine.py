@@ -149,11 +149,9 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         self._session_start_bytes: int = 0
 
     def log(self, message: str):
-        timestamp = time.strftime("%H:%M:%S")
-        log_msg = f"[{timestamp}] {message}"
         if self.on_log:
             try:
-                self.on_log(log_msg)
+                self.on_log(f"[{time.strftime('%H:%M:%S')}] {message}")
             except Exception:
                 pass
 
@@ -171,6 +169,16 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         with self._lock:
             return list(self.chunks)
 
+    def _handle_redirect(self, resp):
+        redirected_url = resp.geturl()
+        if redirected_url:
+            if urllib.parse.urlsplit(redirected_url).scheme.lower() not in ("http", "https", "ftp"):
+                raise ValueError("Unsupported redirect scheme")
+            if redirected_url != self.url:
+                self.url = redirected_url
+                if self.is_googlevideo_url(self.url):
+                    self.is_googlevideo = True; self.max_connections = min(self.max_connections, 1); self.allow_dynamic_split = False
+
     def probe(self):
         """
         Inspect target URL for Content-Length, HTTP 206 Accept-Ranges, and file name.
@@ -182,15 +190,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         head_succeeded = False
         try:
             with urllib.request.urlopen(req, timeout=12, context=self.ssl_context) as resp:
-                # Update URL if redirected
-                redirected_url = resp.geturl()
-                if redirected_url and redirected_url != self.url:
-                    self.url = redirected_url
-                    if self.is_googlevideo_url(self.url):
-                        self.is_googlevideo = True
-                        self.max_connections = min(self.max_connections, 1)
-                        self.allow_dynamic_split = False
-
+                self._handle_redirect(resp)
                 cl = resp.headers.get("Content-Length")
                 ar = resp.headers.get("Accept-Ranges", "").lower()
                 raw_ct = resp.headers.get("Content-Type", "")
@@ -203,6 +203,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                 if cd_fn:
                     self.filename = cd_fn
                 head_succeeded = True
+        except ValueError:
+            raise
         except urllib.error.HTTPError as e:
             e.close()
             head_succeeded = False
@@ -215,14 +217,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             req.add_header("Range", "bytes=0-0")
             try:
                 with urllib.request.urlopen(req, timeout=12, context=self.ssl_context) as resp:
-                    redirected_url = resp.geturl()
-                    if redirected_url and redirected_url != self.url:
-                        self.url = redirected_url
-                        if self.is_googlevideo_url(self.url):
-                            self.is_googlevideo = True
-                            self.max_connections = min(self.max_connections, 1)
-                            self.allow_dynamic_split = False
-
+                    self._handle_redirect(resp)
                     raw_ct = resp.headers.get("Content-Type", "")
                     if raw_ct:
                         self.content_type = raw_ct.split(";")[0].strip().lower()
@@ -244,26 +239,19 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                     cd_fn = self._parse_filename_from_cd(cd)
                     if cd_fn:
                         self.filename = cd_fn
+            except ValueError:
+                raise
             except Exception as e:
                 if isinstance(e, urllib.error.HTTPError):
                     e.close()
                     if e.code in (401, 403, 410):
                         self.has_expired_link = True
                         self.last_http_status = e.code
-                # If GET Range failed and HEAD also failed, attempt a plain GET request
-                # without Range to follow redirects and probe headers
                 if not head_succeeded:
                     try:
                         req_plain = self._create_request()
                         with urllib.request.urlopen(req_plain, timeout=12, context=self.ssl_context) as resp:
-                            redirected_url = resp.geturl()
-                            if redirected_url and redirected_url != self.url:
-                                self.url = redirected_url
-                                if self.is_googlevideo_url(self.url):
-                                    self.is_googlevideo = True
-                                    self.max_connections = min(self.max_connections, 1)
-                                    self.allow_dynamic_split = False
-
+                            self._handle_redirect(resp)
                             raw_ct = resp.headers.get("Content-Type", "")
                             if raw_ct:
                                 self.content_type = raw_ct.split(";")[0].strip().lower()
@@ -277,6 +265,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                             cd_fn = self._parse_filename_from_cd(cd)
                             if cd_fn:
                                 self.filename = cd_fn
+                    except ValueError:
+                        raise
                     except Exception as e_plain:
                         if isinstance(e_plain, urllib.error.HTTPError):
                             e_plain.close()
@@ -334,6 +324,13 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         supervisor_thread = threading.Thread(target=self._supervisor_loop, daemon=True)
         supervisor_thread.start()
 
+    def _abort_active_conns(self):
+        with self._lock:
+            for conn in self._active_connections:
+                try: conn.close()
+                except Exception: pass
+            self._active_connections.clear()
+
     def pause(self):
         """Pauses all active chunk downloads."""
         if not self.is_running or self.is_paused:
@@ -343,6 +340,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             self._accumulated_active_sec += max(0.0, time.monotonic() - self._last_active_start_mono)
             self._last_active_start_mono = None
         self._pause_event.set()
+        self._abort_active_conns()
         self.save_state()
         self.log("Download paused by user.")
 
@@ -364,14 +362,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         self._cancel_event.set()
         self._pause_event.clear()
         self._last_active_start_mono = None
-
-        # Abort any blocked socket reads immediately
-        with self._lock:
-            for conn in self._active_connections:
-                try: conn.close()
-                except Exception: pass
-            self._active_connections.clear()
-
+        self._abort_active_conns()
         self.log("Download cancelled by user.")
         self.cleanup_temp_files()
 
@@ -407,6 +398,19 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                         self.log(f"Server supports HTTP 206 Multi-threading! Total Size: {self.total_size / (1024*1024):.2f} MB ({self.total_size:,} bytes).")
                     else:
                         self.log(f"Server does not support HTTP Range requests. Size: {self.total_size:,} bytes. Single-stream fallback active.")
+
+                if self.total_size > 0:
+                    dest_dir = os.path.dirname(os.path.abspath(self.destination_path)) or "."
+                    while dest_dir and not os.path.exists(dest_dir):
+                        parent = os.path.dirname(dest_dir)
+                        if parent == dest_dir: break
+                        dest_dir = parent
+                    try:
+                        if shutil.disk_usage(dest_dir or ".").free < self.total_size:
+                            raise OSError("Insufficient disk space for download")
+                    except OSError as oe:
+                        if "Insufficient disk space" in str(oe): raise
+                    except Exception: pass
 
                 if os.path.exists(self.temp_dir):
                     shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -515,10 +519,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             if self._last_active_start_mono is not None:
                 active_elapsed += max(0.0, time.monotonic() - self._last_active_start_mono)
 
-            if active_elapsed > 0.001:
-                elapsed = max(0.01, active_elapsed)
-            else:
-                elapsed = max(0.01, time.time() - self.start_time)
+            elapsed = max(0.01, active_elapsed) if active_elapsed > 0.001 else max(0.01, time.time() - self.start_time)
 
             total_downloaded = sum(c.downloaded_bytes for c in self.chunks)
             if self.total_size > 0:
@@ -529,10 +530,8 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             avg_speed = (bytes_for_speed / elapsed) if elapsed > 0 else 0
             speed_str = f"{avg_speed / (1024*1024):.2f} MB/s" if avg_speed >= 1024*1024 else f"{avg_speed / 1024:.1f} KB/s"
             self.log(f"[SUCCESS] Download finished successfully in {elapsed:.1f}s (Average Speed: {speed_str})!")
-
             if self.on_complete:
                 self.on_complete(self.destination_path, self.total_size, elapsed)
-
         except Exception as e:
             self.log(f"[ERROR] {e}")
             if self.on_error:
@@ -541,6 +540,5 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             self.is_running = False
             if self._cancel_event.is_set():
                 self.cleanup_temp_files()
-
 
 __all__ = ["TurboDownloadEngine", "EngineWorkersMixin"]

@@ -162,6 +162,9 @@ def resolve_real_download_url(
         req = urllib.request.Request(clean_url, headers=custom_headers)
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             final_url = resp.geturl() or clean_url
+            redir_scheme = urllib.parse.urlsplit(final_url).scheme.lower()
+            if redir_scheme not in ("http", "https", "ftp"):
+                raise ValueError("Unsupported redirect scheme")
             raw_ct = resp.headers.get("Content-Type", "")
             content_type = raw_ct.split(";")[0].strip().lower()
             cl = resp.headers.get("Content-Length")
@@ -193,6 +196,8 @@ def resolve_real_download_url(
             except Exception:
                 html_text = raw_body.decode("utf-8", errors="replace")
 
+    except ValueError:
+        raise
     except Exception as e:
         result["error"] = str(e)
         return result

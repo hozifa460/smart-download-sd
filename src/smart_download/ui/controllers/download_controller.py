@@ -48,7 +48,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             self.log(f"[QUEUE] Task queued: {os.path.basename(dest)} ({len(self._download_queue)} queued)")
 
     def _on_start_download(self, skip_resolver: bool = False):
-        if self.engine and self.engine.is_running:
+        if getattr(self, "_is_resolving_start", False) or (self.engine and self.engine.is_running):
             return
 
         if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
@@ -83,8 +83,21 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             self._start_download_with_engine(url, dest, max_conn, bytes_limit, modal=None)
             return
 
+        self._is_resolving_start = True
+        try:
+            self.btn_start.configure(state="disabled")
+        except Exception:
+            pass
+
         # Manually typed non-media URL: resolve in background thread before starting
         def _on_resolved(info: Dict[str, Any]):
+            self._is_resolving_start = False
+            try:
+                self.btn_start.configure(state="normal")
+            except Exception:
+                pass
+            if info.get("error") and not info.get("resolved"):
+                return
             real_url = info.get("url") or url
             if info.get("resolved"):
                 self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
@@ -484,13 +497,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                 dl_url = (self.engine.url if self.engine and getattr(self.engine, "url", None) else self.entry_url.get()).strip()
                 dl_dest = (self.engine.dest_path if self.engine and getattr(self.engine, "dest_path", None) else self.entry_dest.get()).strip()
                 if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
-                    self.history_manager.add_or_update_entry(
-                        url=dl_url,
-                        file_path=dl_dest,
-                        size_bytes=0,
-                        status="Failed",
-                        elapsed_sec=0.0
-                    )
+                    self.history_manager.add_or_update_entry(url=dl_url, file_path=dl_dest, size_bytes=0, status="Failed", elapsed_sec=0.0)
                     self._refresh_history_table()
             except Exception:
                 pass
@@ -503,13 +510,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     f"{tr('dialog_expired_msg3', 'Would you like to refresh the download link now to resume?')}"
                 )
                 if hasattr(self, "ask_safe_yesno"):
-                    def _on_yes_refresh():
-                        self._open_refresh_link_dialog()
-                    self.ask_safe_yesno(
-                        tr("dialog_expired_title", "Download Link Expired ⚠️"),
-                        msg,
-                        on_yes=_on_yes_refresh
-                    )
+                    self.ask_safe_yesno(tr("dialog_expired_title", "Download Link Expired ⚠️"), msg, on_yes=self._open_refresh_link_dialog)
                     return
 
             msg = f"{tr('dialog_error_prefix', 'Encountered error during download:')}\n\n{error_msg}"
@@ -521,13 +522,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             else:
                 try:
                     if hasattr(self, "root") and self.root and self.root.winfo_exists():
-                        SafeModalDialog(
-                            self.root,
-                            title=err_title,
-                            message=msg,
-                            dialog_type="error",
-                            theme=getattr(self, "_theme_dict", lambda: None)()
-                        )
+                        SafeModalDialog(self.root, title=err_title, message=msg, dialog_type="error", theme=getattr(self, "_theme_dict", lambda: None)())
                 except Exception:
                     pass
         try:

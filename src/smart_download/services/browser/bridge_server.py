@@ -38,10 +38,40 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
     - POST /download: Queue a new download task
     - OPTIONS *: CORS preflight response
     """
+    timeout = 5.0
+    _REQUEST_SEMAPHORE = threading.BoundedSemaphore(16)
+
+    def handle(self):
+        """Processes request with concurrency limiting to prevent Slowloris thread exhaustion."""
+        if not self._REQUEST_SEMAPHORE.acquire(timeout=5.0):
+            return
+        try:
+            super().handle()
+        finally:
+            try:
+                self._REQUEST_SEMAPHORE.release()
+            except ValueError:
+                pass
 
     # Suppress default server log output in console
     def log_message(self, format, *args):
         pass
+
+    def _is_origin_allowed(self) -> bool:
+        """Validates Origin header: allows extension schemes and empty origins, rejects web CSRF."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        origin_lower = origin.strip().lower()
+        if origin_lower.startswith(("http://", "https://")):
+            return False
+        allowed_prefixes = (
+            "chrome-extension://",
+            "moz-extension://",
+            "edge-extension://",
+            "safari-web-extension://",
+        )
+        return origin_lower.startswith(allowed_prefixes)
 
     def _send_cors_headers(self, content_type: str = "application/json"):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -105,6 +135,10 @@ class BrowserBridgeHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Handle incoming download interception or window restore from browser extension or second instance."""
+        if not self._is_origin_allowed():
+            self._send_json_error(403, "Forbidden: Untrusted Origin")
+            return
+
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
