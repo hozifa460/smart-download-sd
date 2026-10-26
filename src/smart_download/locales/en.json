@@ -242,5 +242,14 @@
   "lbl_subtitle_mode": "⚙️ Mode:",
   "sub_mode_soft": "External SRT + Fast Embed",
   "sub_mode_srt_only": "External .srt File Only",
-  "sub_mode_burn": "External SRT + Burn into Video"
+  "sub_mode_burn": "External SRT + Burn into Video",
+  "lbl_main_quality": "🎞️ Quality:",
+  "lbl_main_audio": "🎙️ Audio:",
+  "lbl_main_sub": "💬 Subtitles:",
+  "lbl_main_sub_mode": "⚙️ Mode:",
+  "btn_media_quality_options": "⚙️ Options...",
+  "opt_sub_soft": "Soft-embed",
+  "opt_sub_srt": "SRT file only",
+  "opt_sub_burn": "Hard-burn into video",
+  "ctx_redownload_quality": "🎞️ Re-Download with Different Quality"
 }

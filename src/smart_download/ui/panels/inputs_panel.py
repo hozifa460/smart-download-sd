@@ -62,6 +62,9 @@ class InputsPanelMixin(ControlsPanelMixin):
         self.btn_browse = tk.Button(dest_row, text=tr("btn_browse"), font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._browse_destination)
         self.btn_browse.pack(side=tk.RIGHT)
 
+        if hasattr(self, "_build_media_options_bar"):
+            self._build_media_options_bar(card)
+
     def _paste_url(self):
         try:
             clipboard = self.root.clipboard_get()

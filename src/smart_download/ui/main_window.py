@@ -183,6 +183,7 @@ from .modals.browser_settings_modal import BrowserSettingsModalMixin
 from .panels.history_panel import HistoryPanelMixin
 from .panels.chunks_panel import ChunksPanelMixin
 from .panels.inputs_panel import InputsPanelMixin
+from .panels.media_options_bar import MediaOptionsBarMixin
 from .controllers.clipboard_controller import ClipboardControllerMixin
 from .controllers.update_controller import UpdateControllerMixin
 from .controllers.download_controller import DownloadControllerMixin
@@ -195,6 +196,7 @@ class ModernFramelessGUI(
     HistoryPanelMixin,
     ChunksPanelMixin,
     InputsPanelMixin,
+    MediaOptionsBarMixin,
     ClipboardControllerMixin,
     UpdateControllerMixin,
     DownloadControllerMixin,

@@ -124,67 +124,12 @@ class YouTubeDownloadControllerMixin:
 
                         self.card_size.configure(text="Select Quality")
 
-                        def _start_coordinator(selected_opt: VideoFormatOption, final_dest: str, yt_modal: Optional[Any] = None):
-                            stream_info = resolver.build_stream_info(info, selected_opt)
-
-                            try:
-                                self.entry_dest.delete(0, tk.END)
-                                self.entry_dest.insert(0, final_dest)
-                                self.btn_pause.configure(state="normal", text=tr("btn_pause", "⏸ Pause"), bg=self.c_panel_light)
-                                self.btn_cancel.configure(state="normal")
-                            except Exception:
-                                pass
-
-                            def _comb_progress(downloaded, total, speed, eta, active):
-                                if yt_modal:
-                                    try:
-                                        if yt_modal.winfo_exists():
-                                            yt_modal.update_progress(downloaded, total, speed, eta, active)
-                                    except Exception:
-                                        pass
-                                self._engine_progress_cb(downloaded, total, speed, eta, active)
-
-                            def _comb_complete(path, total_bytes, elapsed):
-                                has_yt_modal = False
-                                if yt_modal:
-                                    try:
-                                        if yt_modal.winfo_exists():
-                                            yt_modal.on_download_complete(path, total_bytes, elapsed)
-                                            has_yt_modal = True
-                                    except Exception:
-                                        pass
-                                self._engine_complete_cb(path, total_bytes, elapsed, suppress_dialog=has_yt_modal)
-
-                            def _comb_error(err):
-                                if yt_modal:
-                                    try:
-                                        if yt_modal.winfo_exists():
-                                            yt_modal.on_download_error(err)
-                                    except Exception:
-                                        pass
-                                self._engine_error_cb(err)
-
-                            coordinator = StreamDownloadCoordinator(
-                                stream_info=stream_info,
-                                destination_path=final_dest,
-                                max_connections=max_conn,
-                                rate_limit_bytes_per_sec=bytes_limit,
-                                on_progress=_comb_progress,
-                                on_chunk_update=self._engine_chunk_update_cb,
-                                on_log=self.log,
-                                on_complete=_comb_complete,
-                                on_error=_comb_error
-                            )
-                            self.engine = coordinator
-                            if yt_modal and hasattr(yt_modal, "attach_engine"):
-                                yt_modal.attach_engine(coordinator)
-                            coordinator.start()
-
                         def _on_confirm(selected_opt: VideoFormatOption, final_dest: str):
                             self._quality_modal = None
                             if hasattr(self, "clear_last_clipboard_url"):
                                 self.clear_last_clipboard_url()
                             try:
+                                stream_info = resolver.build_stream_info(info, selected_opt)
                                 is_hidden = self.is_window_hidden_or_minimized() if hasattr(self, "is_window_hidden_or_minimized") else False
                                 yt_prog_modal = None
                                 if is_hidden:
@@ -196,7 +141,7 @@ class YouTubeDownloadControllerMixin:
                                         parent_app=self,
                                         show_progress_immediately=True
                                     )
-                                _start_coordinator(selected_opt, final_dest, yt_modal=yt_prog_modal)
+                                self._launch_stream_coordinator(stream_info, final_dest, max_conn, bytes_limit, yt_modal=yt_prog_modal)
                             except Exception as e:
                                 self._quality_modal = None
                                 self.log(f"[{tag} START ERROR] {e}")
@@ -209,11 +154,29 @@ class YouTubeDownloadControllerMixin:
                             if hasattr(self, "restore_window"):
                                 self.restore_window()
                             try:
-                                _start_coordinator(selected_opt, final_dest, yt_modal=None)
+                                self.entry_url.delete(0, tk.END)
+                                self.entry_url.insert(0, url)
+                                self.entry_dest.delete(0, tk.END)
+                                self.entry_dest.insert(0, final_dest)
+                                self.btn_start.configure(state="normal")
+                                self.btn_pause.configure(state="disabled")
+                                self.btn_cancel.configure(state="disabled")
+                                self.card_size.configure(text=tr("status_ready", "Ready"))
+                                if hasattr(self, "populate_main_media_bar"):
+                                    self.populate_main_media_bar(
+                                        url=url,
+                                        dest=final_dest,
+                                        info=info,
+                                        options=options,
+                                        selected_opt=selected_opt,
+                                        audio_tracks=audio_tracks,
+                                        subtitle_tracks=subtitle_tracks,
+                                        resolver=resolver
+                                    )
+                                self.log(f"[{tag}] Ready in main window with selected media options.")
                             except Exception as e:
                                 self._quality_modal = None
-                                self.log(f"[{tag} START ERROR] {e}")
-                                self._engine_error_cb(str(e))
+                                self.log(f"[{tag} OPEN IN MAIN ERROR] {e}")
 
                         def _on_cancel():
                             self._quality_modal = None
@@ -280,15 +243,16 @@ class YouTubeDownloadControllerMixin:
             except Exception as e:
                 if hasattr(self, "clear_last_clipboard_url"):
                     self.clear_last_clipboard_url()
-                try:
-                    if hasattr(self, "_close_fetching_toast"):
-                        self.dispatch_to_main_thread(self._close_fetching_toast)
-                except Exception:
-                    pass
                 if not self._yt_cancel_event.is_set():
                     self.log(f"[{tag} ERROR] {e}")
                     try:
                         self.dispatch_to_main_thread(lambda: self._engine_error_cb(str(e)))
+                    except Exception:
+                        pass
+            finally:
+                if hasattr(self, "_close_fetching_toast"):
+                    try:
+                        self.dispatch_to_main_thread(self._close_fetching_toast)
                     except Exception:
                         pass
 
@@ -296,6 +260,69 @@ class YouTubeDownloadControllerMixin:
         resolve_thread.start()
 
     _start_media_download = _start_youtube_download
+
+    def _launch_stream_coordinator(
+        self,
+        stream_info: Any,
+        final_dest: str,
+        max_conn: int = 8,
+        bytes_limit: float = 0.0,
+        yt_modal: Optional[Any] = None
+    ):
+        """Initializes and runs StreamDownloadCoordinator with GUI progress and status hooks."""
+        try:
+            self.entry_dest.delete(0, tk.END)
+            self.entry_dest.insert(0, final_dest)
+            self.btn_pause.configure(state="normal", text=tr("btn_pause", "⏸ Pause"), bg=self.c_panel_light)
+            self.btn_cancel.configure(state="normal")
+            self.btn_start.configure(state="disabled")
+        except Exception:
+            pass
+
+        def _comb_progress(downloaded, total, speed, eta, active):
+            if yt_modal:
+                try:
+                    if yt_modal.winfo_exists():
+                        yt_modal.update_progress(downloaded, total, speed, eta, active)
+                except Exception:
+                    pass
+            self._engine_progress_cb(downloaded, total, speed, eta, active)
+
+        def _comb_complete(path, total_bytes, elapsed):
+            has_yt_modal = False
+            if yt_modal:
+                try:
+                    if yt_modal.winfo_exists():
+                        yt_modal.on_download_complete(path, total_bytes, elapsed)
+                        has_yt_modal = True
+                except Exception:
+                    pass
+            self._engine_complete_cb(path, total_bytes, elapsed, suppress_dialog=has_yt_modal)
+
+        def _comb_error(err):
+            if yt_modal:
+                try:
+                    if yt_modal.winfo_exists():
+                        yt_modal.on_download_error(err)
+                except Exception:
+                    pass
+            self._engine_error_cb(err)
+
+        coordinator = StreamDownloadCoordinator(
+            stream_info=stream_info,
+            destination_path=final_dest,
+            max_connections=max_conn,
+            rate_limit_bytes_per_sec=bytes_limit,
+            on_progress=_comb_progress,
+            on_chunk_update=self._engine_chunk_update_cb,
+            on_log=self.log,
+            on_complete=_comb_complete,
+            on_error=_comb_error
+        )
+        self.engine = coordinator
+        if yt_modal and hasattr(yt_modal, "attach_engine"):
+            yt_modal.attach_engine(coordinator)
+        coordinator.start()
 
 
 __all__ = ["YouTubeDownloadControllerMixin"]

@@ -47,9 +47,133 @@ def _format_srt_timestamp(ts: str) -> str:
     return f"{h}:{m}:{s.zfill(2)},000"
 
 
+def _format_seconds_to_srt(seconds: float) -> str:
+    """Formats float seconds into SRT timestamp HH:MM:SS,mmm."""
+    if seconds < 0:
+        seconds = 0.0
+    hrs = int(seconds // 3600)
+    mins = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    ms = int(round((seconds - int(seconds)) * 1000))
+    if ms >= 1000:
+        secs += 1
+        ms = 0
+    return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
+
+
+def _parse_timestamp_or_seconds(val: str) -> float:
+    """Parses seconds string (e.g. '1.5s', '12.4') or HH:MM:SS.mmm into float seconds."""
+    s = str(val or "").strip().rstrip("sS")
+    if ":" in s:
+        parts = s.split(":")
+        try:
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + float(parts[1])
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        except Exception:
+            return 0.0
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
+
+
+def _parse_xml_subtitles_to_srt(text: str) -> str:
+    """Parses YouTube timedtext XML (<transcript>, <tt>, <text>, <p>) into valid SRT."""
+    cues: List[str] = []
+    cue_idx = 1
+    # Match classic YouTube XML <text start="1.5" dur="2.0">...</text>
+    text_pat = re.compile(r'<text\s+[^>]*start="([^"]+)"(?:\s+dur="([^"]+)")?[^>]*>(.*?)</text>', re.DOTALL | re.IGNORECASE)
+    for m in text_pat.finditer(text):
+        try:
+            start = float(m.group(1))
+            dur = float(m.group(2)) if m.group(2) else 2.0
+            end = start + max(0.5, dur)
+            body = html.unescape(re.sub(r'<[^>]+>', '', m.group(3))).strip()
+            if body:
+                timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
+                cues.append(f"{cue_idx}\n{timing}\n{body}")
+                cue_idx += 1
+        except Exception:
+            continue
+    if not cues:
+        # Match TTML <p begin="..." dur="..." end="...">...</p>
+        p_pat = re.compile(r'<p\s+[^>]*begin="([^"]+)"(?:\s+(?:dur="([^"]+)"|end="([^"]+)"))?[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
+        for m in p_pat.finditer(text):
+            try:
+                start = _parse_timestamp_or_seconds(m.group(1))
+                if m.group(2):
+                    dur = _parse_timestamp_or_seconds(m.group(2))
+                    end = start + max(0.5, dur)
+                elif m.group(3):
+                    end = _parse_timestamp_or_seconds(m.group(3))
+                else:
+                    end = start + 2.0
+                body = html.unescape(re.sub(r'<[^>]+>', '', m.group(4))).strip()
+                if body:
+                    timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
+                    cues.append(f"{cue_idx}\n{timing}\n{body}")
+                    cue_idx += 1
+            except Exception:
+                continue
+    return "\n\n".join(cues) + ("\n" if cues else "")
+
+
+def _parse_json_subtitles_to_srt(text: str) -> str:
+    """Parses YouTube json3 timedtext into valid SRT."""
+    import json
+    try:
+        data = json.loads(text)
+    except Exception:
+        return ""
+    events = data.get("events")
+    if not isinstance(events, list):
+        return ""
+    cues: List[str] = []
+    cue_idx = 1
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        start_ms = ev.get("tStartMs")
+        dur_ms = ev.get("dDurationMs", 2000)
+        if start_ms is None:
+            continue
+        start = float(start_ms) / 1000.0
+        end = start + max(0.5, float(dur_ms or 2000) / 1000.0)
+        segs = ev.get("segs", [])
+        if isinstance(segs, list) and segs:
+            body = "".join(str(s.get("utf8", "")) for s in segs if isinstance(s, dict)).strip()
+        else:
+            body = str(ev.get("text", "")).strip()
+        body = html.unescape(re.sub(r'<[^>]+>', '', body)).strip()
+        if body:
+            timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
+            cues.append(f"{cue_idx}\n{timing}\n{body}")
+            cue_idx += 1
+    return "\n\n".join(cues) + ("\n" if cues else "")
+
+
 def convert_vtt_to_srt(vtt_text: str) -> str:
-    """Converts WebVTT subtitle text cleanly into standard SubRip (.srt) format."""
-    blocks = re.split(r'\r?\n\r?\n+', vtt_text.strip())
+    """Converts WebVTT, YouTube XML (srv1/srv3/transcript/ttml), or JSON3 into standard SubRip (.srt)."""
+    raw = str(vtt_text or "").strip()
+    if not raw:
+        return ""
+
+    # 1. JSON3 format
+    if ("\"events\"" in raw or "'events'" in raw) and raw.startswith("{"):
+        parsed_json = _parse_json_subtitles_to_srt(raw)
+        if parsed_json:
+            return parsed_json
+
+    # 2. XML format (<transcript>, <tt>, <text>, <p>)
+    if any(tag in raw for tag in ("<transcript", "<tt", "<text", "<p")):
+        parsed_xml = _parse_xml_subtitles_to_srt(raw)
+        if parsed_xml:
+            return parsed_xml
+
+    # 3. WebVTT format
+    blocks = re.split(r'\r?\n\r?\n+', raw)
     srt_cues: List[str] = []
     cue_index = 1
     timestamp_pat = re.compile(
@@ -87,7 +211,7 @@ def convert_vtt_to_srt(vtt_text: str) -> str:
 
 def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> Optional[str]:
     """
-    Downloads subtitle, converts VTT to SRT, and saves alongside video in UTF-8-SIG.
+    Downloads subtitle, converts VTT/XML/JSON to SRT, and saves alongside video in pure UTF-8.
     Writes both <video_stem>.<language>.srt and <video_stem>.srt so media players auto-detect.
     """
     if not sub_track or sub_track.get("sub_id") in (None, "none") or not sub_track.get("url"):
@@ -112,8 +236,9 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
         except Exception:
             return None
 
-    ext = str(sub_track.get("ext") or "").lower()
-    srt_content = convert_vtt_to_srt(raw_text) if (ext == "vtt" or "WEBVTT" in raw_text[:120]) else raw_text
+    srt_content = convert_vtt_to_srt(raw_text)
+    if not srt_content:
+        srt_content = raw_text
     stem = os.path.splitext(video_filepath)[0]
     srt_path = f"{stem}.{sub_track.get('language') or 'sub'}.srt"
     default_srt_path = f"{stem}.srt"
@@ -179,25 +304,24 @@ def burn_subtitle_into_video(
         return False
     abs_video = os.path.abspath(video_path)
     abs_srt = os.path.abspath(srt_path)
-    temp_burn_mp4 = f"{os.path.splitext(video_path)[0]}.burn.mp4"
-    srt_dir = os.path.dirname(abs_srt)
-    srt_base = os.path.basename(abs_srt)
+    srt_dir = os.path.dirname(abs_video)
+    burn_srt_path = os.path.join(srt_dir, "_sd_burn_sub.srt")
+    temp_burn_mp4 = f"{os.path.splitext(abs_video)[0]}.burn.mp4"
 
-    temp_copy_path = None
-    if re.match(r"^[a-zA-Z0-9_.-]+$", srt_base):
-        sub_name = srt_base
-    else:
-        temp_copy_path = os.path.join(srt_dir, f"_sd_burn_{os.getpid()}_{abs(hash(abs_srt)) % 100000}.srt")
-        try:
-            shutil.copy2(abs_srt, temp_copy_path)
-            sub_name = os.path.basename(temp_copy_path)
-        except Exception:
-            sub_name = srt_base.replace("\\", "/").replace("'", r"\'").replace(":", r"\:")
+    try:
+        with open(abs_srt, "r", encoding="utf-8-sig", errors="replace") as sf:
+            srt_content = sf.read()
+        with open(burn_srt_path, "w", encoding="utf-8") as bf:
+            bf.write(srt_content)
+    except Exception as exc:
+        if on_log:
+            on_log(f"[SUBTITLES] Warning: Failed to prepare BOM-free SRT: {exc}")
+        return False
 
     cmd = [
         ffmpeg_path, "-y",
-        "-i", video_path,
-        "-vf", f"subtitles='{sub_name}'",
+        "-i", abs_video,
+        "-vf", "subtitles=_sd_burn_sub.srt:charenc=UTF-8",
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "22",
@@ -216,7 +340,7 @@ def burn_subtitle_into_video(
             creationflags=cflags
         )
         if res.returncode == 0 and os.path.isfile(temp_burn_mp4) and os.path.getsize(temp_burn_mp4) > 0:
-            os.replace(temp_burn_mp4, video_path)
+            os.replace(temp_burn_mp4, abs_video)
             if on_log:
                 on_log("[SUBTITLES] Successfully burned subtitles permanently into video frames.")
             return True
@@ -234,9 +358,9 @@ def burn_subtitle_into_video(
             except Exception: pass
         return False
     finally:
-        if temp_copy_path and os.path.exists(temp_copy_path):
+        if os.path.exists(burn_srt_path):
             try:
-                os.remove(temp_copy_path)
+                os.remove(burn_srt_path)
             except Exception:
                 pass
 

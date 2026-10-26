@@ -45,6 +45,7 @@ class FetchingLinkToast(tk.Toplevel):
         self._pulse_job = None
         self._dot_count = 0
         self._dot_job = None
+        self._safety_close_job = self.after(15000, self.close)
 
         th = theme or {}
         self.c_bg = th.get("c_bg", "#0f172a")
@@ -82,6 +83,7 @@ class FetchingLinkToast(tk.Toplevel):
 
         try:
             self.attributes("-topmost", True)
+            self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
         except Exception:
             pass
 
@@ -266,6 +268,12 @@ class FetchingLinkToast(tk.Toplevel):
             except Exception:
                 pass
             self._dot_job = None
+        if getattr(self, "_safety_close_job", None):
+            try:
+                self.after_cancel(self._safety_close_job)
+            except Exception:
+                pass
+            self._safety_close_job = None
         if callable(self.on_cancel):
             try:
                 self.on_cancel()
@@ -284,6 +292,12 @@ class FetchingLinkToast(tk.Toplevel):
     def close(self):
         """Smoothly closes and destroys the toast window without invoking cancel callback."""
         self._closing = True
+        if getattr(self, "_safety_close_job", None):
+            try:
+                self.after_cancel(self._safety_close_job)
+            except Exception:
+                pass
+            self._safety_close_job = None
         if self._pulse_job:
             try:
                 self.after_cancel(self._pulse_job)
@@ -313,6 +327,12 @@ class FetchingLinkToast(tk.Toplevel):
     def destroy(self):
         """Cancels background animation timers and destroys widget cleanly."""
         self._closing = True
+        if getattr(self, "_safety_close_job", None):
+            try:
+                self.after_cancel(self._safety_close_job)
+            except Exception:
+                pass
+            self._safety_close_job = None
         if hasattr(self, "_pulse_job") and self._pulse_job:
             try:
                 self.after_cancel(self._pulse_job)

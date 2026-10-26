@@ -426,21 +426,19 @@ class QualitySelectionModal(tk.Toplevel):
             idx = self.cb_audio.current()
             if 0 <= idx < len(self.audio_tracks):
                 self.selected_option.selected_audio_track = self.audio_tracks[idx]
-        if self.subtitle_tracks and self.cb_sub:
-            idx = self.cb_sub.current()
-            if 0 <= idx < len(self.subtitle_tracks):
-                self.selected_option.selected_subtitle_track = self.subtitle_tracks[idx]
-        sub_mode = None
+        sub_mode = "soft_embed"
         if hasattr(self, "cb_sub") and self.cb_sub:
             mode_fn = getattr(self.cb_sub, "get_selected_mode", None)
-            sub_mode = mode_fn() if callable(mode_fn) else getattr(self.cb_sub, "_selected_mode", None)
-        if not sub_mode:
-            try:
-                from ...config import get_setting
-                sub_mode = get_setting("subtitle_embed_mode", "soft_embed")
-            except Exception:
-                sub_mode = "soft_embed"
-        self.selected_option.subtitle_embed_mode = sub_mode
+            sub_mode = mode_fn() if callable(mode_fn) else getattr(self.cb_sub, "_selected_mode", "soft_embed")
+        self.selected_option.subtitle_embed_mode = sub_mode or "soft_embed"
+        if self.subtitle_tracks and self.cb_sub:
+            idx = self.cb_sub.current()
+            if idx <= 0 and len(self.subtitle_tracks) > 1 and (sub_mode == "hard_burn" or getattr(self.cb_sub, "_user_touched_mode", False)):
+                idx = 1
+                try: self.cb_sub.current(1)
+                except Exception: pass
+            if 0 <= idx < len(self.subtitle_tracks):
+                self.selected_option.selected_subtitle_track = self.subtitle_tracks[idx]
 
     def _resolve_final_dest(self) -> str:
         final_dest = self.entry_dest.get().strip()

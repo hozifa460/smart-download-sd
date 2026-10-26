@@ -8,6 +8,7 @@ import threading
 import subprocess
 import shutil
 import ssl
+import dataclasses
 from typing import Optional, Callable, Dict, Any, List
 
 from .engine import TurboDownloadEngine
@@ -49,6 +50,7 @@ class StreamDownloadCoordinator:
         self.stream_info = stream_info
         self.destination_path = destination_path
         self.max_connections = max(1, min(max_connections, 32))
+        self._requested_max_connections = self.max_connections
         self.rate_limit = rate_limit_bytes_per_sec
         self.ssl_context = ssl_context
         self.on_progress = on_progress
@@ -66,8 +68,6 @@ class StreamDownloadCoordinator:
             or getattr(self.stream_info, "platform", "").lower() == "youtube"
         )
         if self.is_youtube_stream:
-            # YouTube googlevideo CDN issues HTTP 403 Forbidden on concurrent range requests.
-            # Enforce safe concurrency (1 connection max per stream).
             self.max_connections = min(self.max_connections, 1)
 
         self.current_engine: Optional[TurboDownloadEngine] = None
@@ -78,6 +78,7 @@ class StreamDownloadCoordinator:
         self._is_running = False
         self._is_paused = False
         self.start_time = 0.0
+        self._last_active_speed = 0.0
         self._active_engines: List[TurboDownloadEngine] = []
 
         # Aggregated stream metrics for smooth progress visualization
@@ -99,14 +100,20 @@ class StreamDownloadCoordinator:
         return self.get_chunks_snapshot()
 
     def get_chunks_snapshot(self) -> List[DownloadChunk]:
-        """Returns a thread-safe snapshot copy of the active engines chunk list."""
+        """Returns snapshot combining chunks from all active engines with distinct IDs."""
         with self._lock:
             res: List[DownloadChunk] = []
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
+            offset = 0
             for eng in targets:
                 try:
                     with eng._lock:
-                        res.extend(eng.chunks)
+                        for c in eng.chunks:
+                            if offset > 0:
+                                res.append(dataclasses.replace(c, chunk_id=c.chunk_id + offset))
+                            else:
+                                res.append(c)
+                        offset += len(eng.chunks)
                 except Exception:
                     pass
             return res
@@ -252,19 +259,14 @@ class StreamDownloadCoordinator:
                 def _on_single_complete(path, size, elapsed):
                     if is_mp3_request:
                         self.log("[FFMPEG] Transcoding downloaded audio stream to universal MP3...")
+                        if self.on_progress:
+                            rep_spd = self._last_active_speed if self._last_active_speed > 0 else (size / max(0.05, elapsed))
+                            self.on_progress(size, size, rep_spd, "Transcoding...", 0)
                         try:
                             ffmpeg_bin = find_ffmpeg_bin()
                             if not ffmpeg_bin:
                                 raise RuntimeError("FFmpeg executable not found.")
-                            cmd = [
-                                ffmpeg_bin,
-                                "-y",
-                                "-i", actual_dest,
-                                "-vn",
-                                "-c:a", "libmp3lame",
-                                "-q:a", "2",
-                                self.destination_path
-                            ]
+                            cmd = [ffmpeg_bin, "-y", "-i", actual_dest, "-vn", "-c:a", "libmp3lame", "-q:a", "2", self.destination_path]
                             cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
                             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=cflags)
                             if res.returncode != 0:
@@ -296,9 +298,17 @@ class StreamDownloadCoordinator:
                         if self.on_complete:
                             self.on_complete(path, size, elapsed)
 
-                is_gv = self.is_youtube_stream or TurboDownloadEngine.is_googlevideo_url(self.stream_info.video_url)
-                safe_conn = min(self.max_connections, 1) if is_gv else self.max_connections
-                allow_split = not is_gv
+                req_conn = getattr(self, "_requested_max_connections", self.max_connections)
+                safe_conn = min(max(1, req_conn), 8)
+                allow_split = True
+
+                def _on_single_prog(downloaded, total, speed, eta, active):
+                    if speed > 0:
+                        self._last_active_speed = speed
+                    elif downloaded > 0 and self._last_active_speed <= 0.0:
+                        self._last_active_speed = downloaded / max(0.05, time.time() - self.start_time)
+                    if self.on_progress:
+                        self.on_progress(downloaded, total, speed, eta, active)
 
                 engine = TurboDownloadEngine(
                     url=self.stream_info.video_url,
@@ -308,7 +318,7 @@ class StreamDownloadCoordinator:
                     rate_limit_bytes_per_sec=self.rate_limit,
                     ssl_context=self.ssl_context,
                     headers=self.stream_info.video_headers,
-                    on_progress=self.on_progress,
+                    on_progress=_on_single_prog,
                     on_chunk_update=self.on_chunk_update,
                     on_log=self.on_log,
                     on_complete=_on_single_complete,
@@ -349,6 +359,12 @@ class StreamDownloadCoordinator:
                     combined_dl = min(combined_total, self._v_downloaded + self._a_downloaded)
                     combined_speed = self._v_speed + self._a_speed
                     combined_active = self._v_active + self._a_active
+                    if combined_speed > 0:
+                        self._last_active_speed = combined_speed
+                    elif combined_dl > 0 and self._last_active_speed <= 0.0:
+                        self._last_active_speed = combined_dl / max(0.05, time.time() - self.start_time)
+                    if combined_speed <= 0.0 and self._last_active_speed > 0 and (v_completed.is_set() or a_completed.is_set()):
+                        combined_speed = self._last_active_speed
                 rem_bytes = max(0, combined_total - combined_dl)
                 if combined_speed > 1024 and rem_bytes > 0:
                     eta_sec = int(rem_bytes / combined_speed)
@@ -408,15 +424,13 @@ class StreamDownloadCoordinator:
                     self._a_active = active
                 _report_combined()
 
-            is_v_gv = self.is_youtube_stream or TurboDownloadEngine.is_googlevideo_url(self.stream_info.video_url)
-            v_conn = min(self.max_connections, 1) if is_v_gv else self.max_connections
-            v_allow_split = not is_v_gv
-
+            req_conn = getattr(self, "_requested_max_connections", self.max_connections)
+            v_conn = min(max(1, req_conn), 8)
             v_engine = TurboDownloadEngine(
                 url=self.stream_info.video_url,
                 destination_path=video_tmp,
                 max_connections=v_conn,
-                allow_dynamic_split=v_allow_split,
+                allow_dynamic_split=True,
                 rate_limit_bytes_per_sec=self.rate_limit,
                 ssl_context=self.ssl_context,
                 headers=self.stream_info.video_headers,
@@ -427,15 +441,12 @@ class StreamDownloadCoordinator:
                 on_error=_on_v_error
             )
 
-            is_a_gv = self.is_youtube_stream or TurboDownloadEngine.is_googlevideo_url(self.stream_info.audio_url)
-            a_conn = min(self.max_connections, 1) if is_a_gv else max(1, self.max_connections // 2)
-            a_allow_split = not is_a_gv
-
+            a_conn = min(max(1, req_conn // 2), 4)
             a_engine = TurboDownloadEngine(
                 url=self.stream_info.audio_url,
                 destination_path=audio_tmp,
                 max_connections=a_conn,
-                allow_dynamic_split=a_allow_split,
+                allow_dynamic_split=True,
                 rate_limit_bytes_per_sec=self.rate_limit,
                 ssl_context=self.ssl_context,
                 headers=self.stream_info.audio_headers,
@@ -481,8 +492,9 @@ class StreamDownloadCoordinator:
             with self._lock:
                 self._active_engines.clear()
             combined_total = max(1, self._v_total_size + self._a_total_size)
+            rep_spd = self._last_active_speed if self._last_active_speed > 0 else (combined_total / max(0.05, time.time() - self.start_time))
             if self.on_progress:
-                self.on_progress(combined_total, combined_total, 0.0, "Merging...", 0)
+                self.on_progress(combined_total, combined_total, rep_spd, "Merging...", 0)
 
             self.log(f"[{tag}] Phase 2/2: Merging video and audio streams into final container...")
             YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log)
@@ -507,23 +519,16 @@ class StreamDownloadCoordinator:
                 self._is_running = False
             # Cleanly remove temporary part files on cancel or error
             if self._cancel_event.is_set() or has_error or v_error or a_error:
-                clean_targets = [video_tmp, audio_tmp]
-                if is_mp3_request and actual_dest:
-                    clean_targets.append(actual_dest)
+                clean_targets = [p for p in (video_tmp, audio_tmp, actual_dest if is_mp3_request else "") if p]
                 for p in clean_targets:
-                    if p:
-                        if os.path.exists(p):
-                            try:
-                                os.remove(p)
-                            except Exception:
-                                pass
-                        for ext in (".sd_parts", ".tdm_parts"):
-                            parts_dir = p + ext
-                            if os.path.isdir(parts_dir):
-                                try:
-                                    shutil.rmtree(parts_dir, ignore_errors=True)
-                                except Exception:
-                                    pass
+                    if os.path.exists(p):
+                        try: os.remove(p)
+                        except Exception: pass
+                    for ext in (".sd_parts", ".tdm_parts"):
+                        parts_dir = p + ext
+                        if os.path.isdir(parts_dir):
+                            try: shutil.rmtree(parts_dir, ignore_errors=True)
+                            except Exception: pass
 
     def _process_subtitles(self, target_path: str):
         sub = getattr(self.stream_info, "subtitle_track", None)

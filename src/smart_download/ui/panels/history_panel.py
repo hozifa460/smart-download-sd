@@ -12,7 +12,7 @@ from tkinter import ttk
 
 from ...locales.i18n import tr
 from ...utils.file_ops import open_downloaded_file, open_containing_folder
-from ...services.youtube_service import format_filesize
+from ...services.youtube_service import format_filesize, is_media_url
 
 
 class HistoryPanelMixin:
@@ -49,6 +49,10 @@ class HistoryPanelMixin:
         self.history_context_menu.add_command(
             label=tr("ctx_resume_retry", "🔄 Resume / Retry"),
             command=self._history_redownload_selected
+        )
+        self.history_context_menu.add_command(
+            label=tr("ctx_redownload_quality", "🎞️ Re-Download with Different Quality"),
+            command=self._history_redownload_with_quality
         )
         self.history_context_menu.add_separator()
         self.history_context_menu.add_command(
@@ -164,8 +168,12 @@ class HistoryPanelMixin:
             except Exception:
                 pass
 
-    def _history_redownload_selected(self):
-        """Loads selected history entry into URL/Destination and triggers download."""
+    def _history_redownload_with_quality(self):
+        """Re-downloads selected entry allowing quality and format selection."""
+        self._history_redownload_selected(with_quality=True)
+
+    def _history_redownload_selected(self, with_quality: bool = False):
+        """Loads selected history entry into URL/Destination and triggers download or quality modal."""
         sel = self.tree_history.selection()
         if not sel:
             return
@@ -190,6 +198,11 @@ class HistoryPanelMixin:
                 self.notebook.select(0)
             except Exception:
                 pass
+
+        if (with_quality or is_media_url(url)) and hasattr(self, "_start_youtube_download"):
+            self._start_youtube_download(url, file_path or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""))
+            return
+
         self._on_start_download()
 
     def _history_remove_selected(self, delete_file: bool = False):

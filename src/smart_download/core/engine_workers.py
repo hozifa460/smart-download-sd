@@ -349,7 +349,7 @@ class EngineWorkersMixin(EngineResumerMixin):
             total_downloaded = sum(c.downloaded_bytes for c in self.chunks)
             active_count = sum(1 for c in self.chunks if c.status == "active")
 
-        if dt >= 0.4:
+        if dt >= 0.12:
             delta_bytes = total_downloaded - self.last_downloaded_bytes
             instant_speed = max(0.0, delta_bytes / dt)
             # Exponential Moving Average for silky smooth speed meter
@@ -360,6 +360,9 @@ class EngineWorkersMixin(EngineResumerMixin):
 
             self.last_downloaded_bytes = total_downloaded
             self.last_speed_check_time = now
+
+        if self.current_speed <= 0.0 and total_downloaded > 0:
+            self.current_speed = total_downloaded / max(0.05, time.time() - getattr(self, "start_time", time.time() - 0.1))
 
         # Compute ETA
         if self.current_speed > 1024 and self.total_size > total_downloaded:

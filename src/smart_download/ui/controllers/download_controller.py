@@ -79,6 +79,12 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
 
         bytes_limit = kb_limit * 1024.0 if kb_limit > 0 else 0.0
 
+        pending = getattr(self, "_pending_media_context", None)
+        if pending and pending.get("url") == url:
+            if hasattr(self, "_start_pending_media_download"):
+                self._start_pending_media_download()
+                return
+
         if is_media_url(url, check_ytdlp_extractors=True) or skip_resolver:
             self._start_download_with_engine(url, dest, max_conn, bytes_limit, modal=None)
             return
@@ -264,35 +270,16 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         if hasattr(self, "clear_last_clipboard_url"):
             try: self.clear_last_clipboard_url()
             except Exception: pass
-        if hasattr(self, "_quality_modal") and self._quality_modal:
-            try:
-                if self._quality_modal.winfo_exists():
-                    try:
-                        self._quality_modal.grab_release()
-                    except Exception:
-                        pass
-                    self._quality_modal.destroy()
-            except Exception:
-                pass
-            self._quality_modal = None
-        if hasattr(self, "_active_modal_dialog") and self._active_modal_dialog:
-            try:
-                if self._active_modal_dialog.winfo_exists():
-                    try:
-                        self._active_modal_dialog.grab_release()
-                    except Exception:
-                        pass
-                    self._active_modal_dialog.destroy()
-            except Exception:
-                pass
-            self._active_modal_dialog = None
-        if hasattr(self, "_refresh_modal") and self._refresh_modal:
-            try:
-                if self._refresh_modal.winfo_exists():
-                    self._refresh_modal.destroy()
-            except Exception:
-                pass
-            self._refresh_modal = None
+        for m_name in ("_quality_modal", "_active_modal_dialog", "_refresh_modal"):
+            m = getattr(self, m_name, None)
+            if m:
+                try:
+                    if m.winfo_exists():
+                        try: m.grab_release()
+                        except Exception: pass
+                        m.destroy()
+                except Exception: pass
+                setattr(self, m_name, None)
         if self.engine:
             self.engine.cancel()
         self.btn_start.configure(state="normal")

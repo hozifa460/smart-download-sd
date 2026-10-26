@@ -242,5 +242,14 @@
   "lbl_subtitle_mode": "⚙️ وضع الترجمة:",
   "sub_mode_soft": "ملف منفصل + دمج سريع (MP4)",
   "sub_mode_srt_only": "ملف ترجمة منفصل فقط (.srt)",
-  "sub_mode_burn": "ملف منفصل + طباعة بالفيديو (Burn-in)"
+  "sub_mode_burn": "ملف منفصل + طباعة بالفيديو (Burn-in)",
+  "lbl_main_quality": "🎞️ الجودة:",
+  "lbl_main_audio": "🎙️ الصوت:",
+  "lbl_main_sub": "💬 الترجمة:",
+  "lbl_main_sub_mode": "⚙️ النمط:",
+  "btn_media_quality_options": "⚙️ خيارات...",
+  "opt_sub_soft": "دمج برمجي",
+  "opt_sub_srt": "ملف SRT فقط",
+  "opt_sub_burn": "حرق دائم على الفيديو",
+  "ctx_redownload_quality": "🎞️ إعادة التحميل بجودة مختلفة"
 }

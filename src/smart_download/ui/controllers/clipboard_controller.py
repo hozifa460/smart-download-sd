@@ -433,10 +433,13 @@ class ClipboardControllerMixin:
                     self.entry_custom_speed.insert(0, str(int(bytes_limit / 1024.0)))
                 else:
                     self.entry_custom_speed.delete(0, tk.END)
+                self.btn_start.configure(state="normal")
+                self.btn_pause.configure(state="disabled")
+                self.btn_cancel.configure(state="disabled")
+                self.card_size.configure(text=tr("status_ready", "Ready"))
             except Exception:
                 pass
             self.log(f"[CLIPBOARD] Download opened in main app: {os.path.basename(final_dest)}")
-            self._on_start_download(skip_resolver=True)
 
         def _on_confirm(final_dest: str, *args):
             self._confirm_modal = None

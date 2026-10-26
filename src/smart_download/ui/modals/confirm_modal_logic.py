@@ -387,21 +387,20 @@ class ConfirmModalLogicMixin:
         elif self.parent_app:
             try:
                 self.parent_app.restore_window()
-                self.parent_app.entry_url.delete(0, tk.END)
-                self.parent_app.entry_url.insert(0, self.url)
-                self.parent_app.entry_dest.delete(0, tk.END)
-                self.parent_app.entry_dest.insert(0, final_dest)
-                try:
-                    self.parent_app.conn_var.set(str(conn_count))
-                except Exception:
-                    pass
+                p = self.parent_app
+                p.entry_url.delete(0, tk.END); p.entry_url.insert(0, self.url)
+                p.entry_dest.delete(0, tk.END); p.entry_dest.insert(0, final_dest)
+                try: p.conn_var.set(str(conn_count))
+                except Exception: pass
                 if speed_limit > 0:
                     try:
-                        self.parent_app.entry_custom_speed.delete(0, tk.END)
-                        self.parent_app.entry_custom_speed.insert(0, str(int(speed_limit / 1024.0)))
-                    except Exception:
-                        pass
-                self.parent_app._on_start_download()
+                        p.entry_custom_speed.delete(0, tk.END)
+                        p.entry_custom_speed.insert(0, str(int(speed_limit / 1024.0)))
+                    except Exception: pass
+                if hasattr(p, "btn_start"): p.btn_start.configure(state="normal")
+                if hasattr(p, "btn_pause"): p.btn_pause.configure(state="disabled")
+                if hasattr(p, "btn_cancel"): p.btn_cancel.configure(state="disabled")
+                if hasattr(p, "card_size"): p.card_size.configure(text=tr("status_ready", "Ready"))
             except Exception:
                 pass
         elif self.master:

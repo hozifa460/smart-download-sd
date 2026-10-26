@@ -158,14 +158,31 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     return res
 
 
+def _normalize_sub_url_and_ext(url: str, ext: str) -> Tuple[str, str]:
+    """Rewrites timedtext URLs with srv3/ttml/json3/srv1 to fmt=vtt for standard WebVTT delivery."""
+    if not url:
+        return url, ext
+    if "fmt=" in url:
+        url = re.sub(r'([?&]fmt=)(?:srv3|ttml|json3|srv1)\b', r'\g<1>vtt', url)
+        if "fmt=vtt" in url:
+            ext = "vtt"
+    elif "timedtext" in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}fmt=vtt"
+        ext = "vtt"
+    return url, ext
+
+
 def _pick_best_sub_url(sub_formats: List[Dict[str, Any]]) -> Optional[Tuple[str, str]]:
     """Selects the best subtitle URL and extension preferring srt > vtt > ttml > srv3."""
-    order = {"srt": 4, "vtt": 3, "ttml": 2, "srv3": 1}
+    order = {"srt": 5, "vtt": 4, "ttml": 3, "srv3": 2, "srv1": 1, "json3": 0}
     candidates = [f for f in sub_formats if f.get("url")]
     if not candidates:
         return None
     best = max(candidates, key=lambda f: order.get(str(f.get("ext") or "").lower(), 0))
-    return best["url"], str(best.get("ext") or "vtt").lower()
+    url = best["url"]
+    ext = str(best.get("ext") or "vtt").lower()
+    return _normalize_sub_url_and_ext(url, ext)
 
 
 def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -313,6 +330,7 @@ def build_audio_subtitle_row(
         def _on_radio_click():
             chosen = mode_var.get()
             cb_sub._selected_mode = chosen
+            cb_sub._user_touched_mode = True
             if chosen in mode_codes:
                 cb_sub_mode.current(mode_codes.index(chosen))
             try:
@@ -320,7 +338,7 @@ def build_audio_subtitle_row(
             except Exception:
                 pass
             # Smart Auto-Select UX: If subtitles were 'None' and tracks exist, advance to first track
-            if cb_sub.current() == 0 and len(subtitle_tracks) > 1:
+            if cb_sub.current() <= 0 and len(subtitle_tracks) > 1:
                 cb_sub.current(1)
                 _on_sub_changed()
 
@@ -377,11 +395,15 @@ def build_audio_subtitle_row(
             if 0 <= cur_idx < len(mode_codes):
                 code = mode_codes[cur_idx]
                 cb_sub._selected_mode = code
+                cb_sub._user_touched_mode = True
                 mode_var.set(code)
                 try:
                     set_setting("subtitle_embed_mode", code)
                 except Exception:
                     pass
+                if cb_sub.current() <= 0 and len(subtitle_tracks) > 1:
+                    cb_sub.current(1)
+                    _on_sub_changed()
 
         cb_sub._mode_combobox = cb_sub_mode
         cb_sub._mode_radios = radio_widgets
