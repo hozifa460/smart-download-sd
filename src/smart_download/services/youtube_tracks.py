@@ -210,29 +210,63 @@ def build_audio_subtitle_row(
     parent_frame: Any, theme: Dict[str, str],
     audio_tracks: List[Dict[str, Any]], subtitle_tracks: List[Dict[str, Any]]
 ) -> Tuple[Optional[Any], Optional[Any]]:
-    """Renders compact themed Audio Track, Subtitles, and Delivery Mode selectors for QualitySelectionModal."""
+    """Renders spacious themed 2-row Audio Track, Subtitles, and Delivery Mode card for QualitySelectionModal."""
     if tk is None or ttk is None or (not audio_tracks and not subtitle_tracks):
         return None, None
     c_panel = theme.get("c_panel", "#1e293b")
     c_border = theme.get("c_border", "#475569")
     c_text_bright = theme.get("c_text_bright", "#f8fafc")
-    card = tk.Frame(parent_frame, bg=c_panel, padx=10, pady=6, highlightbackground=c_border, highlightthickness=1)
+    c_input_bg = theme.get("c_input_bg", "#0f172a")
+    c_accent = theme.get("c_accent", "#38bdf8")
+
+    card = tk.Frame(parent_frame, bg=c_panel, padx=12, pady=8, highlightbackground=c_border, highlightthickness=1)
     card.pack(fill=tk.X, pady=(0, 10))
+
     cb_audio, cb_sub = None, None
+
+    # Row 1: Audio Track & Subtitles dropdowns
+    row1 = tk.Frame(card, bg=c_panel)
+    row1.pack(fill=tk.X, pady=(0, 6 if subtitle_tracks else 0))
+
     if audio_tracks:
-        tk.Label(card, text=tr("lbl_audio_track", "🎙️ Audio / Dubbing:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 4))
-        cb_audio = ttk.Combobox(card, values=[t.get("label", "") for t in audio_tracks], state="readonly", font=("Segoe UI", 8), width=24)
+        tk.Label(
+            row1,
+            text=tr("lbl_audio_track", "🎙️ لغة الصوت (الدبلجة):"),
+            font=("Segoe UI", 9, "bold"),
+            bg=c_panel,
+            fg=c_text_bright
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        cb_audio = ttk.Combobox(
+            row1,
+            values=[t.get("label", "") for t in audio_tracks],
+            state="readonly",
+            font=("Segoe UI", 8),
+            width=25
+        )
         cb_audio.current(0)
-        cb_audio.pack(side=tk.LEFT, padx=(0, 12))
+        cb_audio.pack(side=tk.LEFT, padx=(0, 16))
+
     if subtitle_tracks:
-        tk.Label(card, text=tr("lbl_subtitle_track", "💬 Subtitles:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 4))
-        cb_sub = ttk.Combobox(card, values=[s.get("label", "") for s in subtitle_tracks], state="readonly", font=("Segoe UI", 8), width=20)
+        tk.Label(
+            row1,
+            text=tr("lbl_subtitle_track", "💬 الترجمة (Subtitles):"),
+            font=("Segoe UI", 9, "bold"),
+            bg=c_panel,
+            fg=c_text_bright
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        cb_sub = ttk.Combobox(
+            row1,
+            values=[s.get("label", "") for s in subtitle_tracks],
+            state="readonly",
+            font=("Segoe UI", 8),
+            width=25
+        )
         cb_sub.current(0)
         cb_sub.pack(side=tk.LEFT, padx=(0, 8))
 
-        # Subtitle delivery mode selector
+        # Row 2: Interactive 3-Mode Selector (ALWAYS ENABLED & CLICKABLE)
         mode_options = [
-            ("soft_embed", tr("sub_mode_soft", "ملف منفصل + دمج سريع (Soft-Mux)")),
+            ("soft_embed", tr("sub_mode_soft", "ملف منفصل + دمج سريع (MP4)")),
             ("srt_only", tr("sub_mode_srt_only", "ملف ترجمة منفصل فقط (.srt)")),
             ("hard_burn", tr("sub_mode_burn", "ملف منفصل + طباعة بالفيديو (Burn-in)")),
         ]
@@ -252,21 +286,22 @@ def build_audio_subtitle_row(
         initial_idx = mode_codes.index(saved_mode) if saved_mode in mode_codes else 0
         current_mode = mode_codes[initial_idx]
 
-        tk.Label(card, text=tr("lbl_subtitle_mode", "⚙️ Mode:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 4))
+        # Backing combobox for unified test compatibility
         cb_sub_mode = ttk.Combobox(card, values=mode_labels, state="disabled", font=("Segoe UI", 8), width=24)
         cb_sub_mode.current(initial_idx)
-        cb_sub_mode.pack(side=tk.LEFT)
 
-        def _get_active_mode() -> str:
-            cur_idx = cb_sub_mode.current()
-            if 0 <= cur_idx < len(mode_codes):
-                return mode_codes[cur_idx]
-            return getattr(cb_sub, "_selected_mode", "soft_embed")
+        row2 = tk.Frame(card, bg=c_panel)
+        row2.pack(fill=tk.X, pady=(2, 0))
 
-        cb_sub._mode_combobox = cb_sub_mode
-        cb_sub._selected_mode = current_mode
-        cb_sub._mode_codes = mode_codes
-        cb_sub.get_selected_mode = _get_active_mode
+        tk.Label(
+            row2,
+            text=tr("lbl_subtitle_mode", "⚙️ وضع الترجمة:"),
+            font=("Segoe UI", 9, "bold"),
+            bg=c_panel,
+            fg=c_text_bright
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        mode_var = tk.StringVar(master=card, value=current_mode)
 
         def _on_sub_changed(event=None):
             idx = cb_sub.current()
@@ -275,19 +310,72 @@ def build_audio_subtitle_row(
             else:
                 cb_sub_mode.configure(state="disabled")
 
-        def _on_mode_changed(event=None):
+        def _on_radio_click():
+            chosen = mode_var.get()
+            cb_sub._selected_mode = chosen
+            if chosen in mode_codes:
+                cb_sub_mode.current(mode_codes.index(chosen))
+            try:
+                set_setting("subtitle_embed_mode", chosen)
+            except Exception:
+                pass
+            # Smart Auto-Select UX: If subtitles were 'None' and tracks exist, advance to first track
+            if cb_sub.current() == 0 and len(subtitle_tracks) > 1:
+                cb_sub.current(1)
+                _on_sub_changed()
+
+        radio_widgets = []
+        for code, label_txt in mode_options:
+            rb = tk.Radiobutton(
+                row2,
+                text=label_txt,
+                value=code,
+                variable=mode_var,
+                command=_on_radio_click,
+                bg=c_panel,
+                fg=c_text_bright,
+                selectcolor=c_input_bg,
+                activebackground=c_panel,
+                activeforeground=c_accent,
+                cursor="hand2",
+                font=("Segoe UI", 8, "bold")
+            )
+            rb.pack(side=tk.LEFT, padx=(0, 8))
+            radio_widgets.append(rb)
+
+        def _get_active_mode() -> str:
+            cur_idx = cb_sub_mode.current()
+            if 0 <= cur_idx < len(mode_codes):
+                cb_code = mode_codes[cur_idx]
+                if cb_code != getattr(cb_sub, "_selected_mode", None):
+                    cb_sub._selected_mode = cb_code
+                    mode_var.set(cb_code)
+                    return cb_code
+            if mode_var and mode_var.get() in mode_codes:
+                return mode_var.get()
+            return getattr(cb_sub, "_selected_mode", "soft_embed")
+
+        def _on_mode_cb_changed(event=None):
             cur_idx = cb_sub_mode.current()
             if 0 <= cur_idx < len(mode_codes):
                 code = mode_codes[cur_idx]
                 cb_sub._selected_mode = code
+                mode_var.set(code)
                 try:
                     set_setting("subtitle_embed_mode", code)
                 except Exception:
                     pass
 
+        cb_sub._mode_combobox = cb_sub_mode
+        cb_sub._mode_radios = radio_widgets
+        cb_sub._mode_var = mode_var
+        cb_sub._selected_mode = current_mode
+        cb_sub._mode_codes = mode_codes
+        cb_sub.get_selected_mode = _get_active_mode
         cb_sub._update_mode_state = _on_sub_changed
+
         cb_sub.bind("<<ComboboxSelected>>", _on_sub_changed)
-        cb_sub_mode.bind("<<ComboboxSelected>>", _on_mode_changed)
+        cb_sub_mode.bind("<<ComboboxSelected>>", _on_mode_cb_changed)
 
     return cb_audio, cb_sub
 

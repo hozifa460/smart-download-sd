@@ -131,6 +131,7 @@ class SafeModalDialog(tk.Toplevel):
             self.lift()
             self.attributes("-topmost", True)
             self.focus_force()
+            self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
         except Exception:
             pass
 

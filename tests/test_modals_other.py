@@ -709,7 +709,7 @@ class TestInstantFetchingLinkToast(unittest.TestCase):
                     gui._fetching_toast._on_cancel_click()
                     self.assertTrue(gui._yt_cancel_event.is_set())
                     self.assertIsNone(gui._fetching_toast)
-                    self.assertIsNone(gui._last_clipboard_url, "Cancelling fetching toast must clear last clipboard URL")
+                    self.assertIsNotNone(gui._last_clipboard_url, "Cancelling fetching toast must mark last clipboard URL as dismissed")
                     self.assertEqual(gui.btn_start.cget("state"), "normal", "btn_start must be restored to normal")
                     self.assertEqual(gui.card_size.cget("text"), "Ready", "card_size must be restored to Ready")
                     time.sleep(0.1)

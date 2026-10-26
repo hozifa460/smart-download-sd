@@ -125,6 +125,8 @@ class ToastControllerMixin:
                     self.log(f"[FETCHING] Link analysis cancelled by user for: {url}")
                 if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
                     self._yt_cancel_event.set()
+                if hasattr(self, "_fetch_cancel_event") and self._fetch_cancel_event:
+                    self._fetch_cancel_event.set()
                 if callable(on_cancel):
                     try:
                         on_cancel()

@@ -75,7 +75,7 @@ class QualitySelectionModal(tk.Toplevel):
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         dlg_w = min(int(740 * dpi_scale), max(640, int(sw * 0.92)))
-        dlg_h = min(int(580 * dpi_scale), max(480, int(sh * 0.88)))
+        dlg_h = min(int(620 * dpi_scale), max(520, int(sh * 0.88)))
 
         is_parent_visible = False
         try:
@@ -98,10 +98,8 @@ class QualitySelectionModal(tk.Toplevel):
 
         if is_parent_visible:
             try:
-                px = parent.winfo_x()
-                py = parent.winfo_y()
-                pw = parent.winfo_width() or dlg_w
-                ph = parent.winfo_height() or dlg_h
+                px, py = parent.winfo_x(), parent.winfo_y()
+                pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
                 x = max(0, px + (pw - dlg_w) // 2)
                 y = max(0, py + (ph - dlg_h) // 2)
             except Exception:
@@ -112,7 +110,7 @@ class QualitySelectionModal(tk.Toplevel):
             y = max(0, (sh - dlg_h) // 2)
 
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
-        self.minsize(min(640, dlg_w), min(480, dlg_h))
+        self.minsize(min(640, dlg_w), min(520, dlg_h))
 
         # Apply application icon to modal window
         ico_path = get_resource_path("app_icon.ico")
@@ -134,6 +132,7 @@ class QualitySelectionModal(tk.Toplevel):
         self.lift()
         self.attributes("-topmost", True)
         self.focus_force()
+        self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
         self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
 
         self._build_ui()

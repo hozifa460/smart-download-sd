@@ -57,6 +57,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
             dlg.lift()
             dlg.attributes("-topmost", True)
             dlg.focus_force()
+            dlg.after(250, lambda: dlg.attributes("-topmost", False) if dlg.winfo_exists() else None)
         except Exception:
             pass
 

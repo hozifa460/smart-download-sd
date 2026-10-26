@@ -63,14 +63,17 @@ class YouTubeDownloadControllerMixin:
         self.log(f"[{tag}] Detected {plat} stream URL: {url}")
         self.log(f"[{tag}] Querying available video resolutions and formats via yt-dlp...")
 
-        # In < 50ms, display sleek frameless fetching toast indicator if main window is hidden or minimized
-        if hasattr(self, "is_window_hidden_or_minimized") and self.is_window_hidden_or_minimized():
-            try:
-                self._show_fetching_toast(url)
-            except Exception:
-                pass
+        # Always display sleek frameless fetching indicator toast with cancel handler
+        try:
+            self._show_fetching_toast(url, on_cancel=lambda: self._yt_cancel_event.set())
+        except Exception:
+            pass
 
         def _resolve_and_prompt():
+            if self._yt_cancel_event.is_set():
+                if hasattr(self, "_close_fetching_toast"):
+                    self._close_fetching_toast()
+                return
             try:
                 resolver = YouTubeResolver(
                     on_log=self.log,
@@ -82,6 +85,8 @@ class YouTubeDownloadControllerMixin:
                 subtitle_tracks = extract_subtitle_tracks(info)
 
                 if self._yt_cancel_event.is_set():
+                    if hasattr(self, "_close_fetching_toast"):
+                        self._close_fetching_toast()
                     self.log(f"[{tag}] Quality analysis cancelled.")
                     return
 
@@ -107,6 +112,10 @@ class YouTubeDownloadControllerMixin:
                     initial_dest = os.path.join(dest_dir, initial_fn)
 
                 def _show_modal():
+                    if self._yt_cancel_event.is_set():
+                        if hasattr(self, "_close_fetching_toast"):
+                            self._close_fetching_toast()
+                        return
                     try:
                         if hasattr(self, "_close_fetching_toast"):
                             self._close_fetching_toast()

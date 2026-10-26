@@ -637,17 +637,17 @@ class TestClipboardSequenceRecopying(unittest.TestCase):
                     finally:
                         gui._cleanup_resources()
 
-    def test_modal_cancellation_clears_last_clipboard_url(self):
+    def test_modal_cancellation_marks_clipboard_dismissed(self):
         gui = ModernFramelessGUI(self.root)
         try:
             url = "https://example.com/cancel_and_recopy.zip"
-            gui._last_clipboard_url = url
-            gui.clear_last_clipboard_url()
-            self.assertIsNone(gui._last_clipboard_url)
+            with patch("turbo_downloader.get_clipboard_text", return_value=url):
+                gui.clear_last_clipboard_url()
+                self.assertEqual(gui._last_clipboard_url, url)
         finally:
             gui._cleanup_resources()
 
-    def test_clear_last_clipboard_url_allows_reprocessing(self):
+    def test_clear_last_clipboard_url_prevents_loop_without_recopy(self):
         gui = ModernFramelessGUI(self.root)
         try:
             url = "https://example.com/clear_recopy_test.zip"
@@ -660,12 +660,12 @@ class TestClipboardSequenceRecopying(unittest.TestCase):
                 gui._check_clipboard_now(force=True)
                 self.assertEqual(len(detected_urls), 0)
 
-                # Clear last clipboard url (as done when closing/cancelling a modal)
+                # Dismiss clipboard url (as done when closing/cancelling a modal)
                 gui.clear_last_clipboard_url()
 
-                # Now checking clipboard processes the URL
-                gui._check_clipboard_now(force=True)
-                self.assertEqual(len(detected_urls), 1, "Clearing last clipboard URL must allow re-processing")
+                # Checking clipboard without re-copying must NOT re-open
+                gui._check_clipboard_now(force=False)
+                self.assertEqual(len(detected_urls), 0, "Dismissing clipboard must NOT re-trigger without recopy")
         finally:
             gui._cleanup_resources()
 
@@ -673,20 +673,20 @@ class TestClipboardSequenceRecopying(unittest.TestCase):
         gui = ModernFramelessGUI(self.root)
         try:
             url = "https://www.youtube.com/watch?v=cancel_modal_test"
-            gui._last_clipboard_url = url
-            modal = QualitySelectionModal(
-                parent=self.root,
-                video_title="Cancel Test Video",
-                duration=120,
-                options=[],
-                default_dest_path="test.mp4",
-                theme=gui._theme_dict(),
-                on_confirm=lambda opt, dest: None,
-                on_cancel=None,
-                parent_app=gui
-            )
-            modal._on_close()
-            self.assertIsNone(gui._last_clipboard_url, "Closing QualitySelectionModal must clear _last_clipboard_url")
+            with patch("turbo_downloader.get_clipboard_text", return_value=url):
+                modal = QualitySelectionModal(
+                    parent=self.root,
+                    video_title="Cancel Test Video",
+                    duration=120,
+                    options=[],
+                    default_dest_path="test.mp4",
+                    theme=gui._theme_dict(),
+                    on_confirm=lambda opt, dest: None,
+                    on_cancel=None,
+                    parent_app=gui
+                )
+                modal._on_close()
+                self.assertEqual(gui._last_clipboard_url, url, "Closing QualitySelectionModal must mark URL as dismissed")
         finally:
             gui._cleanup_resources()
 
@@ -694,16 +694,16 @@ class TestClipboardSequenceRecopying(unittest.TestCase):
         gui = ModernFramelessGUI(self.root)
         try:
             url = "https://example.com/confirm_cancel.zip"
-            gui._last_clipboard_url = url
-            modal = DownloadConfirmationModal(
-                parent=self.root,
-                url=url,
-                default_dest_path="confirm_cancel.zip",
-                theme=gui._theme_dict(),
-                parent_app=gui
-            )
-            modal._on_close()
-            self.assertIsNone(gui._last_clipboard_url, "Closing DownloadConfirmationModal must clear _last_clipboard_url")
+            with patch("turbo_downloader.get_clipboard_text", return_value=url):
+                modal = DownloadConfirmationModal(
+                    parent=self.root,
+                    url=url,
+                    default_dest_path="confirm_cancel.zip",
+                    theme=gui._theme_dict(),
+                    parent_app=gui
+                )
+                modal._on_close()
+                self.assertEqual(gui._last_clipboard_url, url, "Closing DownloadConfirmationModal must mark URL as dismissed")
         finally:
             gui._cleanup_resources()
 

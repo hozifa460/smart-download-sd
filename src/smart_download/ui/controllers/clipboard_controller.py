@@ -76,46 +76,68 @@ class ClipboardControllerMixin:
 
     def _check_clipboard_now(self, force: bool = False):
         """Checks if current clipboard contains a new downloadable URL and processes it."""
+        if not force:
+            for m in (getattr(self, "_fetching_toast", None), getattr(self, "_quality_modal", None), getattr(self, "_confirm_modal", None)):
+                if m is not None:
+                    try:
+                        if m.winfo_exists() and not getattr(m, "is_completed", False) and not getattr(m, "is_closed", False):
+                            if IS_WINDOWS:
+                                try:
+                                    self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
+                                except Exception:
+                                    pass
+                            try:
+                                cur = get_clipboard_text(getattr(self, "root", None))
+                                if cur and isinstance(cur, str):
+                                    self._last_clipboard_url = cur.strip()
+                            except Exception:
+                                pass
+                            return
+                    except Exception:
+                        pass
+
         seq = None
         if IS_WINDOWS and not force:
             try:
                 seq = ctypes.windll.user32.GetClipboardSequenceNumber()
             except Exception:
                 seq = None
-
-            # Fast path: sequence number unchanged -> nothing was copied
             if seq is not None and getattr(self, "_last_clipboard_seq", None) is not None:
                 if seq == self._last_clipboard_seq:
                     return
 
         text = get_clipboard_text(self.root)
-
         seq_changed = (seq is not None and getattr(self, "_last_clipboard_seq", None) is not None and seq != self._last_clipboard_seq)
-
         if seq is not None:
             self._last_clipboard_seq = seq
-
         if not text or not isinstance(text, str):
             return
 
         url = text.strip()
-        if not url:
+        if not url or (not seq_changed and (url == getattr(self, "_last_clipboard_url", None))):
             return
-
-        # Prevent duplicate prompt if URL matches last processed clipboard string and sequence unchanged.
-        # But if sequence number changed (user explicitly copied the link again) or last URL was cleared, allow processing.
-        if not seq_changed and (url == getattr(self, "_last_clipboard_url", None)):
-            return
-
         self._last_clipboard_url = url
-
         if is_downloadable_url(url):
             self._on_clipboard_url_detected(url)
 
-    def clear_last_clipboard_url(self):
-        """Clears cached last clipboard URL string so re-copying or re-checking triggers immediately."""
-        self._last_clipboard_url = None
-        self._last_clipboard_seq = None
+    def clear_last_clipboard_url(self, url: Optional[str] = None):
+        """Marks current clipboard content as already processed so it won't re-trigger unless re-copied."""
+        if IS_WINDOWS:
+            try:
+                self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
+            except Exception:
+                pass
+        try:
+            if url:
+                self._last_clipboard_url = url.strip()
+            else:
+                cur = get_clipboard_text(getattr(self, "root", None))
+                if cur and isinstance(cur, str):
+                    self._last_clipboard_url = cur.strip()
+                elif getattr(self, "_last_clipboard_url", None) is None:
+                    self._last_clipboard_url = ""
+        except Exception:
+            pass
 
     def _resolve_real_url_async(
         self,
@@ -125,9 +147,23 @@ class ClipboardControllerMixin:
         modal_to_close: Optional[Any] = None
     ):
         """Asynchronously probes and resolves a candidate download URL, handling HTML landing pages."""
+        if hasattr(self, "_fetch_cancel_event") and self._fetch_cancel_event:
+            try:
+                self._fetch_cancel_event.set()
+            except Exception:
+                pass
+        cancel_ev = threading.Event()
+        self._fetch_cancel_event = cancel_ev
+
         if show_toast:
             try:
                 def _on_toast_cancel():
+                    cancel_ev.set()
+                    if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
+                        try:
+                            self._yt_cancel_event.set()
+                        except Exception:
+                            pass
                     self._is_resolving_start = False
                     try:
                         self.btn_start.configure(state="normal")
@@ -138,40 +174,26 @@ class ClipboardControllerMixin:
                 pass
 
         def _worker():
+            if cancel_ev.is_set():
+                return
             try:
                 info = resolve_real_download_url(url, ssl_context=getattr(self, "ssl_context", None))
             except Exception as e:
                 info = {"url": url, "error": str(e), "resolved": False}
+            if cancel_ev.is_set():
+                return
 
             def _dispatch():
+                if cancel_ev.is_set():
+                    return
                 try:
                     self._close_fetching_toast()
                 except Exception:
                     pass
+                if cancel_ev.is_set():
+                    return
 
-                candidates = info.get("candidates") or []
-
-                if info.get("is_html") and not info.get("resolved"):
-                    if len(candidates) > 1:
-                        self._is_resolving_start = False
-                        try:
-                            self.btn_start.configure(state="normal")
-                        except Exception:
-                            pass
-                        self.clear_last_clipboard_url()
-                        if modal_to_close:
-                            try:
-                                modal_to_close.destroy()
-                            except Exception:
-                                pass
-                            if getattr(self, "_confirm_modal", None) is modal_to_close:
-                                self._confirm_modal = None
-                        self.log(f"[LINK RESOLVER] Multiple download candidates ({len(candidates)}) detected on page: {url}")
-                        self._show_multiple_candidates_dialog(url, candidates, page_title=info.get("page_title", ""))
-                        return
-
-                    self._is_resolving_start = False
-                    self.clear_last_clipboard_url()
+                def _cleanup_modal():
                     if modal_to_close:
                         try:
                             modal_to_close.destroy()
@@ -179,6 +201,29 @@ class ClipboardControllerMixin:
                             pass
                         if getattr(self, "_confirm_modal", None) is modal_to_close:
                             self._confirm_modal = None
+
+                candidates = info.get("candidates") or []
+
+                if len(candidates) > 1:
+                    if cancel_ev.is_set():
+                        return
+                    self._is_resolving_start = False
+                    try:
+                        self.btn_start.configure(state="normal")
+                    except Exception:
+                        pass
+                    self.clear_last_clipboard_url()
+                    _cleanup_modal()
+                    self.log(f"[LINK RESOLVER] Multiple download candidates ({len(candidates)}) detected on page: {url}")
+                    self._show_multiple_candidates_dialog(url, candidates, page_title=info.get("page_title", ""))
+                    return
+
+                if info.get("is_html") and not info.get("resolved"):
+                    if cancel_ev.is_set():
+                        return
+                    self._is_resolving_start = False
+                    self.clear_last_clipboard_url()
+                    _cleanup_modal()
                     try:
                         self.btn_start.configure(state="normal")
                         self.btn_pause.configure(state="disabled")
@@ -186,32 +231,13 @@ class ClipboardControllerMixin:
                     except Exception:
                         pass
                     self.log(f"[LINK RESOLVER] Web page detected (not a download link): {url}")
-                    msg = tr("dialog_not_download_msg")
                     SafeModalDialog(
                         self.root,
                         title=tr("dialog_not_download_title"),
-                        message=msg,
+                        message=tr("dialog_not_download_msg"),
                         dialog_type="warning",
                         theme=self._theme_dict()
                     )
-                    return
-
-                if len(candidates) > 1:
-                    self._is_resolving_start = False
-                    try:
-                        self.btn_start.configure(state="normal")
-                    except Exception:
-                        pass
-                    self.clear_last_clipboard_url()
-                    if modal_to_close:
-                        try:
-                            modal_to_close.destroy()
-                        except Exception:
-                            pass
-                        if getattr(self, "_confirm_modal", None) is modal_to_close:
-                            self._confirm_modal = None
-                    self.log(f"[LINK RESOLVER] Multiple download candidates ({len(candidates)}) detected on page: {url}")
-                    self._show_multiple_candidates_dialog(url, candidates, page_title=info.get("page_title", ""))
                     return
 
                 if len(candidates) == 1 and info.get("is_html"):
@@ -222,6 +248,8 @@ class ClipboardControllerMixin:
                     info["resolved"] = True
                     info["is_html"] = False
 
+                if cancel_ev.is_set():
+                    return
                 on_resolved(info)
 
             self.dispatch_to_main_thread(_dispatch)
