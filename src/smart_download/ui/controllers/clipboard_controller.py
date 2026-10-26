@@ -45,6 +45,7 @@ class ClipboardControllerMixin:
         except Exception:
             pass
 
+        self._fetch_cancel_event = threading.Event()
         if hasattr(self, "root") and self.root:
             try:
                 self._clipboard_job = self.root.after(self._clipboard_poll_interval, self._check_clipboard_tick)
@@ -77,7 +78,7 @@ class ClipboardControllerMixin:
     def _check_clipboard_now(self, force: bool = False):
         """Checks if current clipboard contains a new downloadable URL and processes it."""
         if not force:
-            for m in (getattr(self, "_fetching_toast", None), getattr(self, "_quality_modal", None), getattr(self, "_confirm_modal", None)):
+            for m in (getattr(self, "_fetching_toast", None), getattr(self, "_quality_modal", None), getattr(self, "_confirm_modal", None), getattr(self, "_candidates_modal", None)):
                 if m is not None:
                     try:
                         if m.winfo_exists() and not getattr(m, "is_completed", False) and not getattr(m, "is_closed", False):
@@ -97,12 +98,12 @@ class ClipboardControllerMixin:
                         pass
 
         seq = None
-        if IS_WINDOWS and not force:
+        if IS_WINDOWS:
             try:
                 seq = ctypes.windll.user32.GetClipboardSequenceNumber()
             except Exception:
                 seq = None
-            if seq is not None and getattr(self, "_last_clipboard_seq", None) is not None:
+            if not force and seq is not None and getattr(self, "_last_clipboard_seq", None) is not None:
                 if seq == self._last_clipboard_seq:
                     return
 
@@ -114,7 +115,7 @@ class ClipboardControllerMixin:
             return
 
         url = text.strip()
-        if not url or (not seq_changed and (url == getattr(self, "_last_clipboard_url", None))):
+        if not url or (not force and not seq_changed and (url == getattr(self, "_last_clipboard_url", None))):
             return
         self._last_clipboard_url = url
         if is_downloadable_url(url):

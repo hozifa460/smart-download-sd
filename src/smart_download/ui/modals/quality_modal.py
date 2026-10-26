@@ -132,7 +132,7 @@ class QualitySelectionModal(tk.Toplevel):
         self.lift()
         self.attributes("-topmost", True)
         self.focus_force()
-        self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
+        self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
         self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
 
         self._build_ui()
@@ -505,12 +505,14 @@ class QualitySelectionModal(tk.Toplevel):
         pass
 
     def destroy(self):
-        if getattr(self, "_idle_job", None):
-            try:
-                self.after_cancel(self._idle_job)
-            except Exception:
-                pass
-            self._idle_job = None
+        for job_attr in ("_idle_job", "_topmost_job"):
+            job = getattr(self, job_attr, None)
+            if job:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+                setattr(self, job_attr, None)
         if hasattr(self, "_modal_icon_photo"):
             _detach_photo_tk(self._modal_icon_photo)
             self._modal_icon_photo = None

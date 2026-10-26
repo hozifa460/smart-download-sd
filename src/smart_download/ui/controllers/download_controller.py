@@ -254,8 +254,16 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                 pass
 
     def _on_cancel_download(self):
-        if hasattr(self, "_yt_cancel_event"):
-            self._yt_cancel_event.set()
+        for ev_name in ("_yt_cancel_event", "_fetch_cancel_event"):
+            ev = getattr(self, ev_name, None)
+            if ev:
+                ev.set()
+        if hasattr(self, "_close_fetching_toast"):
+            try: self._close_fetching_toast()
+            except Exception: pass
+        if hasattr(self, "clear_last_clipboard_url"):
+            try: self.clear_last_clipboard_url()
+            except Exception: pass
         if hasattr(self, "_quality_modal") and self._quality_modal:
             try:
                 if self._quality_modal.winfo_exists():

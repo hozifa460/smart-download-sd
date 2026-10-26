@@ -477,12 +477,14 @@ class ConfirmModalLogicMixin:
         pass
 
     def destroy(self):
-        if getattr(self, "_idle_job", None):
-            try:
-                self.after_cancel(self._idle_job)
-            except Exception:
-                pass
-            self._idle_job = None
+        for job_attr in ("_idle_job", "_topmost_job"):
+            job = getattr(self, job_attr, None)
+            if job:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+                setattr(self, job_attr, None)
         if hasattr(self, "_modal_icon_photo"):
             _detach_photo_tk(self._modal_icon_photo)
             self._modal_icon_photo = None

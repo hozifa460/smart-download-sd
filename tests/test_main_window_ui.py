@@ -657,7 +657,7 @@ class TestClipboardSequenceRecopying(unittest.TestCase):
 
             with patch("turbo_downloader.get_clipboard_text", return_value=url):
                 # Duplicate is initially suppressed
-                gui._check_clipboard_now(force=True)
+                gui._check_clipboard_now(force=False)
                 self.assertEqual(len(detected_urls), 0)
 
                 # Dismiss clipboard url (as done when closing/cancelling a modal)

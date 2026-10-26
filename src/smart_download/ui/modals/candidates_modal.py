@@ -453,6 +453,13 @@ class MultipleCandidatesModal(tk.Toplevel):
             self.unbind_all("<MouseWheel>")
         except Exception:
             pass
+        if self.parent_app and getattr(self.parent_app, "_candidates_modal", None) is self:
+            self.parent_app._candidates_modal = None
+        if self.parent_app and hasattr(self.parent_app, "clear_last_clipboard_url"):
+            try:
+                self.parent_app.clear_last_clipboard_url()
+            except Exception:
+                pass
         super().destroy()
 
     def grab_set(self):

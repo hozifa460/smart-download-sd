@@ -18,6 +18,7 @@ from smart_download.ui.modals.quality_modal import QualitySelectionModal
 from smart_download.ui.modals.confirm_modal import DownloadConfirmationModal
 from smart_download.ui.modals.refresh_modal import RefreshLinkModal
 from smart_download.ui.modals.update_modal import AppUpdateModal
+from smart_download.ui.modals.candidates_modal import MultipleCandidatesModal
 from smart_download.ui.components.base_modal import SafeModalDialog
 from smart_download.services.youtube_models import VideoFormatOption
 from smart_download.services.youtube_tracks import extract_audio_tracks, extract_subtitle_tracks
@@ -63,6 +64,7 @@ class TestStage82LiveUX(unittest.TestCase):
 
         # Check cancel events
         self.assertTrue(self.gui._yt_cancel_event.is_set(), "_yt_cancel_event must be set on toast cancel")
+        self.assertTrue(self.gui._fetch_cancel_event.is_set(), "_fetch_cancel_event must be set on toast cancel")
         self.assertIsNone(getattr(self.gui, "_fetching_toast", None), "Fetching toast must be destroyed/cleared")
 
         # Simulate clipboard polling 3 times with same URL in clipboard
@@ -268,6 +270,132 @@ class TestStage82LiveUX(unittest.TestCase):
         self.root.update()
         self.assertFalse(bool(cmodal.attributes("-topmost")), "DownloadConfirmationModal must release -topmost")
         cmodal.destroy()
+
+    def test_cancel_async_resolver_stops_worker_and_no_dialog(self):
+        """5. Cancelling FetchingLinkToast during _resolve_real_url_async aborts completion."""
+        url = "https://example.com/slow_probe_page.html"
+        resolved_called = []
+
+        def mock_slow_resolve(u, **kw):
+            time.sleep(0.2)
+            return {"url": u, "candidates": [{"url": "https://example.com/file.zip"}], "is_html": True, "resolved": True}
+
+        with patch("smart_download.ui.controllers.clipboard_controller.resolve_real_download_url", side_effect=mock_slow_resolve):
+            self.gui._resolve_real_url_async(url, on_resolved=lambda info: resolved_called.append(info), show_toast=True)
+            self.root.update()
+
+            toast = getattr(self.gui, "_fetching_toast", None)
+            self.assertIsNotNone(toast, "Fetching toast must appear during async probe")
+            toast._on_cancel_click()
+            self.root.update()
+
+            self.assertTrue(self.gui._fetch_cancel_event.is_set())
+            time.sleep(0.3)
+            self.gui._drain_dispatch_queue()
+            self.root.update()
+
+            self.assertEqual(len(resolved_called), 0, "Cancelled async probe must NEVER invoke on_resolved")
+            self.assertIsNone(getattr(self.gui, "_confirm_modal", None))
+
+    def test_main_btn_cancel_aborts_fetching_and_resets_events(self):
+        """6. Clicking main window btn_cancel aborts ongoing fetch operations."""
+        url = "https://www.youtube.com/watch?v=live_test_btn_cancel"
+        self.gui._start_youtube_download(url, "test.mp4")
+        self.root.update()
+
+        toast = getattr(self.gui, "_fetching_toast", None)
+        self.assertIsNotNone(toast)
+
+        self.gui._on_cancel_download()
+        self.root.update()
+
+        self.assertTrue(self.gui._yt_cancel_event.is_set(), "_yt_cancel_event must be set by _on_cancel_download")
+        self.assertTrue(self.gui._fetch_cancel_event.is_set(), "_fetch_cancel_event must be set by _on_cancel_download")
+        self.assertIsNone(getattr(self.gui, "_fetching_toast", None))
+
+    def test_force_clipboard_check_processes_even_if_previously_dismissed(self):
+        """7. _check_clipboard_now(force=True) re-processes URL even after dismissal."""
+        url = "https://example.com/force_test.zip"
+        detected = []
+        self.gui._on_clipboard_url_detected = lambda u: detected.append(u)
+
+        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value=url):
+            self.gui.clear_last_clipboard_url(url)
+            self.gui._check_clipboard_now(force=False)
+            self.root.update()
+            self.assertEqual(len(detected), 0, "Unforced check on dismissed URL must NOT trigger")
+
+            self.gui._check_clipboard_now(force=True)
+            self.root.update()
+            self.assertEqual(len(detected), 1, "Forced check on dismissed URL MUST trigger")
+
+    def test_mode_var_programmatic_set_syncs_with_combobox(self):
+        """8. Programmatic mode_var.set() updates cb_sub._selected_mode and cb_sub_mode."""
+        sample_info = {
+            "title": "Sub Trace Video",
+            "duration": 60,
+            "subtitles": {"en": [{"url": "https://example.com/en.vtt", "ext": "vtt"}]}
+        }
+        audio_tracks = extract_audio_tracks(sample_info)
+        subtitle_tracks = extract_subtitle_tracks(sample_info)
+        opt = VideoFormatOption(format_id="18", resolution_label="360p", height=360, ext="mp4", filesize_approx=1024, fps=30, vcodec="avc1", acodec="mp4a", note="")
+
+        modal = QualitySelectionModal(
+            parent=self.root,
+            video_title="Sub Trace Video",
+            duration=60,
+            options=[opt],
+            default_dest_path="sub.mp4",
+            theme=self.gui._theme_dict(),
+            on_confirm=lambda o, d: None,
+            parent_app=self.gui,
+            audio_tracks=audio_tracks,
+            subtitle_tracks=subtitle_tracks
+        )
+        self.root.update()
+
+        cb_sub = modal.cb_sub
+        self.assertIsNotNone(cb_sub)
+        cb_sub._mode_var.set("srt_only")
+        self.root.update()
+        self.assertEqual(cb_sub.get_selected_mode(), "srt_only")
+        self.assertEqual(cb_sub._mode_combobox.current(), 1)
+
+        cb_sub._mode_var.set("hard_burn")
+        self.root.update()
+        self.assertEqual(cb_sub.get_selected_mode(), "hard_burn")
+        self.assertEqual(cb_sub._mode_combobox.current(), 2)
+        modal.destroy()
+
+    def test_candidates_modal_clean_destroy_and_modal_guard(self):
+        """9. MultipleCandidatesModal acts as active modal and resets reference on destroy."""
+        cands = [
+            {"url": "https://example.com/file1.zip", "label": "File 1", "filename": "file1.zip"},
+            {"url": "https://example.com/file2.zip", "label": "File 2", "filename": "file2.zip"},
+        ]
+        modal = MultipleCandidatesModal(
+            parent=self.root,
+            source_url="https://example.com/landing",
+            candidates=cands,
+            page_title="Candidates Test",
+            theme=self.gui._theme_dict(),
+            parent_app=self.gui
+        )
+        self.gui._candidates_modal = modal
+        self.root.update()
+        self.assertTrue(modal.winfo_exists())
+
+        # With candidates modal open, check clipboard polling does not trigger
+        detected = []
+        self.gui._on_clipboard_url_detected = lambda u: detected.append(u)
+        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://example.com/other.zip"):
+            self.gui._check_clipboard_now(force=False)
+            self.root.update()
+        self.assertEqual(len(detected), 0, "Active candidates modal must guard clipboard polling")
+
+        modal.destroy()
+        self.root.update()
+        self.assertIsNone(getattr(self.gui, "_candidates_modal", None))
 
 
 if __name__ == "__main__":

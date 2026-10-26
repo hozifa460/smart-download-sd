@@ -343,13 +343,30 @@ def build_audio_subtitle_row(
             rb.pack(side=tk.LEFT, padx=(0, 8))
             radio_widgets.append(rb)
 
+        def _on_mode_var_changed(*_):
+            val = mode_var.get()
+            if val in mode_codes:
+                cb_sub._selected_mode = val
+                idx = mode_codes.index(val)
+                if cb_sub_mode.current() != idx:
+                    cb_sub_mode.current(idx)
+
+        try:
+            mode_var.trace_add("write", _on_mode_var_changed)
+        except Exception:
+            try:
+                mode_var.trace("w", _on_mode_var_changed)
+            except Exception:
+                pass
+
         def _get_active_mode() -> str:
             cur_idx = cb_sub_mode.current()
             if 0 <= cur_idx < len(mode_codes):
                 cb_code = mode_codes[cur_idx]
                 if cb_code != getattr(cb_sub, "_selected_mode", None):
                     cb_sub._selected_mode = cb_code
-                    mode_var.set(cb_code)
+                    if mode_var.get() != cb_code:
+                        mode_var.set(cb_code)
                     return cb_code
             if mode_var and mode_var.get() in mode_codes:
                 return mode_var.get()

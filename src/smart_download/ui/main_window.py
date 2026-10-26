@@ -227,8 +227,10 @@ class ModernFramelessGUI(
         self.engine: Optional[Union[TurboDownloadEngine, StreamDownloadCoordinator]] = None
         self.speed_limit: float = 0.0
         self._yt_cancel_event = threading.Event()
+        self._fetch_cancel_event = threading.Event()
         self._quality_modal: Optional[tk.Toplevel] = None
         self._confirm_modal: Optional[tk.Toplevel] = None
+        self._candidates_modal: Optional[tk.Toplevel] = None
         self._update_modal: Optional[tk.Toplevel] = None
         self._fetching_toast: Optional[Any] = None
         self._bg_toast: Optional[tk.Toplevel] = None

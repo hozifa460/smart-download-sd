@@ -143,7 +143,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, tk.Toplevel):
             self.lift()
             self.attributes("-topmost", True)
             self.focus_force()
-            self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
+            self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
             self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
         except Exception:
             pass
