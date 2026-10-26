@@ -278,21 +278,6 @@ class QualitySelectionModal(tk.Toplevel):
             )
             self.btn_download_mp3.pack(side=tk.LEFT, padx=(8, 0))
 
-        self.btn_preview = tk.Button(
-            btn_row,
-            text=tr("btn_live_preview", "▶️ معاينة (Live Preview)"),
-            font=("Segoe UI", 9, "bold"),
-            bg=c_panel_light,
-            fg=c_accent,
-            relief="flat",
-            activebackground=c_accent_dark,
-            cursor="hand2",
-            padx=12,
-            pady=6,
-            command=self._open_live_preview
-        )
-        self.btn_preview.pack(side=tk.LEFT, padx=(8, 0))
-
         self.btn_cancel = tk.Button(
             btn_row,
             text=tr("modal_btn_cancel", "✕ Cancel"),
@@ -466,30 +451,6 @@ class QualitySelectionModal(tk.Toplevel):
             pass
         self.on_confirm(self.selected_option, final_dest)
 
-    def _open_live_preview(self):
-        """Opens live video, audio, and subtitle preview player for selected options."""
-        if not self.selected_option:
-            return
-        if getattr(self, "_preview_modal", None) and self._preview_modal.winfo_exists():
-            try: self._preview_modal.lift(); self._preview_modal.focus_force(); return
-            except Exception: pass
-        self._attach_selected_tracks()
-        stream_url = getattr(self.selected_option, "url", "") or ""
-        if not stream_url and self.parent_app:
-            ctx = getattr(self.parent_app, "_pending_media_context", None) or getattr(self.parent_app, "_last_media_context", None)
-            if ctx: stream_url = ctx.get("url") or ""
-        if not stream_url and hasattr(self, "dest_path"):
-            stream_url = self.dest_path
-
-        from .video_preview_modal import VideoPreviewModal
-        sel_audio = getattr(self.selected_option, "selected_audio_track", None)
-        sel_sub = getattr(self.selected_option, "selected_subtitle_track", None)
-        self._preview_modal = VideoPreviewModal(
-            parent=self.master or self, video_title=self.video_title, duration=self.duration,
-            media_url=stream_url, selected_option=self.selected_option, selected_audio=sel_audio,
-            selected_subtitle=sel_sub, theme=self.theme, on_download_now=self._on_download
-        )
-
     def _on_open_in_main(self):
         if not self.selected_option:
             return
@@ -513,6 +474,10 @@ class QualitySelectionModal(tk.Toplevel):
     def grab_set_global(self): pass
 
     def destroy(self):
+        try:
+            self.withdraw()
+        except Exception:
+            pass
         for job_attr in ("_idle_job", "_topmost_job"):
             job = getattr(self, job_attr, None)
             if job:

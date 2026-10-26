@@ -21,14 +21,7 @@ from smart_download.core.stream_coordinator import StreamDownloadCoordinator
 from smart_download.services.youtube_models import YouTubeStreamInfo, VideoFormatOption
 from smart_download.services.youtube_service import YouTubeResolver
 from smart_download.services.subtitle_processor import embed_subtitle_into_mp4, burn_subtitle_into_video
-from smart_download.services.preview_service import (
-    SubtitleCue,
-    parse_srt_cues,
-    fetch_cues_for_track,
-    PreviewSession,
-)
 from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
-from smart_download.ui.modals.video_preview_modal import VideoPreviewModal
 
 
 class TestStage9_1_And_10_Verification(unittest.TestCase):
@@ -178,127 +171,24 @@ class TestStage9_1_And_10_Verification(unittest.TestCase):
         )
         self.assertFalse(burn_res)
 
-    def test_srt_parsing_and_preview_session(self):
-        """Verify SRT cue extraction and PreviewSession seeking / subtitle tracking."""
-        sample_srt = """1
-00:00:01,000 --> 00:00:03,500
-Hello, welcome to Smart Download!
+    def test_preview_completely_removed(self):
+        """Verify that broken fake preview modules and symbols are completely eliminated."""
+        with self.assertRaises((ImportError, ModuleNotFoundError)):
+            import smart_download.ui.modals.video_preview_modal  # type: ignore
 
-2
-00:00:04,200 --> 00:00:07,000
-<b>High-Speed Multi-Threading</b> in Action.
+        with self.assertRaises((ImportError, ModuleNotFoundError)):
+            import smart_download.services.preview_service  # type: ignore
 
-3
-00:00:08,000 --> 00:00:10,000
-Enjoy downloading!
-"""
-        cues = parse_srt_cues(sample_srt)
-        self.assertEqual(len(cues), 3)
+        import smart_download.ui.modals as modals
+        self.assertFalse(hasattr(modals, "VideoPreviewModal"))
 
-        # Check first cue
-        self.assertAlmostEqual(cues[0].start_sec, 1.0)
-        self.assertAlmostEqual(cues[0].end_sec, 3.5)
-        self.assertEqual(cues[0].text, "Hello, welcome to Smart Download!")
+        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+        self.assertFalse(hasattr(QualitySelectionModal, "_open_live_preview"))
+        self.assertFalse(hasattr(QualitySelectionModal, "_open_preview"))
 
-        # Check second cue (HTML tags stripped)
-        self.assertAlmostEqual(cues[1].start_sec, 4.2)
-        self.assertAlmostEqual(cues[1].end_sec, 7.0)
-        self.assertEqual(cues[1].text, "High-Speed Multi-Threading in Action.")
-
-        # Test PreviewSession
-        updates = []
-
-        def on_time(t, cue):
-            updates.append((t, cue))
-
-        session = PreviewSession(
-            duration=30.0,
-            cues=cues,
-            on_time_update=on_time,
-            use_ffplay=False  # Headless test
-        )
-
-        # Query active subtitle at specific times
-        self.assertEqual(session.get_active_subtitle(0.5), "")
-        self.assertEqual(session.get_active_subtitle(2.0), "Hello, welcome to Smart Download!")
-        self.assertEqual(session.get_active_subtitle(3.8), "")
-        self.assertEqual(session.get_active_subtitle(5.0), "High-Speed Multi-Threading in Action.")
-        self.assertEqual(session.get_active_subtitle(9.0), "Enjoy downloading!")
-        self.assertEqual(session.get_active_subtitle(15.0), "")
-
-        # Seek test
-        session.seek_to(5.0)
-        self.assertEqual(session.current_time, 5.0)
-        self.assertEqual(session.get_active_subtitle(), "High-Speed Multi-Threading in Action.")
-
-        # Seek relative
-        session.seek(4.0)  # 5.0 + 4.0 = 9.0
-        self.assertEqual(session.current_time, 9.0)
-        self.assertEqual(session.get_active_subtitle(), "Enjoy downloading!")
-
-        session.stop()
-        self.assertEqual(session.current_time, 0.0)
-        self.assertFalse(session.is_playing)
-
-    def test_video_preview_modal_instantiation(self):
-        """Verify VideoPreviewModal initializes safely with widgets, badges, and clean teardown."""
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            cues = [
-                SubtitleCue(start_sec=0.0, end_sec=5.0, text="First subtitle cue"),
-                SubtitleCue(start_sec=6.0, end_sec=10.0, text="Second subtitle cue")
-            ]
-            fake_opt = VideoFormatOption(
-                format_id="1080p",
-                resolution_label="1080p",
-                height=1080,
-                ext="mp4",
-                filesize_approx=12345678
-            )
-            download_called = False
-
-            def on_dl():
-                nonlocal download_called
-                download_called = True
-
-            modal = VideoPreviewModal(
-                parent=root,
-                video_title="Unit Test Video Preview",
-                duration=60,
-                media_url="",
-                selected_option=fake_opt,
-                selected_audio={"label": "English Audio"},
-                selected_subtitle={"label": "English Subtitles"},
-                cues=cues,
-                use_ffplay=False,
-                on_download_now=on_dl
-            )
-
-            # Check widgets exist
-            self.assertTrue(modal.winfo_exists())
-            self.assertIsNotNone(modal.scale_seek)
-            self.assertIsNotNone(modal.lbl_subtitle_cue)
-            self.assertIsNotNone(modal.btn_play_pause)
-            self.assertIsNotNone(modal.btn_dl_now)
-
-            # Test seek and cue update
-            modal.session.seek_to(2.0)
-            modal.update_idletasks()
-            self.assertEqual(modal.session.get_active_subtitle(), "First subtitle cue")
-
-            # Test download trigger
-            modal._on_download_now()
-            for _ in range(15):
-                root.update()
-                time.sleep(0.015)
-            self.assertTrue(download_called)
-
-        finally:
-            try:
-                root.destroy()
-            except Exception:
-                pass
+        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
+        self.assertFalse(hasattr(MediaOptionsBarMixin, "_open_media_preview"))
+        self.assertFalse(hasattr(MediaOptionsBarMixin, "_on_media_bar_preview_click"))
 
     def test_merge_video_audio_pipe_deadlock_free(self):
         """Verify merge_video_audio handles subprocess.TimeoutExpired without deadlocking on pipes."""

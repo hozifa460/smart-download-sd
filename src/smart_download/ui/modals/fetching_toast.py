@@ -287,13 +287,21 @@ class FetchingLinkToast(tk.Toplevel):
             except Exception:
                 pass
         try:
+            self.withdraw()
+        except Exception:
+            pass
+        try:
             self.destroy()
         except Exception:
             pass
 
     def close(self):
-        """Smoothly closes and destroys the toast window without invoking cancel callback."""
+        """Immediately withdraws and destroys the toast window without invoking cancel callback."""
         self._closing = True
+        try:
+            self.withdraw()
+        except Exception:
+            pass
         if getattr(self, "_safety_close_job", None):
             try:
                 self.after_cancel(self._safety_close_job)
@@ -329,6 +337,10 @@ class FetchingLinkToast(tk.Toplevel):
     def destroy(self):
         """Cancels background animation timers and destroys widget cleanly."""
         self._closing = True
+        try:
+            self.withdraw()
+        except Exception:
+            pass
         if getattr(self, "_safety_close_job", None):
             try:
                 self.after_cancel(self._safety_close_job)

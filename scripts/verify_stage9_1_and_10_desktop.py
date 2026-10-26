@@ -24,8 +24,6 @@ if SRC_DIR not in sys.path:
 
 from smart_download.ui.main_window import ModernFramelessGUI
 from smart_download.services.youtube_models import VideoFormatOption, YouTubeStreamInfo
-from smart_download.ui.modals.video_preview_modal import VideoPreviewModal
-from smart_download.services.preview_service import SubtitleCue
 
 
 def run_visible_desktop_verification():
@@ -129,37 +127,6 @@ def run_visible_desktop_verification():
     assert app._quality_modal.winfo_exists(), "Quality modal window does not exist!"
     time.sleep(0.4)
 
-    # 5. Live Video + Audio Dubbing + Subtitle Preview Player
-    print("[DESKTOP E2E] Step 5/6: Launching Live Video & Subtitle Preview Player dialog...")
-    cues = [
-        SubtitleCue(start_sec=0.0, end_sec=3.0, text="Never gonna give you up"),
-        SubtitleCue(start_sec=3.1, end_sec=6.0, text="Never gonna let you down"),
-        SubtitleCue(start_sec=6.1, end_sec=10.0, text="Never gonna run around and desert you")
-    ]
-    preview = VideoPreviewModal(
-        parent=root,
-        video_title="Rick Astley - Live Preview",
-        duration=212,
-        media_url="",
-        selected_option=fake_opt,
-        selected_audio={"label": "Arabic Dubbed (العربية)"},
-        selected_subtitle={"label": "العربية (Arabic)"},
-        theme=app._theme_dict(),
-        cues=cues,
-        use_ffplay=False
-    )
-    root.update()
-    assert preview.winfo_exists(), "Preview modal window does not exist!"
-
-    # Test live cue display update
-    preview.session.seek_to(4.5)
-    root.update()
-    time.sleep(0.3)
-    cue_text = preview.lbl_subtitle_cue.cget("text")
-    assert "Never gonna let you down" in cue_text, f"Subtitle cue failed to render: {cue_text}"
-    print(f"[DESKTOP E2E] Live preview subtitle cue rendered on screen: '{cue_text}'")
-
-    preview.destroy()
     if hasattr(app, "_quality_modal") and app._quality_modal:
         app._quality_modal.destroy()
     root.update()

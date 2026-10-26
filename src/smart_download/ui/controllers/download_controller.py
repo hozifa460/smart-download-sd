@@ -237,6 +237,18 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
 
         self.engine.start()
 
+    def _resolve_history_url(self) -> str:
+        u = (self.engine.url if self.engine and getattr(self.engine, "url", None) else (self.entry_url.get() if hasattr(self, "entry_url") else "")).strip()
+        if "googlevideo.com" in u.lower():
+            eu = (self.entry_url.get() if hasattr(self, "entry_url") else "").strip()
+            if eu and "googlevideo.com" not in eu.lower():
+                return eu
+            if hasattr(self, "engine") and hasattr(self.engine, "stream_info"):
+                wp = getattr(self.engine.stream_info, "webpage_url", "")
+                if wp and "googlevideo.com" not in wp.lower():
+                    return wp
+        return u
+
     def _on_pause_resume(self):
         if not self.engine:
             return
@@ -249,16 +261,10 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             if hasattr(self, "btn_refresh_link"):
                 self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
             try:
-                dl_url = (self.engine.url if self.engine and getattr(self.engine, "url", None) else self.entry_url.get()).strip()
+                dl_url = self._resolve_history_url()
                 dl_dest = (self.engine.dest_path if self.engine and getattr(self.engine, "dest_path", None) else self.entry_dest.get()).strip()
                 if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
-                    self.history_manager.add_or_update_entry(
-                        url=dl_url,
-                        file_path=dl_dest,
-                        size_bytes=0,
-                        status="Paused",
-                        elapsed_sec=0.0
-                    )
+                    self.history_manager.add_or_update_entry(url=dl_url, file_path=dl_dest, size_bytes=0, status="Paused", elapsed_sec=0.0)
                     self._refresh_history_table()
             except Exception:
                 pass
@@ -404,15 +410,9 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                 self.btn_refresh_link.configure(state="disabled", bg=self.c_panel_light, fg=self.c_text_muted)
             self.log(f"[COMPLETE] Download complete: {os.path.basename(path)} ({total_bytes:,} bytes in {elapsed:.1f}s)")
             try:
-                dl_url = (self.engine.url if self.engine and getattr(self.engine, "url", None) else self.entry_url.get()).strip()
+                dl_url = self._resolve_history_url()
                 if hasattr(self, "history_manager") and self.history_manager:
-                    self.history_manager.add_or_update_entry(
-                        url=dl_url,
-                        file_path=path,
-                        size_bytes=total_bytes,
-                        status="Completed",
-                        elapsed_sec=elapsed
-                    )
+                    self.history_manager.add_or_update_entry(url=dl_url, file_path=path, size_bytes=total_bytes, status="Completed", elapsed_sec=elapsed)
                     self._refresh_history_table()
             except Exception:
                 pass
@@ -501,7 +501,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     pass
 
             try:
-                dl_url = (self.engine.url if self.engine and getattr(self.engine, "url", None) else self.entry_url.get()).strip()
+                dl_url = self._resolve_history_url()
                 dl_dest = (self.engine.dest_path if self.engine and getattr(self.engine, "dest_path", None) else self.entry_dest.get()).strip()
                 if dl_url and dl_dest and hasattr(self, "history_manager") and self.history_manager:
                     self.history_manager.add_or_update_entry(url=dl_url, file_path=dl_dest, size_bytes=0, status="Failed", elapsed_sec=0.0)

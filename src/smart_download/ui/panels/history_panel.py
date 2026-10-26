@@ -168,6 +168,10 @@ class HistoryPanelMixin:
             except Exception:
                 pass
 
+    def _redownload_different_quality(self):
+        """Alias for re-downloading selected history item with different quality/settings."""
+        self._history_redownload_with_quality()
+
     def _history_redownload_with_quality(self):
         """Re-downloads selected entry allowing quality and format selection."""
         self._history_redownload_selected(with_quality=True)
@@ -185,6 +189,32 @@ class HistoryPanelMixin:
         file_path = entry.get("file_path", "").strip()
         if not url:
             return
+
+        # Check if the stored URL is an expired googlevideo stream URL from an older session
+        if "googlevideo.com" in url.lower():
+            cached_ctx = self._get_cached_media_context(url) if hasattr(self, "_get_cached_media_context") else None
+            recovered_url = None
+            if cached_ctx and cached_ctx.get("url") and "googlevideo.com" not in cached_ctx["url"].lower():
+                recovered_url = cached_ctx["url"]
+            elif entry.get("webpage_url") and "googlevideo.com" not in entry["webpage_url"].lower():
+                recovered_url = entry["webpage_url"]
+
+            if recovered_url:
+                url = recovered_url
+                entry["url"] = recovered_url
+            else:
+                if hasattr(self, "show_error_dialog"):
+                    self.show_error_dialog(
+                        tr("err_expired_googlevideo_title", "Expired Video Stream Link"),
+                        tr(
+                            "err_expired_googlevideo_msg",
+                            "This history entry contains an expired temporary stream URL from an older session.\n\nPlease enter the original YouTube/video link (e.g. https://www.youtube.com/watch?v=...) to redownload with different settings."
+                        )
+                    )
+                elif hasattr(self, "log"):
+                    self.log("[HISTORY] Cannot redownload expired googlevideo.com stream URL. Please provide original media URL.")
+                return
+
         if hasattr(self, "entry_url"):
             self.entry_url.delete(0, tk.END)
             self.entry_url.insert(0, url)

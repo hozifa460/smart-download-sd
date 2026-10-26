@@ -476,6 +476,8 @@ class ConfirmModalLogicMixin:
         pass
 
     def destroy(self):
+        try: self.withdraw()
+        except Exception: pass
         for job_attr in ("_idle_job", "_topmost_job"):
             job = getattr(self, job_attr, None)
             if job:

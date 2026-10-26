@@ -8,7 +8,7 @@ import threading
 import queue
 import tkinter as tk
 from tkinter import ttk
-from typing import Any, Tuple, Callable
+from typing import Any, Tuple, Callable, Optional
 
 def _detach_photo_tk(photo: Any) -> None:
     """Detaches the underlying Tcl interpreter reference from a PhotoImage/Variable/Style so GC on any thread is safe."""
@@ -57,11 +57,15 @@ def _detach_widget_tk_refs(obj: Any) -> None:
         pass
 
 
-_BG_TK_CALLBACK_QUEUE: "queue.Queue[Tuple[Any, Callable, Tuple]]" = queue.Queue()
+_EXISTING_QUEUE = getattr(tk.Misc, "_sd_bg_callback_queue", None)
+if _EXISTING_QUEUE is None:
+    _EXISTING_QUEUE = queue.Queue()
+    setattr(tk.Misc, "_sd_bg_callback_queue", _EXISTING_QUEUE)
+_BG_TK_CALLBACK_QUEUE: "queue.Queue[Tuple[Any, Callable, Tuple]]" = _EXISTING_QUEUE
 
 
 def _drain_bg_tk_callbacks() -> None:
-    """Drains any widget.after() callbacks queued from background threads on the Tkinter main thread."""
+    """Drains any widget.after() or after_idle() callbacks queued from background threads on the Tkinter main thread."""
     if threading.current_thread() is not threading.main_thread():
         return
     while not _BG_TK_CALLBACK_QUEUE.empty():
@@ -77,194 +81,252 @@ def _drain_bg_tk_callbacks() -> None:
             pass
 
 
-if not getattr(tk.Misc, "_sd_safe_destroy_patched", False):
-    _orig_winfo_exists = tk.Misc.winfo_exists
-    _orig_update = tk.Misc.update
-    _orig_update_idletasks = tk.Misc.update_idletasks
-    _orig_after = tk.Misc.after
-    _orig_after_cancel = tk.Misc.after_cancel
-    _orig_grab_release = tk.Misc.grab_release
-    _orig_grab_current = tk.Misc.grab_current
-    _orig_basewidget_destroy = tk.BaseWidget.destroy
-    _orig_tk_destroy = tk.Tk.destroy
+if not hasattr(tk.Misc, "_sd_orig_destroy"):
+    tk.Misc._sd_orig_destroy = tk.Misc.destroy
+if not hasattr(tk.Misc, "_sd_orig_Toplevel_destroy"):
+    tk.Misc._sd_orig_Toplevel_destroy = tk.Toplevel.destroy
+if not hasattr(tk.Misc, "_sd_orig_after"):
+    tk.Misc._sd_orig_after = tk.Misc.after
+if not hasattr(tk.Misc, "_sd_orig_after_idle"):
+    tk.Misc._sd_orig_after_idle = tk.Misc.after_idle
+if not hasattr(tk.Misc, "_sd_orig_update"):
+    tk.Misc._sd_orig_update = tk.Misc.update
+if not hasattr(tk.Misc, "_sd_orig_update_idletasks"):
+    tk.Misc._sd_orig_update_idletasks = tk.Misc.update_idletasks
+if not hasattr(tk.Misc, "_sd_orig_after_cancel"):
+    tk.Misc._sd_orig_after_cancel = tk.Misc.after_cancel
+if not hasattr(tk.Misc, "_sd_orig_winfo_exists"):
+    tk.Misc._sd_orig_winfo_exists = tk.Misc.winfo_exists
+if not hasattr(tk.Misc, "_sd_orig_grab_release"):
+    tk.Misc._sd_orig_grab_release = tk.Misc.grab_release
+if not hasattr(tk.Misc, "_sd_orig_grab_current"):
+    tk.Misc._sd_orig_grab_current = tk.Misc.grab_current
+if not hasattr(tk.Misc, "_sd_orig_basewidget_destroy"):
+    tk.Misc._sd_orig_basewidget_destroy = tk.BaseWidget.destroy
+if not hasattr(tk.Misc, "_sd_orig_tk_destroy"):
+    tk.Misc._sd_orig_tk_destroy = tk.Tk.destroy
 
-    def _safe_winfo_exists(self):
-        if getattr(self, "tk", None) is None or getattr(self, "_closing", False):
-            return 0
-        if threading.current_thread() is not threading.main_thread():
-            return 1
-        try:
-            return _orig_winfo_exists(self)
-        except Exception:
-            return 0
+_ORIG_MISC_DESTROY = tk.Misc._sd_orig_destroy
+_ORIG_TOPLEVEL_DESTROY = tk.Misc._sd_orig_Toplevel_destroy
+_ORIG_MISC_AFTER = tk.Misc._sd_orig_after
+_ORIG_MISC_AFTER_IDLE = tk.Misc._sd_orig_after_idle
+_ORIG_MISC_UPDATE = tk.Misc._sd_orig_update
+_ORIG_MISC_UPDATE_IDLETASKS = tk.Misc._sd_orig_update_idletasks
+_ORIG_MISC_AFTER_CANCEL = tk.Misc._sd_orig_after_cancel
+_ORIG_MISC_WINFO_EXISTS = tk.Misc._sd_orig_winfo_exists
+_ORIG_MISC_GRAB_RELEASE = tk.Misc._sd_orig_grab_release
+_ORIG_MISC_GRAB_CURRENT = tk.Misc._sd_orig_grab_current
+_ORIG_BASEWIDGET_DESTROY = tk.Misc._sd_orig_basewidget_destroy
+_ORIG_TK_DESTROY = tk.Misc._sd_orig_tk_destroy
 
-    def _safe_update(self):
-        if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
-            return
-        _drain_bg_tk_callbacks()
-        return _orig_update(self)
 
-    def _safe_update_idletasks(self):
-        if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
-            return
-        _drain_bg_tk_callbacks()
-        return _orig_update_idletasks(self)
+def _safe_winfo_exists(self):
+    if getattr(self, "tk", None) is None or getattr(self, "_closing", False):
+        return 0
+    if threading.current_thread() is not threading.main_thread():
+        return 1
+    try:
+        return _ORIG_MISC_WINFO_EXISTS(self)
+    except Exception:
+        return 0
 
-    def _safe_after(self, ms, func=None, *args):
-        if getattr(self, "tk", None) is None or getattr(self, "_closing", False):
-            return None
-        if threading.current_thread() is not threading.main_thread():
-            if func is not None:
-                try:
-                    w_ref = weakref.ref(self)
-                except Exception:
-                    w_ref = lambda: None
-                _BG_TK_CALLBACK_QUEUE.put((w_ref, func, args))
-            return "bg_queued"
-        return _orig_after(self, ms, func, *args)
 
-    def _safe_after_cancel(self, id):
-        if (
-            getattr(self, "tk", None) is None
-            or not id
-            or id == "bg_queued"
-            or threading.current_thread() is not threading.main_thread()
-        ):
-            return
-        try:
-            return _orig_after_cancel(self, id)
-        except Exception:
-            return
+def _safe_misc_update(self):
+    if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
+        return
+    _drain_bg_tk_callbacks()
+    return _ORIG_MISC_UPDATE(self)
 
-    def _safe_grab_release(self):
-        if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
-            return
-        try:
-            return _orig_grab_release(self)
-        except Exception:
-            return
 
-    def _safe_grab_current(self):
-        if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
-            return None
-        try:
-            return _orig_grab_current(self)
-        except Exception:
-            return None
+def _safe_misc_update_idletasks(self):
+    if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
+        return
+    _drain_bg_tk_callbacks()
+    return _ORIG_MISC_UPDATE_IDLETASKS(self)
 
-    def _safe_basewidget_destroy(self):
-        self._closing = True
-        if getattr(self, "tk", None) is None:
-            _detach_widget_tk_refs(self)
-            return
-        try:
-            _orig_basewidget_destroy(self)
-        finally:
-            _detach_widget_tk_refs(self)
 
-    def _safe_tk_destroy(self):
-        self._closing = True
-        while not _BG_TK_CALLBACK_QUEUE.empty():
+def _safe_misc_after(self, ms, func=None, *args):
+    if getattr(self, "tk", None) is None or getattr(self, "_closing", False):
+        return None
+    if threading.current_thread() is not threading.main_thread():
+        if func is not None:
             try:
-                _BG_TK_CALLBACK_QUEUE.get_nowait()
+                w_ref = weakref.ref(self)
             except Exception:
-                break
-        if getattr(self, "tk", None) is None:
-            _detach_widget_tk_refs(self)
-            return
+                w_ref = lambda: self
+            _BG_TK_CALLBACK_QUEUE.put((w_ref, func, args))
+        return "bg_queued"
+    return _ORIG_MISC_AFTER(self, ms, func, *args)
+
+
+def _safe_misc_after_idle(self, func, *args):
+    if getattr(self, "tk", None) is None or getattr(self, "_closing", False):
+        return None
+    if threading.current_thread() is not threading.main_thread():
+        if func is not None:
+            try:
+                w_ref = weakref.ref(self)
+            except Exception:
+                w_ref = lambda: self
+            _BG_TK_CALLBACK_QUEUE.put((w_ref, func, args))
+        return "bg_queued_idle"
+    return _ORIG_MISC_AFTER_IDLE(self, func, *args)
+
+
+def _safe_after_cancel(self, id):
+    if (
+        getattr(self, "tk", None) is None
+        or not id
+        or id in ("bg_queued", "bg_queued_idle")
+        or threading.current_thread() is not threading.main_thread()
+    ):
+        return
+    try:
+        return _ORIG_MISC_AFTER_CANCEL(self, id)
+    except Exception:
+        return
+
+
+def _safe_grab_release(self):
+    if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
+        return
+    try:
+        return _ORIG_MISC_GRAB_RELEASE(self)
+    except Exception:
+        return
+
+
+def _safe_grab_current(self):
+    if getattr(self, "tk", None) is None or threading.current_thread() is not threading.main_thread():
+        return None
+    try:
+        return _ORIG_MISC_GRAB_CURRENT(self)
+    except Exception:
+        return None
+
+
+def _safe_misc_destroy(self):
+    self._closing = True
+    if getattr(self, "tk", None) is None:
+        _detach_widget_tk_refs(self)
+        return
+    try:
+        _ORIG_MISC_DESTROY(self)
+    finally:
+        _detach_widget_tk_refs(self)
+
+
+def _safe_toplevel_destroy(self):
+    self._closing = True
+    if getattr(self, "tk", None) is None:
+        _detach_widget_tk_refs(self)
+        return
+    try:
+        _ORIG_TOPLEVEL_DESTROY(self)
+    finally:
+        _detach_widget_tk_refs(self)
+
+
+def _safe_basewidget_destroy(self):
+    self._closing = True
+    if getattr(self, "tk", None) is None:
+        _detach_widget_tk_refs(self)
+        return
+    try:
+        _ORIG_BASEWIDGET_DESTROY(self)
+    finally:
+        _detach_widget_tk_refs(self)
+
+
+def _safe_tk_destroy(self):
+    self._closing = True
+    while not _BG_TK_CALLBACK_QUEUE.empty():
         try:
-            _orig_tk_destroy(self)
-        finally:
-            _detach_widget_tk_refs(self)
-
-    tk.Misc.winfo_exists = _safe_winfo_exists
-    tk.Misc.update = _safe_update
-    tk.Misc.update_idletasks = _safe_update_idletasks
-    tk.Misc.after = _safe_after
-    tk.Misc.after_cancel = _safe_after_cancel
-    tk.Misc.grab_release = _safe_grab_release
-    tk.Misc.grab_current = _safe_grab_current
-    tk.BaseWidget.destroy = _safe_basewidget_destroy
-    tk.Tk.destroy = _safe_tk_destroy
-    tk.Misc._sd_safe_destroy_patched = True
+            _BG_TK_CALLBACK_QUEUE.get_nowait()
+        except Exception:
+            break
+    if getattr(self, "tk", None) is None:
+        _detach_widget_tk_refs(self)
+        return
+    try:
+        _ORIG_TK_DESTROY(self)
+    finally:
+        _detach_widget_tk_refs(self)
 
 
-def animate_window_open(win: Any, duration_ms: int = 140) -> None:
-    """Smoothly steps -alpha from 0.05 to 1.0 over ~4 frames using win.after (falling back in test/headless environments)."""
+tk.Misc.winfo_exists = _safe_winfo_exists
+tk.Misc.update = _safe_misc_update
+tk.Misc.update_idletasks = _safe_misc_update_idletasks
+tk.Misc.after = _safe_misc_after
+tk.Misc.after_idle = _safe_misc_after_idle
+tk.Misc.after_cancel = _safe_after_cancel
+tk.Misc.grab_release = _safe_grab_release
+tk.Misc.grab_current = _safe_grab_current
+tk.Misc.destroy = _safe_misc_destroy
+tk.Toplevel.destroy = _safe_toplevel_destroy
+tk.BaseWidget.destroy = _safe_basewidget_destroy
+tk.Tk.destroy = _safe_tk_destroy
+tk.Misc._sd_safe_destroy_patched = True
+
+
+def animate_window_open(win: Any, duration_ms: int = 140, steps: int = 7) -> None:
+    """Immediately sets window alpha to 1.0 and deiconifies cleanly without multi-step alpha flicker."""
     if not win:
         return
     try:
-        from ..config import is_test_environment
-        if is_test_environment():
-            try: win.wm_attributes("-alpha", 1.0)
-            except Exception: pass
-            return
-        if not hasattr(win, "wm_attributes") or not win.winfo_exists():
-            return
-        try:
-            win.wm_attributes("-alpha", 0.05)
-        except Exception:
-            return
-        steps = [0.25, 0.55, 0.85, 1.0]
-        step_delay = max(10, duration_ms // len(steps))
-
-        def _step(idx: int):
+        if hasattr(win, "wm_attributes"):
             try:
-                if not win.winfo_exists() or getattr(win, "_closing", False):
-                    return
-                win.wm_attributes("-alpha", steps[idx])
-                if idx + 1 < len(steps):
-                    win.after(step_delay, _step, idx + 1)
+                win.wm_attributes("-alpha", 1.0)
             except Exception:
-                try:
-                    win.wm_attributes("-alpha", 1.0)
-                except Exception:
-                    pass
-
-        win.after(step_delay, _step, 0)
+                pass
+        elif hasattr(win, "attributes"):
+            try:
+                win.attributes("-alpha", 1.0)
+            except Exception:
+                pass
+        if hasattr(win, "deiconify"):
+            try:
+                win.deiconify()
+            except Exception:
+                pass
     except Exception:
         pass
 
 
-def animate_window_close(win: Any, on_done: Callable[[], None], duration_ms: int = 110) -> None:
-    """Smoothly steps -alpha from 1.0 to 0.0 before invoking on_done callback (falling back in test/headless environments)."""
-    if not win:
-        if on_done:
-            on_done()
-        return
+def animate_window_close(
+    win: Any,
+    on_done: Optional[Callable[[], None]] = None,
+    duration_ms: int = 120,
+    steps: int = 6,
+    **kwargs: Any
+) -> None:
+    """Cancels any pending _sd_anim_job on win and immediately executes on_done() (or win.destroy()) without delay."""
+    actual_on_done = on_done
+    if not callable(actual_on_done):
+        if "on_done" in kwargs and callable(kwargs["on_done"]):
+            actual_on_done = kwargs["on_done"]
+        elif callable(steps):
+            actual_on_done = steps
+
+    if win is not None:
+        try:
+            job = getattr(win, "_sd_anim_job", None)
+            if job and hasattr(win, "after_cancel"):
+                try:
+                    win.after_cancel(job)
+                except Exception:
+                    pass
+                setattr(win, "_sd_anim_job", None)
+        except Exception:
+            pass
+
     try:
-        from ..config import is_test_environment
-        if is_test_environment():
-            if on_done:
-                on_done()
-            return
-        if not hasattr(win, "wm_attributes") or not win.winfo_exists() or getattr(win, "_closing", False):
-            if on_done:
-                on_done()
-            return
-        steps = [0.75, 0.45, 0.15, 0.0]
-        step_delay = max(10, duration_ms // len(steps))
-
-        def _step(idx: int):
-            try:
-                if not win.winfo_exists():
-                    if on_done:
-                        on_done()
-                    return
-                win.wm_attributes("-alpha", steps[idx])
-                if idx + 1 < len(steps):
-                    win.after(step_delay, _step, idx + 1)
-                else:
-                    if on_done:
-                        on_done()
-            except Exception:
-                if on_done:
-                    on_done()
-
-        win.after(step_delay, _step, 0)
+        if callable(actual_on_done):
+            actual_on_done()
+        elif win is not None and hasattr(win, "destroy"):
+            win.destroy()
     except Exception:
-        if on_done:
-            on_done()
+        pass
 
 
 
