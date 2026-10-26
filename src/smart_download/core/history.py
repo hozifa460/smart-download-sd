@@ -108,17 +108,26 @@ class DownloadHistoryManager:
                 e_path = entry.get("file_path", "")
                 e_url = entry.get("url", "")
                 e_fn = entry.get("filename", "")
+                e_status = str(entry.get("status", "")).strip()
                 e_path_norm = os.path.normcase(os.path.abspath(e_path)) if e_path else ""
+
                 if norm_path_case and e_path_norm and e_path_norm == norm_path_case:
+                    # If existing entry is Completed, do not pop or replace it when a new download
+                    # is starting, queued, or paused. Only update if the existing entry is incomplete.
+                    if e_status in ("Completed", "مكتمل") and status in ("Queued", "In Progress", "Paused"):
+                        continue
                     match_idx = idx
                     matched_id = entry.get("id")
                     old_entry = entry
                     break
+
                 if raw_url and e_url == raw_url and filename and e_fn == filename:
-                    match_idx = idx
-                    matched_id = entry.get("id")
-                    old_entry = entry
-                    break
+                    if e_status not in ("Completed", "مكتمل") and (not norm_path_case or not e_path_norm or e_path_norm == norm_path_case):
+                        match_idx = idx
+                        matched_id = entry.get("id")
+                        old_entry = entry
+                        break
+
 
             if match_idx >= 0 and old_entry:
                 self._entries.pop(match_idx)

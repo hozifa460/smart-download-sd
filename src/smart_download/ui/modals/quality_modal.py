@@ -14,7 +14,12 @@ except ImportError:
 
 from ...config import get_resource_path
 from ...locales.i18n import tr
-from ...utils.file_ops import CATEGORY_SUBFOLDERS, resolve_categorized_path
+from ...utils.file_ops import (
+    CATEGORY_SUBFOLDERS,
+    resolve_categorized_path,
+    generate_unique_destination_path,
+    apply_media_filename_tags,
+)
 from ...services.youtube_service import VideoFormatOption, format_filesize, sanitize_filename
 from ...utils.tk_helpers import _detach_photo_tk, animate_window_open, animate_window_close
 
@@ -52,6 +57,13 @@ class QualitySelectionModal(tk.Toplevel):
 
         self.selected_option: Optional[VideoFormatOption] = self.options[0] if self.options else None
         self._confirmed = False
+        if self.selected_option and self.dest_path:
+            self.dest_path = apply_media_filename_tags(
+                self.dest_path,
+                quality_label=self.selected_option.resolution_label,
+                is_sub_burned=False,
+                ext=self.selected_option.ext
+            )
 
         self.title(tr("modal_quality_title", "Select Video Quality — Smart Download"))
         self.configure(bg=self.theme["c_bg"])
@@ -364,26 +376,30 @@ class QualitySelectionModal(tk.Toplevel):
             return
         self.selected_option = opt
 
-        # Dynamically adjust filename extension in the destination entry
+        # Dynamically adjust filename extension and tags in the destination entry
         cur_path = self.entry_dest.get().strip()
         target_path = cur_path or self.dest_path
         if target_path:
-            base, _ = os.path.splitext(target_path)
-            new_ext = opt.ext.lower()
-            if not new_ext.startswith("."):
-                new_ext = "." + new_ext
-            parent_dir = os.path.dirname(target_path)
+            sub_mode = "soft_embed"
+            if hasattr(self, "cb_sub") and self.cb_sub:
+                mode_fn = getattr(self.cb_sub, "get_selected_mode", None)
+                sub_mode = mode_fn() if callable(mode_fn) else getattr(self.cb_sub, "_selected_mode", "soft_embed")
+            updated_dest = apply_media_filename_tags(
+                target_path,
+                quality_label=opt.resolution_label,
+                is_sub_burned=(sub_mode == "hard_burn"),
+                ext=opt.ext.lower()
+            )
+            parent_dir = os.path.dirname(updated_dest)
             parent_base = os.path.basename(os.path.normpath(parent_dir)) if parent_dir else ""
             subfolders_lower = {v.lower() for v in CATEGORY_SUBFOLDERS.values()}
             if parent_base in CATEGORY_SUBFOLDERS.values() or parent_base.lower() in subfolders_lower:
                 updated_dest = resolve_categorized_path(
                     parent_dir,
-                    os.path.basename(base) + new_ext,
+                    os.path.basename(updated_dest),
                     auto_categorize=True,
                     create_dir=False
                 )
-            else:
-                updated_dest = base + new_ext
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, updated_dest)
             if self.dest_path:
@@ -418,8 +434,9 @@ class QualitySelectionModal(tk.Toplevel):
         if self.subtitle_tracks and self.cb_sub:
             idx = self.cb_sub.current()
             if idx <= 0 and len(self.subtitle_tracks) > 1 and (sub_mode == "hard_burn" or getattr(self.cb_sub, "_user_touched_mode", False)):
-                idx = 1
-                try: self.cb_sub.current(1)
+                ar_idx = next((i for i, s in enumerate(self.subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
+                idx = ar_idx if ar_idx is not None else 1
+                try: self.cb_sub.current(idx)
                 except Exception: pass
             if 0 <= idx < len(self.subtitle_tracks):
                 self.selected_option.selected_subtitle_track = self.subtitle_tracks[idx]
@@ -429,11 +446,22 @@ class QualitySelectionModal(tk.Toplevel):
         if not final_dest:
             if self.dest_path:
                 base, _ = os.path.splitext(self.dest_path)
-                return f"{base}.{self.selected_option.ext}"
-            downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-            clean_title = sanitize_filename(self.video_title)
-            return os.path.join(downloads_dir, f"{clean_title}.{self.selected_option.ext}")
-        return final_dest
+                final_dest = f"{base}.{self.selected_option.ext}"
+            else:
+                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                clean_title = sanitize_filename(self.video_title)
+                final_dest = os.path.join(downloads_dir, f"{clean_title}.{self.selected_option.ext}")
+
+        if self.selected_option:
+            is_sub_burned = getattr(self.selected_option, "subtitle_embed_mode", "") == "hard_burn"
+            final_dest = apply_media_filename_tags(
+                final_dest,
+                quality_label=self.selected_option.resolution_label,
+                is_sub_burned=is_sub_burned,
+                ext=self.selected_option.ext
+            )
+        return generate_unique_destination_path(final_dest)
+
 
     def _on_download(self):
         if not self.selected_option:

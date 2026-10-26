@@ -18,6 +18,8 @@ from .file_ops import (
     resolve_categorized_path,
     open_downloaded_file,
     open_containing_folder,
+    generate_unique_destination_path,
+    apply_media_filename_tags,
 )
 
 try:
@@ -62,6 +64,8 @@ __all__ = [
     "resolve_categorized_path",
     "open_downloaded_file",
     "open_containing_folder",
+    "generate_unique_destination_path",
+    "apply_media_filename_tags",
     "_detach_photo_tk",
     "_detach_widget_tk_refs",
     "_drain_bg_tk_callbacks",

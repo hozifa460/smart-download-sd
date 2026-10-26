@@ -127,6 +127,92 @@ def open_containing_folder(file_path: str):
         pass
 
 
+def generate_unique_destination_path(dest_path: str) -> str:
+    """
+    If dest_path already exists on disk and is not an incomplete download (does not have .sd_parts or .tdm_parts),
+    generates a non-colliding filename e.g. 'Title (1).mp4', 'Title (2).mp4'.
+    """
+    if not dest_path:
+        return dest_path
+
+    parts_dir = dest_path + ".sd_parts"
+    tdm_parts = dest_path + ".tdm_parts"
+    if os.path.isdir(parts_dir) or os.path.isdir(tdm_parts):
+        return dest_path
+
+    if not os.path.exists(dest_path):
+        return dest_path
+
+    dirname, filename = os.path.split(dest_path)
+    base, ext = os.path.splitext(filename)
+
+    import re
+    m = re.match(r'^(.*?)\s*\((\d+)\)$', base)
+    if m:
+        root_base = m.group(1).rstrip()
+        counter = int(m.group(2)) + 1
+    else:
+        root_base = base
+        counter = 1
+
+    while True:
+        candidate = os.path.join(dirname, f"{root_base} ({counter}){ext}")
+        c_parts = candidate + ".sd_parts"
+        if not os.path.exists(candidate) and not os.path.isdir(c_parts):
+            return candidate
+        counter += 1
+
+
+def apply_media_filename_tags(
+    dest_path: str,
+    quality_label: Optional[str] = None,
+    is_sub_burned: bool = False,
+    ext: Optional[str] = None
+) -> str:
+    """
+    Formats destination path to include quality tag (e.g. [1080p], [720p], [Audio])
+    and subtitle burn-in tag [Sub], stripping any older tags first.
+    """
+    if not dest_path:
+        return dest_path
+
+    import re
+    dirname, filename = os.path.split(dest_path)
+    base, old_ext = os.path.splitext(filename)
+
+    clean_base = re.sub(r'\s*\[(?:\d{3,4}p|2160p|1440p|1080p|720p|480p|360p|240p|144p|4k|8k|audio|mp3|m4a)\]', '', base, flags=re.IGNORECASE)
+    clean_base = re.sub(r'\s*\[sub\]', '', clean_base, flags=re.IGNORECASE)
+    clean_base = clean_base.strip()
+
+    q_tag = ""
+    if quality_label:
+        ql = str(quality_label).strip()
+        qm = re.search(r'(\d{3,4}p|4K|8K)', ql, flags=re.IGNORECASE)
+        if qm:
+            q_tag = f"[{qm.group(1)}]"
+        elif "audio" in ql.lower():
+            q_tag = "[Audio]"
+        elif ql:
+            clean_ql = re.sub(r'[\(\)\[\]]', '', ql).split('—')[0].split('-')[0].strip()
+            if clean_ql:
+                q_tag = f"[{clean_ql}]"
+
+    sub_tag = "[Sub]" if is_sub_burned else ""
+
+    parts = [clean_base]
+    if q_tag:
+        parts.append(q_tag)
+    if sub_tag:
+        parts.append(sub_tag)
+
+    new_base = " ".join(parts).strip()
+    target_ext = ext if ext else old_ext
+    if target_ext and not target_ext.startswith("."):
+        target_ext = "." + target_ext
+
+    return os.path.join(dirname, f"{new_base}{target_ext}")
+
+
 __all__ = [
     "MagicBytesDetector",
     "calculate_file_integrity",
@@ -136,4 +222,7 @@ __all__ = [
     "resolve_categorized_path",
     "open_downloaded_file",
     "open_containing_folder",
+    "generate_unique_destination_path",
+    "apply_media_filename_tags",
 ]
+

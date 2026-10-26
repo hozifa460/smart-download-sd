@@ -189,35 +189,50 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extracts manual and auto-translated subtitle tracks: None first, en, ar, manual, auto."""
     tracks: List[Dict[str, Any]] = [{
         "sub_id": "none", "language": "none", "label": "None / بدون ترجمة",
-        "url": "", "ext": "", "is_auto": False,
+        "url": "", "ext": "", "is_auto": False, "fallback_urls": [], "http_headers": {},
     }]
     manual_subs = info.get("subtitles") or {}
     auto_subs = info.get("automatic_captions") or {}
+    popular_lower = [x.lower() for x in POPULAR_AUTO_LANGS]
+    base_headers = dict(info.get("http_headers") or {})
 
     for is_auto, sub_dict in ((False, manual_subs), (True, auto_subs)):
         for lang, flist in sub_dict.items():
             lang_norm = lang.lower()
-            if is_auto and lang_norm not in POPULAR_AUTO_LANGS and lang not in manual_subs:
+            base_lang = lang_norm.split("-")[0].split("_")[0]
+            if is_auto and lang_norm not in popular_lower and base_lang not in popular_lower and lang not in manual_subs:
                 continue
             res = _pick_best_sub_url(flist)
             if not res:
                 continue
             url, ext = res
+
+            fallback_urls: List[str] = []
+            sub_headers = dict(base_headers)
+            for f in flist:
+                f_url = f.get("url")
+                if f_url and f_url not in fallback_urls:
+                    fallback_urls.append(f_url)
+                if f_url == url and isinstance(f.get("http_headers"), dict):
+                    sub_headers.update(f["http_headers"])
+
             if is_auto:
-                suffix = "ترجمة تلقائية" if lang_norm == "ar" else "Auto-Translated"
+                suffix = "ترجمة تلقائية" if base_lang == "ar" else "Auto-Translated"
             else:
                 suffix = "Official"
-            name = "العربية" if lang_norm == "ar" else ("English" if lang_norm == "en" else LANG_NAMES.get(lang_norm, (lang.upper(), ""))[0])
-            label = f"{name} ({suffix})" if lang_norm != "ar" or not is_auto else f"العربية ({suffix})"
+            name = "العربية" if base_lang == "ar" else ("English" if base_lang == "en" else LANG_NAMES.get(lang_norm, LANG_NAMES.get(base_lang, (lang.upper(), "")))[0])
+            label = f"{name} ({suffix})" if base_lang != "ar" or not is_auto else f"العربية ({suffix})"
             tracks.append({
                 "sub_id": f"{lang}-auto" if is_auto else lang,
                 "language": lang, "label": label, "url": url, "ext": ext, "is_auto": is_auto,
+                "fallback_urls": fallback_urls,
+                "http_headers": sub_headers,
             })
 
     def _sub_sort_key(t: Dict[str, Any]) -> Tuple[int, int, str]:
         if t["sub_id"] == "none": return (0, 0, "")
         lang = t["language"].lower()
-        sub_order = 0 if lang == "en" else (1 if lang == "ar" else 2)
+        sub_order = 0 if lang.startswith("ar") else (1 if lang.startswith("en") else 2)
         return (2 if t["is_auto"] else 1, sub_order, lang)
 
     return sorted(tracks, key=_sub_sort_key)
@@ -338,10 +353,13 @@ def build_audio_subtitle_row(
                 set_setting("subtitle_embed_mode", chosen)
             except Exception:
                 pass
-            # Smart Auto-Select UX: If subtitles were 'None' and tracks exist, advance to first track
+            # Smart Auto-Select UX: If subtitles were 'None' and tracks exist, advance to Arabic or first track
             if cb_sub.current() <= 0 and len(subtitle_tracks) > 1:
-                cb_sub.current(1)
+                ar_idx = next((i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
+                target_idx = ar_idx if ar_idx is not None else 1
+                cb_sub.current(target_idx)
                 _on_sub_changed()
+
 
         radio_widgets = []
         for code, label_txt in mode_options:

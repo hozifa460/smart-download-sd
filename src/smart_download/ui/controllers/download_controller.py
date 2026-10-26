@@ -22,7 +22,7 @@ from smart_download.services.youtube_service import (
     extract_media_platform,
     sanitize_filename,
 )
-from smart_download.utils import resolve_categorized_path, derive_download_filename
+from smart_download.utils import resolve_categorized_path, derive_download_filename, generate_unique_destination_path
 from smart_download.ui.modals.quality_modal import QualitySelectionModal
 from smart_download.ui.modals.confirm_modal import DownloadConfirmationModal
 from smart_download.ui.modals.candidates_modal import MultipleCandidatesModal
@@ -150,6 +150,8 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             except Exception:
                 pass
 
+        if not is_media_url(url, check_ytdlp_extractors=False):
+            dest = generate_unique_destination_path(dest)
         # Populate GUI entry fields
         try:
             self.entry_url.delete(0, tk.END)
@@ -417,33 +419,29 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             except Exception:
                 pass
             if hasattr(self, "_download_queue") and self._download_queue:
-                q_url, q_dest, q_conn, q_limit = self._download_queue.pop(0)
-                self.log(f"[QUEUE] Launching next queued download: {os.path.basename(q_dest)} ({len(self._download_queue)} remaining)")
-                self._start_download_with_engine(q_url, q_dest, q_conn, q_limit)
+                next_task = self._download_queue.pop(0)
+                if callable(next_task):
+                    self.log(f"[QUEUE] Launching next queued stream ({len(self._download_queue)} remaining)")
+                    next_task()
+                elif isinstance(next_task, (list, tuple)) and len(next_task) >= 4:
+                    q_url, q_dest, q_conn, q_limit = next_task[:4]
+                    self.log(f"[QUEUE] Launching next queued download: {os.path.basename(q_dest)} ({len(self._download_queue)} remaining)")
+                    self._start_download_with_engine(q_url, q_dest, q_conn, q_limit)
 
             if suppress_dialog:
                 return
-            msg = (
-                f"{tr('dialog_complete_msg_verified', 'File verified & assembled without corruption!')}\n\n"
-                f"{tr('dialog_complete_msg_saved', 'Saved to:')} {path}\n"
-                f"{tr('dialog_complete_msg_size', 'Size:')} {total_bytes:,} bytes\n"
-                f"{tr('dialog_complete_msg_time', 'Total Time:')} {elapsed:.1f} seconds"
-            )
+            msg = (f"{tr('dialog_complete_msg_verified', 'File verified & assembled without corruption!')}\n\n"
+                   f"{tr('dialog_complete_msg_saved', 'Saved to:')} {path}\n"
+                   f"{tr('dialog_complete_msg_size', 'Size:')} {total_bytes:,} bytes\n"
+                   f"{tr('dialog_complete_msg_time', 'Total Time:')} {elapsed:.1f} seconds")
             complete_title = tr("toast_completed_title", "Download Completed Successfully! 🚀")
             if hasattr(self, "show_safe_info"):
                 self.show_safe_info(complete_title, msg)
             elif getattr(messagebox.showinfo, "_mock_name", None) or hasattr(messagebox.showinfo, "mock"):
                 messagebox.showinfo(complete_title, msg)
-            else:
+            elif hasattr(self, "root") and self.root and self.root.winfo_exists():
                 try:
-                    if hasattr(self, "root") and self.root and self.root.winfo_exists():
-                        SafeModalDialog(
-                            self.root,
-                            title=complete_title,
-                            message=msg,
-                            dialog_type="info",
-                            theme=getattr(self, "_theme_dict", lambda: None)()
-                        )
+                    SafeModalDialog(self.root, title=complete_title, message=msg, dialog_type="info", theme=getattr(self, "_theme_dict", lambda: None)())
                 except Exception:
                     pass
         try:

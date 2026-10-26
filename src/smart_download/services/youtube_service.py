@@ -408,9 +408,9 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
 
         def _run_proc(cmd_list):
             if cancel_event is None:
-                res = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
+                res = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=creationflags)
                 return res.returncode, res.stderr
-            p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
+            p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=creationflags)
             while True:
                 try:
                     _, err = p.communicate(timeout=0.05)

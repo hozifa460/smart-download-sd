@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import html
+import time
 import subprocess
 import shutil
 import urllib.request
@@ -102,21 +103,32 @@ def _parse_xml_subtitles_to_srt(text: str) -> str:
         attrs_str = m.group(1)
         raw_body = m.group(2)
         attrs = {k: v1 if v1 != "" else v2 for k, v1, v2 in attr_pat.findall(attrs_str)}
+        t_val = attrs.get("t")
         start_val = attrs.get("start") or attrs.get("begin")
-        if not start_val:
+        if not start_val and not t_val:
             continue
         try:
-            start = _parse_timestamp_or_seconds(start_val)
+            if t_val:
+                start = float(t_val) / 1000.0
+            else:
+                start = _parse_timestamp_or_seconds(start_val)
+
+            d_val = attrs.get("d")
             dur_val = attrs.get("dur")
             end_val = attrs.get("end")
-            if dur_val:
+            if d_val:
+                dur = float(d_val) / 1000.0
+                end = start + max(0.5, dur)
+            elif dur_val:
                 dur = _parse_timestamp_or_seconds(dur_val)
                 end = start + max(0.5, dur)
             elif end_val:
                 end = _parse_timestamp_or_seconds(end_val)
             else:
                 end = start + 2.0
+
             body = re.sub(r'<br\s*/?>', '\n', raw_body, flags=re.IGNORECASE)
+            body = re.sub(r'</?s\b[^>]*>', '', body, flags=re.IGNORECASE)
             body = html.unescape(re.sub(r'<[^>]+>', '', body)).strip()
             if body:
                 timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
@@ -219,33 +231,55 @@ def convert_vtt_to_srt(vtt_text: str) -> str:
 def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> Optional[str]:
     """
     Downloads subtitle, converts VTT/XML/JSON to SRT, and saves alongside video in pure UTF-8.
-    Writes both <video_stem>.<language>.srt and <video_stem>.srt so media players auto-detect.
+    Tries fallback_urls if primary URL fails or yields invalid content.
+    Never writes .srt if srt_content is empty or lacks '-->' timing.
     """
-    if not sub_track or sub_track.get("sub_id") in (None, "none") or not sub_track.get("url"):
+    if not sub_track or sub_track.get("sub_id") in (None, "none"):
         return None
-    url = sub_track["url"]
+
+    primary_url = sub_track.get("url") or ""
+    fallbacks = sub_track.get("fallback_urls") or []
+    cand_urls = [u for u in [primary_url] + fallbacks if u]
+    if not cand_urls:
+        return None
+
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"}
     if isinstance(sub_track.get("http_headers"), dict):
         headers.update(sub_track["http_headers"])
-    raw_text = None
-    if requests is not None:
-        try:
-            resp = requests.get(url, headers=headers, timeout=15)
-            if resp.status_code == 200:
-                raw_text = resp.content.decode("utf-8", errors="replace")
-        except Exception:
-            raw_text = None
-    if raw_text is None:
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                raw_text = resp.read().decode("utf-8", errors="replace")
-        except Exception:
-            return None
 
-    srt_content = convert_vtt_to_srt(raw_text)
-    if not srt_content:
-        srt_content = raw_text
+    srt_content = ""
+    for u in cand_urls:
+        raw_text = None
+        if requests is not None:
+            try:
+                resp = requests.get(u, headers=headers, timeout=15)
+                if resp.status_code == 200:
+                    raw_text = resp.content.decode("utf-8", errors="replace")
+            except Exception:
+                raw_text = None
+
+        if raw_text is None:
+            try:
+                req = urllib.request.Request(u, headers=headers)
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    raw_text = resp.read().decode("utf-8", errors="replace")
+            except Exception:
+                raw_text = None
+
+        if not raw_text or not raw_text.strip():
+            continue
+
+        conv = convert_vtt_to_srt(raw_text)
+        if conv and "-->" in conv:
+            srt_content = conv
+            break
+        elif "-->" in raw_text:
+            srt_content = raw_text
+            break
+
+    if not srt_content or "-->" not in srt_content:
+        return None
+
     stem = os.path.splitext(video_filepath)[0]
     srt_path = f"{stem}.{sub_track.get('language') or 'sub'}.srt"
     default_srt_path = f"{stem}.srt"
@@ -260,6 +294,7 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
         return srt_path
     except Exception:
         return None
+
 
 
 def embed_subtitle_into_mp4(
@@ -284,13 +319,14 @@ def embed_subtitle_into_mp4(
         "-disposition:s:0", "default",
         "-f", "mp4", temp_mp4
     ]
+    p: Optional[subprocess.Popen] = None
     try:
         cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
         if cancel_event is None:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=cflags)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=cflags)
             rc, err = res.returncode, res.stderr
         else:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=cflags)
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=cflags)
             while True:
                 try:
                     _, err = p.communicate(timeout=0.05)
@@ -317,11 +353,18 @@ def embed_subtitle_into_mp4(
             except Exception: pass
         return False
     except Exception as exc:
+        if p and p.poll() is None:
+            try: p.kill()
+            except Exception: pass
         if on_log: on_log(f"[SUBTITLES] FFmpeg soft-muxing skipped: {exc}")
         if os.path.exists(temp_mp4):
             try: os.remove(temp_mp4)
             except Exception: pass
         return False
+    finally:
+        if p and p.poll() is None:
+            try: p.kill()
+            except Exception: pass
 
 
 def burn_subtitle_into_video(
@@ -337,7 +380,8 @@ def burn_subtitle_into_video(
     abs_video = os.path.abspath(video_path)
     abs_srt = os.path.abspath(srt_path)
     srt_dir = os.path.dirname(abs_video)
-    burn_srt_path = os.path.join(srt_dir, "_sd_burn_sub.srt")
+    burn_srt_name = f"_sd_burn_{os.getpid()}_{int(time.time() * 1000)}.srt"
+    burn_srt_path = os.path.join(srt_dir, burn_srt_name)
     temp_burn_mp4 = f"{os.path.splitext(abs_video)[0]}.burn.mp4"
 
     try:
@@ -353,7 +397,7 @@ def burn_subtitle_into_video(
     cmd = [
         ffmpeg_path, "-y",
         "-i", abs_video,
-        "-vf", "subtitles=_sd_burn_sub.srt:charenc=UTF-8",
+        "-vf", f"subtitles={burn_srt_name}",
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "22",
@@ -361,28 +405,60 @@ def burn_subtitle_into_video(
         "-f", "mp4",
         temp_burn_mp4
     ]
-    try:
-        cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
+
+    p: Optional[subprocess.Popen] = None
+    cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
+
+    def _run_burn_cmd(current_cmd: List[str]) -> Tuple[int, str]:
+        nonlocal p
+        p = None
         if cancel_event is None:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=srt_dir, creationflags=cflags)
-            rc, err = res.returncode, res.stderr
-        else:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=srt_dir, creationflags=cflags)
-            while True:
-                try:
-                    _, err = p.communicate(timeout=0.05)
-                    rc = p.returncode
-                    break
-                except subprocess.TimeoutExpired:
-                    if cancel_event and cancel_event.is_set():
-                        try: p.kill()
-                        except Exception: pass
-                        try: p.communicate()
-                        except Exception: pass
-                        if os.path.exists(temp_burn_mp4):
-                            try: os.remove(temp_burn_mp4)
-                            except Exception: pass
-                        return False
+            res = subprocess.run(
+                current_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=srt_dir,
+                creationflags=cflags
+            )
+            return res.returncode, res.stderr
+        p = subprocess.Popen(
+            current_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=srt_dir,
+            creationflags=cflags
+        )
+        while True:
+            try:
+                _, err = p.communicate(timeout=0.05)
+                return p.returncode, err
+            except subprocess.TimeoutExpired:
+                if cancel_event and cancel_event.is_set():
+                    try: p.kill()
+                    except Exception: pass
+                    try: p.communicate()
+                    except Exception: pass
+                    return -999, "Cancelled"
+
+    try:
+        rc, err = _run_burn_cmd(cmd)
+        if rc != 0 and not (cancel_event and cancel_event.is_set()):
+            if on_log:
+                on_log("[SUBTITLES] Burn with -c:a copy failed; retrying with audio transcode (-c:a aac)...")
+            cmd_retry = list(cmd)
+            try:
+                a_idx = cmd_retry.index("-c:a")
+                cmd_retry[a_idx:a_idx + 2] = ["-c:a", "aac", "-b:a", "192k"]
+            except ValueError:
+                cmd_retry.extend(["-c:a", "aac", "-b:a", "192k"])
+            rc, err = _run_burn_cmd(cmd_retry)
+
         if rc == 0 and os.path.isfile(temp_burn_mp4) and os.path.getsize(temp_burn_mp4) > 0:
             os.replace(temp_burn_mp4, abs_video)
             if on_log:
@@ -395,6 +471,9 @@ def burn_subtitle_into_video(
             except Exception: pass
         return False
     except Exception as exc:
+        if p and p.poll() is None:
+            try: p.kill()
+            except Exception: pass
         if on_log:
             on_log(f"[SUBTITLES] FFmpeg burn exception: {exc}")
         if os.path.exists(temp_burn_mp4):
@@ -402,11 +481,13 @@ def burn_subtitle_into_video(
             except Exception: pass
         return False
     finally:
+        if p and p.poll() is None:
+            try: p.kill()
+            except Exception: pass
         if os.path.exists(burn_srt_path):
-            try:
-                os.remove(burn_srt_path)
-            except Exception:
-                pass
+            try: os.remove(burn_srt_path)
+            except Exception: pass
+
 
 
 def handle_subtitles_post_download(

@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional, Tuple
 APP_NAME = "Smart Download"
 APP_TITLE = "Smart Download (SD)"
 APP_ID = "SmartDownload"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 APP_AUTHOR = "Smart Download Team"
 GITHUB_REPO_OWNER = "hozifa460"
 GITHUB_REPO_NAME = "smart-download-sd"

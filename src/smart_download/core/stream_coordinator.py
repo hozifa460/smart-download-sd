@@ -287,8 +287,9 @@ class StreamDownloadCoordinator:
                                 self.on_error(f"MP3 transcoding error: {ex}")
                     else:
                         self._process_subtitles(path)
+                        final_sz = os.path.getsize(path) if os.path.isfile(path) else size
                         if self.on_complete:
-                            self.on_complete(path, size, elapsed)
+                            self.on_complete(path, final_sz, elapsed)
 
                 safe_conn = max(1, self.max_connections)
                 allow_split = (self.max_connections > 1)
@@ -494,7 +495,7 @@ class StreamDownloadCoordinator:
             self._process_subtitles(self.destination_path)
 
             elapsed = max(0.01, time.time() - self.start_time)
-            final_size = os.path.getsize(self.destination_path)
+            final_size = os.path.getsize(self.destination_path) if os.path.isfile(self.destination_path) else combined_total
             self.log(f"[SUCCESS] {plat} media assembled & merged successfully ({final_size:,} bytes in {elapsed:.1f}s)!")
 
             if self.on_complete:
@@ -525,8 +526,12 @@ class StreamDownloadCoordinator:
 
     def _process_subtitles(self, target_path: str):
         sub = getattr(self.stream_info, "subtitle_track", None)
+        mode = getattr(self.stream_info, "subtitle_embed_mode", "soft_embed")
         if sub and sub.get("sub_id") not in (None, "none") and sub.get("url"):
             try:
+                if mode == "hard_burn" and self.on_progress and os.path.isfile(target_path):
+                    cur_sz = os.path.getsize(target_path)
+                    self.on_progress(cur_sz, cur_sz, self._last_active_speed, "Burning Subtitles...", 0)
                 from ..services.youtube_tracks import handle_subtitles_post_download
                 handle_subtitles_post_download(self.stream_info, target_path, on_log=self.log, cancel_event=self._cancel_event)
             except Exception as e:

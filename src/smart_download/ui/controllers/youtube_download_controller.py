@@ -11,7 +11,11 @@ except Exception:
     tk = None  # type: ignore
 
 from smart_download.i18n import tr
-from smart_download.utils.file_ops import resolve_categorized_path
+from smart_download.utils.file_ops import (
+    resolve_categorized_path,
+    generate_unique_destination_path,
+    apply_media_filename_tags,
+)
 from smart_download.core.stream_coordinator import StreamDownloadCoordinator
 from smart_download.services.youtube_service import (
     YouTubeResolver,
@@ -115,6 +119,8 @@ class YouTubeDownloadControllerMixin:
                     initial_dest = resolve_categorized_path(downloads_dir, initial_fn, auto_categorize=True)
                 else:
                     initial_dest = os.path.join(dest_dir, initial_fn)
+                initial_dest = apply_media_filename_tags(initial_dest, quality_label=options[0].resolution_label, is_sub_burned=False, ext=initial_ext)
+
 
                 def _show_modal():
                     if self._yt_cancel_event.is_set():
@@ -309,6 +315,27 @@ class YouTubeDownloadControllerMixin:
         yt_modal: Optional[Any] = None
     ):
         """Initializes and runs StreamDownloadCoordinator with GUI progress and status hooks."""
+        final_dest = generate_unique_destination_path(final_dest)
+
+        if self.engine and getattr(self.engine, "is_running", False):
+            if not hasattr(self, "_download_queue"):
+                self._download_queue = []
+
+            def _queued_task():
+                self._launch_stream_coordinator(stream_info, final_dest, max_conn, bytes_limit, yt_modal=yt_modal)
+
+            self._download_queue.append(_queued_task)
+            self.log(f"[QUEUE] Media stream queued: {os.path.basename(final_dest)} ({len(self._download_queue)} queued)")
+            if hasattr(self, "history_manager") and self.history_manager:
+                q_url = getattr(stream_info, "webpage_url", "") or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
+                est_sz = (getattr(stream_info, "video_size", 0) or 0) + (getattr(stream_info, "audio_size", 0) or 0)
+                self.history_manager.add_or_update_entry(
+                    url=q_url, file_path=final_dest, size_bytes=est_sz, status="Queued", elapsed_sec=0.0
+                )
+                if hasattr(self, "_refresh_history_table"):
+                    self._refresh_history_table(force=True)
+            return
+
         try:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, final_dest)

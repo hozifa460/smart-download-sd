@@ -111,6 +111,8 @@ from smart_download.utils.file_ops import (
     resolve_categorized_path,
     open_downloaded_file,
     open_containing_folder,
+    generate_unique_destination_path,
+    apply_media_filename_tags,
 )
 from smart_download.utils.tk_helpers import (
     _detach_photo_tk,

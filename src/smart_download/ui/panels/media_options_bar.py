@@ -15,6 +15,10 @@ except Exception:
 
 from smart_download.i18n import tr
 from smart_download.config import get_setting, set_setting
+from smart_download.utils.file_ops import (
+    apply_media_filename_tags,
+    generate_unique_destination_path,
+)
 from smart_download.services.youtube_service import (
     VideoFormatOption,
     YouTubeResolver,
@@ -212,7 +216,7 @@ class MediaOptionsBarMixin:
                 pass
 
     def _on_main_quality_changed(self, event=None):
-        """Dynamically updates the destination filename extension when user picks a different quality."""
+        """Dynamically updates destination filename extension and quality tag when user picks a different quality."""
         if not getattr(self, "_main_media_options", None):
             return
         idx = self.cb_main_quality.current()
@@ -220,10 +224,19 @@ class MediaOptionsBarMixin:
             opt = self._main_media_options[idx]
             cur = self.entry_dest.get().strip()
             if cur:
-                base, _ = os.path.splitext(cur)
-                ext = opt.ext if str(opt.ext).startswith(".") else f".{opt.ext}"
+                sub_mode = "soft_embed"
+                if hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes"):
+                    m_idx = self.cb_main_sub_mode.current()
+                    if 0 <= m_idx < len(self._main_sub_mode_codes):
+                        sub_mode = self._main_sub_mode_codes[m_idx]
+                updated = apply_media_filename_tags(
+                    cur,
+                    quality_label=opt.resolution_label,
+                    is_sub_burned=(sub_mode == "hard_burn"),
+                    ext=opt.ext
+                )
                 self.entry_dest.delete(0, tk.END)
-                self.entry_dest.insert(0, f"{base}{ext}")
+                self.entry_dest.insert(0, updated)
 
     def _on_main_sub_changed(self, event=None):
         """Enables or disables subtitle mode combobox based on selected subtitle."""
@@ -234,8 +247,9 @@ class MediaOptionsBarMixin:
             self.cb_main_sub_mode.configure(state="disabled")
 
     def _on_main_sub_mode_changed(self, event=None):
-        """Saves chosen mode and auto-selects subtitle track 1 if user chose a mode with None selected."""
+        """Saves chosen mode, auto-selects Arabic/first subtitle track if None, and reflects [Sub] tag."""
         cur_idx = self.cb_main_sub_mode.current()
+        chosen = "soft_embed"
         if 0 <= cur_idx < len(self._main_sub_mode_codes):
             chosen = self._main_sub_mode_codes[cur_idx]
             try:
@@ -243,8 +257,20 @@ class MediaOptionsBarMixin:
             except Exception:
                 pass
         if self.cb_main_sub.current() <= 0 and len(self._main_subtitle_tracks) > 1:
-            self.cb_main_sub.current(1)
+            ar_idx = next((i for i, s in enumerate(self._main_subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
+            target_idx = ar_idx if ar_idx is not None else 1
+            self.cb_main_sub.current(target_idx)
             self.cb_main_sub_mode.configure(state="readonly")
+        cur = self.entry_dest.get().strip()
+        if cur and getattr(self, "_main_media_options", None):
+            q_idx = self.cb_main_quality.current() if hasattr(self, "cb_main_quality") else 0
+            opt = self._main_media_options[q_idx] if (0 <= q_idx < len(self._main_media_options)) else None
+            ql = opt.resolution_label if opt else None
+            ext = opt.ext if opt else None
+            updated = apply_media_filename_tags(cur, quality_label=ql, is_sub_burned=(chosen == "hard_burn"), ext=ext)
+            self.entry_dest.delete(0, tk.END)
+            self.entry_dest.insert(0, updated)
+
 
     def _get_cached_media_context(self, url: str) -> Optional[Dict[str, Any]]:
         """Retrieves cached media options context by full URL or extracted video ID for 0ms reopen."""
@@ -424,13 +450,19 @@ class MediaOptionsBarMixin:
             if hasattr(self, "cb_main_sub") and subtitle_tracks:
                 s_idx = self.cb_main_sub.current()
                 if s_idx <= 0 and len(subtitle_tracks) > 1 and sub_mode == "hard_burn":
-                    s_idx = 1
-                    try: self.cb_main_sub.current(1)
+                    ar_idx = next((i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
+                    s_idx = ar_idx if ar_idx is not None else 1
+                    try: self.cb_main_sub.current(s_idx)
                     except Exception: pass
                 if 0 <= s_idx < len(subtitle_tracks):
                     selected_opt.selected_subtitle_track = subtitle_tracks[s_idx]
 
         final_dest = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or ctx.get("final_dest", "")
+        if selected_opt:
+            is_sub = (getattr(selected_opt, "subtitle_embed_mode", "") == "hard_burn")
+            final_dest = apply_media_filename_tags(final_dest, quality_label=selected_opt.resolution_label, is_sub_burned=is_sub, ext=selected_opt.ext)
+        final_dest = generate_unique_destination_path(final_dest)
+
         try: max_conn = int(self.conn_var.get())
         except Exception: max_conn = 8
         try: kb_lim = float(self.entry_custom_speed.get().strip())
