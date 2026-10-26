@@ -685,6 +685,46 @@ Hello world from <i>smart</i> download!
             try: root.destroy()
             except Exception: pass
 
+    def test_burn_subtitle_into_video_special_chars(self):
+        """Verifies burn_subtitle_into_video creates safe temp copy for filenames with quotes/spaces."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "Don't Stop [1080p].mp4")
+            srt_path = os.path.join(tmpdir, "Don't Stop [1080p].ar.srt")
+            with open(video_path, "wb") as vf: vf.write(b"mp4_raw")
+            with open(srt_path, "wb") as sf: sf.write(b"1\n00:00:01,000 --> 00:00:02,000\nSub\n")
+
+            captured_cmd = []
+            def mock_run(cmd, **kwargs):
+                captured_cmd.extend(cmd)
+                out_path = cmd[-1]
+                with open(out_path, "wb") as out_f:
+                    out_f.write(b"mp4_burned")
+                res = MagicMock()
+                res.returncode = 0
+                return res
+
+            with patch("subprocess.run", side_effect=mock_run):
+                ok = burn_subtitle_into_video(video_path, srt_path, "ffmpeg")
+                self.assertTrue(ok)
+                vf_arg = captured_cmd[captured_cmd.index("-vf") + 1]
+                self.assertTrue(vf_arg.startswith("subtitles='_sd_burn_"))
+                self.assertTrue(vf_arg.endswith(".srt'"))
+                # Temporary srt copy must be cleaned up in finally block
+                temp_files = [f for f in os.listdir(tmpdir) if f.startswith("_sd_burn_")]
+                self.assertEqual(len(temp_files), 0)
+
+    def test_build_stream_info_fallback_sub_mode_setting(self):
+        """Verifies build_stream_info falls back to get_setting when option mode is None."""
+        info = {"id": "vid_mode", "title": "Mode Test", "duration": 100}
+        option = VideoFormatOption(
+            format_id="22", resolution_label="720p", height=720,
+            ext="mp4", filesize_approx=5000, is_progressive=True, video_url="http://vid"
+        )
+        option.subtitle_embed_mode = None  # Explicitly None
+        with patch("smart_download.config.get_setting", return_value="hard_burn"):
+            stream_info = self.builder.build_stream_info(info, option)
+            self.assertEqual(stream_info.subtitle_embed_mode, "hard_burn")
+
 
 if __name__ == "__main__":
     unittest.main()

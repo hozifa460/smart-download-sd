@@ -431,13 +431,16 @@ class QualitySelectionModal(tk.Toplevel):
             idx = self.cb_sub.current()
             if 0 <= idx < len(self.subtitle_tracks):
                 self.selected_option.selected_subtitle_track = self.subtitle_tracks[idx]
-        sub_mode = "soft_embed"
+        sub_mode = None
         if hasattr(self, "cb_sub") and self.cb_sub:
             mode_fn = getattr(self.cb_sub, "get_selected_mode", None)
-            if callable(mode_fn):
-                sub_mode = mode_fn()
-            else:
-                sub_mode = getattr(self.cb_sub, "_selected_mode", "soft_embed")
+            sub_mode = mode_fn() if callable(mode_fn) else getattr(self.cb_sub, "_selected_mode", None)
+        if not sub_mode:
+            try:
+                from ...config import get_setting
+                sub_mode = get_setting("subtitle_embed_mode", "soft_embed")
+            except Exception:
+                sub_mode = "soft_embed"
         self.selected_option.subtitle_embed_mode = sub_mode
 
     def _resolve_final_dest(self) -> str:

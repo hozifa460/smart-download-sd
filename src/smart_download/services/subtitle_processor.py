@@ -7,6 +7,7 @@ import re
 import sys
 import html
 import subprocess
+import shutil
 import urllib.request
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
@@ -18,7 +19,6 @@ except ImportError:
 try:
     from .youtube_models import find_ffmpeg_bin
 except Exception:
-    import shutil
     def find_ffmpeg_bin() -> Optional[str]:  # type: ignore
         return shutil.which("ffmpeg")
 
@@ -94,6 +94,8 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
         return None
     url = sub_track["url"]
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"}
+    if isinstance(sub_track.get("http_headers"), dict):
+        headers.update(sub_track["http_headers"])
     raw_text = None
     if requests is not None:
         try:
@@ -133,7 +135,7 @@ def embed_subtitle_into_mp4(
     on_log: Optional[Callable[[str], None]] = None
 ) -> bool:
     """Muxes .srt into MP4 as soft subtitle stream via FFmpeg, atomically replacing video file."""
-    if not ffmpeg_path or not video_path.lower().endswith(".mp4") or not os.path.isfile(srt_path):
+    if not ffmpeg_path or not video_path.lower().endswith(".mp4") or not os.path.isfile(video_path) or not os.path.isfile(srt_path):
         return False
     norm_lang = str(lang_code or "und").strip().lower()
     base_lang = norm_lang.split("-")[0].split("_")[0]
@@ -175,14 +177,27 @@ def burn_subtitle_into_video(
     """Burns subtitles directly onto video frames using FFmpeg's subtitles filter with veryfast H.264."""
     if not ffmpeg_path or not os.path.isfile(video_path) or not os.path.isfile(srt_path):
         return False
+    abs_video = os.path.abspath(video_path)
+    abs_srt = os.path.abspath(srt_path)
     temp_burn_mp4 = f"{os.path.splitext(video_path)[0]}.burn.mp4"
-    srt_dir = os.path.dirname(os.path.abspath(srt_path))
-    srt_base = os.path.basename(srt_path)
-    escaped_base = srt_base.replace("\\", "/").replace("'", "'\\''")
+    srt_dir = os.path.dirname(abs_srt)
+    srt_base = os.path.basename(abs_srt)
+
+    temp_copy_path = None
+    if re.match(r"^[a-zA-Z0-9_.-]+$", srt_base):
+        sub_name = srt_base
+    else:
+        temp_copy_path = os.path.join(srt_dir, f"_sd_burn_{os.getpid()}_{abs(hash(abs_srt)) % 100000}.srt")
+        try:
+            shutil.copy2(abs_srt, temp_copy_path)
+            sub_name = os.path.basename(temp_copy_path)
+        except Exception:
+            sub_name = srt_base.replace("\\", "/").replace("'", r"\'").replace(":", r"\:")
+
     cmd = [
         ffmpeg_path, "-y",
         "-i", video_path,
-        "-vf", f"subtitles='{escaped_base}'",
+        "-vf", f"subtitles='{sub_name}'",
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "22",
@@ -218,6 +233,12 @@ def burn_subtitle_into_video(
             try: os.remove(temp_burn_mp4)
             except Exception: pass
         return False
+    finally:
+        if temp_copy_path and os.path.exists(temp_copy_path):
+            try:
+                os.remove(temp_copy_path)
+            except Exception:
+                pass
 
 
 def handle_subtitles_post_download(

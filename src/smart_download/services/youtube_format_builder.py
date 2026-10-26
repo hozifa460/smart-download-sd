@@ -384,7 +384,13 @@ class YouTubeFormatBuilderMixin:
 
         sel_audio = getattr(option, "selected_audio_track", None)
         sub_track = getattr(option, "selected_subtitle_track", None)
-        sub_mode = getattr(option, "subtitle_embed_mode", "soft_embed")
+        sub_mode = getattr(option, "subtitle_embed_mode", None)
+        if not sub_mode:
+            try:
+                from ..config import get_setting
+                sub_mode = get_setting("subtitle_embed_mode", "soft_embed")
+            except Exception:
+                sub_mode = "soft_embed"
         audio_lang = sel_audio.get("language") if sel_audio else None
 
         if sel_audio and sel_audio.get("url"):
