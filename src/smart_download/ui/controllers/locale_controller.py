@@ -68,6 +68,8 @@ class LocaleControllerMixin:
             self.btn_refresh_link.configure(text=tr("btn_refresh_url"))
         if hasattr(self, "btn_browser") and self.btn_browser.winfo_exists():
             self.btn_browser.configure(text=tr("btn_browser"))
+        if hasattr(self, "btn_quality_main") and self.btn_quality_main.winfo_exists():
+            self.btn_quality_main.configure(text=tr("btn_quality_reopen"))
         if hasattr(self, "btn_check_updates") and self.btn_check_updates.winfo_exists():
             self.btn_check_updates.configure(text=tr("btn_check_updates"))
 

@@ -199,9 +199,14 @@ class HistoryPanelMixin:
             except Exception:
                 pass
 
-        if (with_quality or is_media_url(url)) and hasattr(self, "_start_youtube_download"):
-            self._start_youtube_download(url, file_path or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""))
-            return
+        if with_quality or is_media_url(url):
+            ctx = self._get_cached_media_context(url) if hasattr(self, "_get_cached_media_context") else None
+            if ctx and ctx.get("options") and hasattr(self, "_show_cached_quality_modal"):
+                self._show_cached_quality_modal(ctx)
+                return
+            if hasattr(self, "_start_youtube_download"):
+                self._start_youtube_download(url, file_path or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""))
+                return
 
         self._on_start_download()
 

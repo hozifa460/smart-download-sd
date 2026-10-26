@@ -21,7 +21,13 @@ from .file_ops import (
 )
 
 try:
-    from .tk_helpers import _detach_photo_tk, _detach_widget_tk_refs, _drain_bg_tk_callbacks
+    from .tk_helpers import (
+        _detach_photo_tk,
+        _detach_widget_tk_refs,
+        _drain_bg_tk_callbacks,
+        animate_window_open,
+        animate_window_close,
+    )
 except Exception:
     def _detach_photo_tk(photo=None):  # type: ignore
         pass
@@ -29,6 +35,10 @@ except Exception:
         pass
     def _drain_bg_tk_callbacks():  # type: ignore
         pass
+    def animate_window_open(win=None, duration_ms=140):  # type: ignore
+        pass
+    def animate_window_close(win=None, on_done=None, duration_ms=110):  # type: ignore
+        if on_done: on_done()
 
 __all__ = [
     "enable_high_dpi_awareness",

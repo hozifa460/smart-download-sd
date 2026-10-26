@@ -27,6 +27,7 @@ from smart_download.services.youtube_tracks import (
     extract_subtitle_tracks,
 )
 from ..modals.quality_modal import QualitySelectionModal
+from ..modals.video_preview_modal import VideoPreviewModal
 
 
 class MediaOptionsBarMixin:
@@ -88,6 +89,22 @@ class MediaOptionsBarMixin:
             command=self._reopen_media_quality_modal
         )
         self.btn_reopen_quality.pack(side=tk.RIGHT)
+
+        self.btn_media_preview = tk.Button(
+            row1,
+            text=tr("btn_live_preview", "▶️ معاينة"),
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=8,
+            pady=2,
+            command=self._open_media_preview
+        )
+        self.btn_media_preview.pack(side=tk.RIGHT, padx=(0, 6))
 
         # Row 2: Subtitles (Combobox), Subtitle Delivery Mode (Combobox)
         row2 = tk.Frame(self.media_options_frame, bg=self.c_panel)
@@ -156,6 +173,7 @@ class MediaOptionsBarMixin:
             "final_dest": final_dest
         }
         self._last_media_context = dict(self._pending_media_context)
+        self._cache_media_context(media_url, self._pending_media_context)
 
         # Show frame in layout
         self.media_options_frame.pack(fill=tk.X, pady=(4, 2))
@@ -245,6 +263,47 @@ class MediaOptionsBarMixin:
             self.cb_main_sub.current(1)
             self.cb_main_sub_mode.configure(state="readonly")
 
+    def _get_cached_media_context(self, url: str) -> Optional[Dict[str, Any]]:
+        """Retrieves cached media options context by full URL or extracted video ID for 0ms reopen."""
+        if not url:
+            return None
+        cache = getattr(self, "_media_context_cache", None)
+        if cache and isinstance(cache, dict):
+            if url in cache:
+                return cache[url]
+            clean_url = url.split("&")[0].strip() if "?" in url else url.strip()
+            if clean_url in cache:
+                return cache[clean_url]
+            for k, ctx in cache.items():
+                info = ctx.get("info") or {}
+                vid = info.get("id") or info.get("display_id")
+                if vid and (str(vid) in url or str(vid) == url):
+                    return ctx
+        for ctx_attr in ("_pending_media_context", "_last_media_context"):
+            ctx = getattr(self, ctx_attr, None)
+            if ctx and isinstance(ctx, dict):
+                ctx_url = ctx.get("url") or ""
+                info = ctx.get("info") or {}
+                vid = info.get("id") or info.get("display_id")
+                if (ctx_url and (ctx_url == url or ctx_url.split("&")[0] == url.split("&")[0])) or (vid and (str(vid) in url or str(vid) == url)):
+                    return ctx
+        return None
+
+    def _cache_media_context(self, url: str, ctx: Dict[str, Any]):
+        """Caches media format context by full URL and extracted video ID for 0ms reopen."""
+        if not hasattr(self, "_media_context_cache") or self._media_context_cache is None:
+            self._media_context_cache = {}
+        if url:
+            self._media_context_cache[url] = ctx
+            clean_url = url.split("&")[0].strip() if "?" in url else url.strip()
+            self._media_context_cache[clean_url] = ctx
+        info = ctx.get("info") or {}
+        vid = info.get("id") or info.get("display_id")
+        if vid:
+            self._media_context_cache[str(vid)] = ctx
+            self._media_context_cache[f"https://www.youtube.com/watch?v={vid}"] = ctx
+            self._media_context_cache[f"https://youtu.be/{vid}"] = ctx
+
     def _reopen_media_quality_modal(self):
         """Opens or re-opens QualitySelectionModal so user can reconfigure quality and subtitles."""
         url = self.entry_url.get().strip() if hasattr(self, "entry_url") else ""
@@ -252,13 +311,62 @@ class MediaOptionsBarMixin:
         if not url:
             return
 
-        ctx = getattr(self, "_pending_media_context", None) or getattr(self, "_last_media_context", None)
-        if ctx and (ctx.get("url") == url or not ctx.get("url")) and ctx.get("options"):
+        ctx = self._get_cached_media_context(url)
+        if not ctx:
+            ctx = getattr(self, "_pending_media_context", None) or getattr(self, "_last_media_context", None)
+        if ctx and ctx.get("options"):
             self._show_cached_quality_modal(ctx)
             return
 
         if hasattr(self, "_start_youtube_download"):
             self._start_youtube_download(url, dest)
+
+    def _open_media_preview(self):
+        """Opens live video, audio, and subtitle preview modal from current media bar state."""
+        ctx = getattr(self, "_pending_media_context", None) or getattr(self, "_last_media_context", None)
+        if not ctx:
+            return
+        info = ctx.get("info") or {}
+        options = getattr(self, "_main_media_options", ctx.get("options", []))
+        audio_tracks = getattr(self, "_main_audio_tracks", ctx.get("audio_tracks", []))
+        subtitle_tracks = getattr(self, "_main_subtitle_tracks", ctx.get("subtitle_tracks", []))
+
+        sel_opt = ctx.get("selected_option")
+        if hasattr(self, "cb_main_quality") and options:
+            q_idx = self.cb_main_quality.current()
+            if 0 <= q_idx < len(options):
+                sel_opt = options[q_idx]
+
+        sel_audio = None
+        if hasattr(self, "cb_main_audio") and audio_tracks:
+            a_idx = self.cb_main_audio.current()
+            if 0 <= a_idx < len(audio_tracks):
+                sel_audio = audio_tracks[a_idx]
+
+        sel_sub = None
+        if hasattr(self, "cb_main_sub") and subtitle_tracks:
+            s_idx = self.cb_main_sub.current()
+            if 0 <= s_idx < len(subtitle_tracks):
+                sel_sub = subtitle_tracks[s_idx]
+
+        stream_url = ""
+        if sel_opt:
+            stream_url = getattr(sel_opt, "url", "") or ""
+        if not stream_url:
+            stream_url = ctx.get("url") or ""
+
+        theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
+        VideoPreviewModal(
+            parent=self.root,
+            video_title=info.get("title") or "Media Preview",
+            duration=int(info.get("duration") or 0),
+            media_url=stream_url,
+            selected_option=sel_opt,
+            selected_audio=sel_audio,
+            selected_subtitle=sel_sub,
+            theme=theme_dict,
+            on_download_now=self._start_pending_media_download
+        )
 
     def _show_cached_quality_modal(self, ctx: Dict[str, Any]):
         """Displays QualitySelectionModal instantaneously from cached metadata context."""

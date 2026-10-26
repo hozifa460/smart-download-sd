@@ -419,6 +419,7 @@ class YouTubeFormatBuilderMixin:
                 if sel_audio.get("filesize"):
                     option.audio_size = int(sel_audio["filesize"])
 
+        webpage_url = str(info.get("webpage_url") or info.get("original_url") or (f"https://www.youtube.com/watch?v={video_id}" if video_id else ""))
         if option.is_audio_only:
             out_fn = f"{clean_title}.{option.ext}"
             return YouTubeStreamInfo(
@@ -442,6 +443,7 @@ class YouTubeFormatBuilderMixin:
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
+                webpage_url=webpage_url,
             )
         elif option.is_progressive or not option.audio_url:
             out_fn = f"{clean_title}.{option.ext}"
@@ -466,6 +468,7 @@ class YouTubeFormatBuilderMixin:
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
+                webpage_url=webpage_url,
             )
         else:
             out_fn = f"{clean_title}.{option.ext}"
@@ -491,5 +494,6 @@ class YouTubeFormatBuilderMixin:
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
+                webpage_url=webpage_url,
             )
 

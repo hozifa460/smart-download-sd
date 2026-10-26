@@ -251,5 +251,7 @@
   "opt_sub_soft": "Soft-embed",
   "opt_sub_srt": "SRT file only",
   "opt_sub_burn": "Hard-burn into video",
-  "ctx_redownload_quality": "🎞️ Re-Download with Different Quality"
+  "ctx_redownload_quality": "🎞️ Re-Download with Different Quality",
+  "btn_quality_reopen": "🎞️ Quality / Dubbing & Subtitles",
+  "btn_live_preview": "▶️ Live Preview"
 }

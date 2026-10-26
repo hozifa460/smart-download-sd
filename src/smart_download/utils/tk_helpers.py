@@ -189,4 +189,73 @@ if not getattr(tk.Misc, "_sd_safe_destroy_patched", False):
     tk.Misc._sd_safe_destroy_patched = True
 
 
+def animate_window_open(win: Any, duration_ms: int = 140) -> None:
+    """Smoothly steps -alpha from 0.05 to 1.0 over ~4 frames using win.after."""
+    if not win:
+        return
+    try:
+        if not hasattr(win, "wm_attributes") or not win.winfo_exists():
+            return
+        try:
+            win.wm_attributes("-alpha", 0.05)
+        except Exception:
+            return
+        steps = [0.25, 0.55, 0.85, 1.0]
+        step_delay = max(10, duration_ms // len(steps))
+
+        def _step(idx: int):
+            try:
+                if not win.winfo_exists() or getattr(win, "_closing", False):
+                    return
+                win.wm_attributes("-alpha", steps[idx])
+                if idx + 1 < len(steps):
+                    win.after(step_delay, _step, idx + 1)
+            except Exception:
+                try:
+                    win.wm_attributes("-alpha", 1.0)
+                except Exception:
+                    pass
+
+        win.after(step_delay, _step, 0)
+    except Exception:
+        pass
+
+
+def animate_window_close(win: Any, on_done: Callable[[], None], duration_ms: int = 110) -> None:
+    """Smoothly steps -alpha from 1.0 to 0.0 before invoking on_done callback."""
+    if not win:
+        if on_done:
+            on_done()
+        return
+    try:
+        if not hasattr(win, "wm_attributes") or not win.winfo_exists() or getattr(win, "_closing", False):
+            if on_done:
+                on_done()
+            return
+        steps = [0.75, 0.45, 0.15, 0.0]
+        step_delay = max(10, duration_ms // len(steps))
+
+        def _step(idx: int):
+            try:
+                if not win.winfo_exists():
+                    if on_done:
+                        on_done()
+                    return
+                win.wm_attributes("-alpha", steps[idx])
+                if idx + 1 < len(steps):
+                    win.after(step_delay, _step, idx + 1)
+                else:
+                    if on_done:
+                        on_done()
+            except Exception:
+                if on_done:
+                    on_done()
+
+        win.after(step_delay, _step, 0)
+    except Exception:
+        if on_done:
+            on_done()
+
+
+
 

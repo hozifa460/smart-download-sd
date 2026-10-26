@@ -45,3 +45,8 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local native host manifests
+com.smartdownload.host.json
+sd_host.bat
+

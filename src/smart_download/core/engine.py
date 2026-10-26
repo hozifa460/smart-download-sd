@@ -76,13 +76,9 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
         )
         self.headers: Dict[str, str] = dict(headers) if headers else {}
 
-        # YouTube googlevideo CDN detection and concurrency safety
+        # YouTube googlevideo CDN detection
         self.is_googlevideo = self.is_googlevideo_url(self.url)
-        self.allow_dynamic_split = allow_dynamic_split and not self.is_googlevideo
-        if self.is_googlevideo:
-            # YouTube googlevideo CDN issues HTTP 403 Forbidden on concurrent range requests
-            # with the same signed token. Enforce safe concurrency (1 connection) & no dynamic splitting.
-            self.max_connections = min(self.max_connections, 1)
+        self.allow_dynamic_split = bool(allow_dynamic_split)
 
         self.on_progress = on_progress
         self.on_chunk_update = on_chunk_update
@@ -112,8 +108,6 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
                     self.url = p_url
                     if self.is_googlevideo_url(self.url):
                         self.is_googlevideo = True
-                        self.max_connections = min(self.max_connections, 1)
-                        self.allow_dynamic_split = False
                 self.total_size = int(p_size)
                 self.supports_ranges = bool(self.pre_probed_info.get("supports_ranges", True))
                 self.content_type = str(self.pre_probed_info.get("content_type") or "")
@@ -177,7 +171,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             if redirected_url != self.url:
                 self.url = redirected_url
                 if self.is_googlevideo_url(self.url):
-                    self.is_googlevideo = True; self.max_connections = min(self.max_connections, 1); self.allow_dynamic_split = False
+                    self.is_googlevideo = True
 
     def probe(self):
         """
@@ -472,7 +466,7 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
 
             # Scheduling & Dynamic Splitting Loop
             while self.is_running and not self._cancel_event.is_set():
-                ramp_up = (self.supports_ranges and not self.is_googlevideo and len(self.chunks) < self.max_connections)
+                ramp_up = (self.supports_ranges and len(self.chunks) < self.max_connections)
                 time.sleep(0.02 if ramp_up else 0.08)
 
                 if self.is_paused:

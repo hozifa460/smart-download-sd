@@ -14,6 +14,7 @@ Modular resolver layer for YouTube and streaming media:
 import os
 import re
 import sys
+import time
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -363,23 +364,29 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         video_path: str,
         audio_path: str,
         output_path: str,
-        on_log: Optional[Callable[[str], None]] = None
+        on_log: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Any] = None
     ) -> bool:
         """
         Lossless FFmpeg stream multiplexing (-c copy).
         Merges video and audio streams into the final container without quality loss.
         Cleans up temporary video and audio files upon successful completion.
+        Supports cancel_event for instant 50ms abort.
         """
         ffmpeg_bin = find_ffmpeg_bin()
         if not ffmpeg_bin:
             raise RuntimeError("FFmpeg executable was not found on PATH or app directory. Cannot merge video and audio.")
+
+        if cancel_event and cancel_event.is_set():
+            if on_log:
+                on_log("[FFMPEG] Merge cancelled before execution.")
+            return False
 
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video part file not found: {video_path}")
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio part file not found: {audio_path}")
 
-        # Ensure destination directory exists
         dest_dir = os.path.dirname(output_path)
         if dest_dir:
             os.makedirs(dest_dir, exist_ok=True)
@@ -387,94 +394,79 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         if on_log:
             on_log(f"[FFMPEG] Merging streams into final file: {os.path.basename(output_path)}...")
 
-        # Construct FFmpeg command with explicit stream mapping (video from input 0, audio from input 1)
         cmd = [
-            ffmpeg_bin,
-            "-y",  # Overwrite output without asking
-            "-i", video_path,
-            "-i", audio_path,
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-c", "copy"  # Fast stream copy without re-encoding
+            ffmpeg_bin, "-y",
+            "-i", video_path, "-i", audio_path,
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c", "copy"
         ]
         if output_path.lower().endswith((".mp4", ".m4v", ".mov")):
             cmd.extend(["-movflags", "+faststart"])
         cmd.append(output_path)
 
-        # Windows-specific: hide console window for subprocess
-        startupinfo = None
-        creationflags = 0
-        if sys.platform.startswith("win"):
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
 
-        proc = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            creationflags=creationflags
-        )
+        def _run_proc(cmd_list):
+            if cancel_event is None:
+                res = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
+                return res.returncode, res.stderr
+            p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
+            while p.poll() is None:
+                if cancel_event and cancel_event.is_set():
+                    try: p.kill()
+                    except Exception: pass
+                    try: p.communicate()
+                    except Exception: pass
+                    if os.path.exists(output_path):
+                        try: os.remove(output_path)
+                        except Exception: pass
+                    return -999, "Cancelled"
+                time.sleep(0.05)
+            _, err = p.communicate()
+            return p.returncode, err
 
-        if proc.returncode != 0:
-            primary_err = proc.stderr.strip()
-            # If fast lossless copy fails (e.g. opus audio or unsupported codec in mp4 container),
-            # attempt fallback: copy video stream losslessly and re-encode audio to universal AAC
+        rc, primary_err = _run_proc(cmd)
+        if cancel_event and cancel_event.is_set():
+            return False
+
+        if rc != 0:
             if on_log:
-                on_log(f"[FFMPEG] Direct stream copy failed ({proc.returncode}). Retrying with audio transcode to AAC...")
+                on_log(f"[FFMPEG] Direct stream copy failed ({rc}). Retrying with audio transcode to AAC...")
 
             fallback_cmd = [
-                ffmpeg_bin,
-                "-y",
-                "-i", video_path,
-                "-i", audio_path,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-b:a", "192k"
+                ffmpeg_bin, "-y",
+                "-i", video_path, "-i", audio_path,
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k"
             ]
             if output_path.lower().endswith((".mp4", ".m4v", ".mov")):
                 fallback_cmd.extend(["-movflags", "+faststart"])
             fallback_cmd.append(output_path)
 
-            proc2 = subprocess.run(
-                fallback_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                creationflags=creationflags
-            )
-            if proc2.returncode != 0:
-                # Secondary fallback: full container transcode (libx264+aac)
+            rc2, err2 = _run_proc(fallback_cmd)
+            if cancel_event and cancel_event.is_set():
+                return False
+            if rc2 != 0:
                 if on_log:
                     on_log("[FFMPEG] Audio transcode fallback failed. Retrying full container transcode (libx264+aac)...")
                 transcode_cmd = [
-                    ffmpeg_bin,
-                    "-y",
-                    "-i", video_path,
-                    "-i", audio_path,
-                    "-map", "0:v:0",
-                    "-map", "1:a:0",
-                    "-c:v", "libx264",
-                    "-preset", "ultrafast",
-                    "-c:a", "aac",
-                    "-b:a", "192k"
+                    ffmpeg_bin, "-y",
+                    "-i", video_path, "-i", audio_path,
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "libx264", "-preset", "ultrafast",
+                    "-c:a", "aac", "-b:a", "192k"
                 ]
                 if output_path.lower().endswith((".mp4", ".m4v", ".mov")):
                     transcode_cmd.extend(["-movflags", "+faststart"])
                 transcode_cmd.append(output_path)
 
-                proc3 = subprocess.run(
-                    transcode_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    creationflags=creationflags
-                )
-                if proc3.returncode != 0:
-                    err_msg = proc3.stderr.strip() or proc2.stderr.strip() or primary_err or "Unknown FFmpeg error"
+                rc3, err3 = _run_proc(transcode_cmd)
+                if cancel_event and cancel_event.is_set():
+                    return False
+                if rc3 != 0:
+                    err_msg = err3.strip() or err2.strip() or primary_err.strip() or "Unknown FFmpeg error"
                     if on_log:
-                        on_log(f"[FFMPEG ERROR] Merge failed (exit code {proc3.returncode}): {err_msg}")
+                        on_log(f"[FFMPEG ERROR] Merge failed (exit code {rc3}): {err_msg}")
                     raise RuntimeError(f"FFmpeg stream merge failed: {err_msg}")
 
         # Validate that the merged file exists and has non-zero size

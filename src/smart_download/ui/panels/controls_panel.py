@@ -99,15 +99,15 @@ class ControlsPanelMixin:
         self.lbl_slider_val = tk.Label(row_slider, text=f"{tr('lbl_unlimited', 'Unlimited')} (0 KB/s)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent, width=18, anchor="w")
         self.lbl_slider_val.pack(side=tk.RIGHT)
 
-        # Row 3: Action Buttons (Start, Pause, Cancel)
-        row2 = tk.Frame(card, bg=self.c_panel)
-        row2.pack(fill=tk.X, pady=(10, 2))
+        # Primary Transfer Controls Row (Row 1)
+        row_transfers = tk.Frame(card, bg=self.c_panel)
+        row_transfers.pack(fill=tk.X, pady=(10, 4))
 
         self.btn_start = tk.Button(
-            row2,
+            row_transfers,
             text=tr("btn_start", "▶ Start Download"),
             font=("Segoe UI", 9, "bold"),
-            bg=self.c_success,
+            bg="#10b981",
             fg="white",
             relief="flat",
             activebackground="#059669",
@@ -119,10 +119,10 @@ class ControlsPanelMixin:
         self.btn_start.pack(side=tk.LEFT, padx=(0, 8))
 
         self.btn_pause = tk.Button(
-            row2,
+            row_transfers,
             text=tr("btn_pause", "⏸ Pause"),
             font=("Segoe UI", 9, "bold"),
-            bg=self.c_panel_light,
+            bg="#334155",
             fg=self.c_text_bright,
             relief="flat",
             activebackground=self.c_border,
@@ -135,10 +135,10 @@ class ControlsPanelMixin:
         self.btn_pause.pack(side=tk.LEFT, padx=(0, 8))
 
         self.btn_cancel = tk.Button(
-            row2,
+            row_transfers,
             text=tr("btn_cancel", "⏹ Cancel"),
             font=("Segoe UI", 9, "bold"),
-            bg=self.c_danger,
+            bg="#ef4444",
             fg="white",
             relief="flat",
             activebackground="#dc2626",
@@ -148,10 +148,10 @@ class ControlsPanelMixin:
             state="disabled",
             command=self._on_cancel_download
         )
-        self.btn_cancel.pack(side=tk.LEFT)
+        self.btn_cancel.pack(side=tk.LEFT, padx=(0, 8))
 
         self.btn_refresh_link = tk.Button(
-            row2,
+            row_transfers,
             text=tr("btn_refresh_url", "🔄 Refresh Link"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
@@ -164,25 +164,30 @@ class ControlsPanelMixin:
             pady=4,
             command=self._open_refresh_link_dialog
         )
-        self.btn_refresh_link.pack(side=tk.LEFT, padx=(8, 0))
+        self.btn_refresh_link.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_browser = tk.Button(
-            row2,
-            text=tr("btn_browser", "🌐 Settings & Integration"),
+        self.btn_quality_main = tk.Button(
+            row_transfers,
+            text=tr("btn_quality_reopen", "🎞️ Quality / Dubbing & Subtitles"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,
             relief="flat",
             activebackground=self.c_accent_dark,
+            activeforeground="white",
             cursor="hand2",
             padx=12,
             pady=4,
-            command=self._open_browser_integration_dialog
+            command=self._reopen_media_quality_modal if hasattr(self, "_reopen_media_quality_modal") else lambda: None
         )
-        self.btn_browser.pack(side=tk.RIGHT)
+        self.btn_quality_main.pack(side=tk.LEFT)
+
+        # Quick Toggles & Integration Row (Row 2)
+        row_toggles = tk.Frame(card, bg=self.c_panel)
+        row_toggles.pack(fill=tk.X, pady=(4, 2))
 
         self.btn_clipboard_sniffer = tk.Button(
-            row2,
+            row_toggles,
             text="📋 Sniffer: Active",
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
@@ -195,44 +200,11 @@ class ControlsPanelMixin:
             pady=4,
             command=self.toggle_clipboard_sniffer
         )
-        self.btn_clipboard_sniffer.pack(side=tk.RIGHT, padx=(0, 8))
+        self.btn_clipboard_sniffer.pack(side=tk.LEFT, padx=(0, 8))
         ToolTip(self.btn_clipboard_sniffer, "tip_sniffer")
 
-        self.btn_startup = tk.Button(
-            row2,
-            text=tr("btn_startup_off", "🚀 Boot: OFF"),
-            font=("Segoe UI", 9, "bold"),
-            relief="flat",
-            activebackground=self.c_accent_dark,
-            activeforeground="white",
-            cursor="hand2",
-            padx=12,
-            pady=4,
-            command=self.toggle_startup_setting
-        )
-        self.btn_startup.pack(side=tk.RIGHT, padx=(0, 8))
-        ToolTip(self.btn_startup, "tip_startup")
-        if hasattr(self, "_update_startup_btn") and callable(self._update_startup_btn):
-            self._update_startup_btn()
-
-        self.btn_cookies = tk.Button(
-            row2,
-            text=self._get_cookies_btn_text() if hasattr(self, "_get_cookies_btn_text") else "🍪 Cookies: Auto",
-            font=("Segoe UI", 9, "bold"),
-            relief="flat",
-            activebackground=self.c_accent_dark,
-            activeforeground="white",
-            cursor="hand2",
-            padx=12,
-            pady=4,
-            command=self.cycle_cookies_setting
-        )
-        self.btn_cookies.pack(side=tk.RIGHT, padx=(0, 8))
-        if hasattr(self, "_update_cookies_btn") and callable(self._update_cookies_btn):
-            self._update_cookies_btn()
-
         self.btn_auto_cat = tk.Button(
-            row2,
+            row_toggles,
             text="📁 Auto-Sort: ON" if getattr(self, "auto_categorize_folders", True) else "📁 Auto-Sort: OFF",
             font=("Segoe UI", 9, "bold"),
             relief="flat",
@@ -245,10 +217,58 @@ class ControlsPanelMixin:
             pady=4,
             command=self.toggle_auto_categorize
         )
-        self.btn_auto_cat.pack(side=tk.RIGHT, padx=(0, 8))
+        self.btn_auto_cat.pack(side=tk.LEFT, padx=(0, 8))
         ToolTip(self.btn_auto_cat, "tip_auto_cat")
         if hasattr(self, "_update_auto_cat_btn") and callable(self._update_auto_cat_btn):
             self._update_auto_cat_btn()
+
+        self.btn_cookies = tk.Button(
+            row_toggles,
+            text=self._get_cookies_btn_text() if hasattr(self, "_get_cookies_btn_text") else "🍪 Cookies: Auto",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            command=self.cycle_cookies_setting
+        )
+        self.btn_cookies.pack(side=tk.LEFT, padx=(0, 8))
+        if hasattr(self, "_update_cookies_btn") and callable(self._update_cookies_btn):
+            self._update_cookies_btn()
+
+        self.btn_startup = tk.Button(
+            row_toggles,
+            text=tr("btn_startup_off", "🚀 Boot: OFF"),
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            command=self.toggle_startup_setting
+        )
+        self.btn_startup.pack(side=tk.LEFT, padx=(0, 8))
+        ToolTip(self.btn_startup, "tip_startup")
+        if hasattr(self, "_update_startup_btn") and callable(self._update_startup_btn):
+            self._update_startup_btn()
+
+        self.btn_browser = tk.Button(
+            row_toggles,
+            text=tr("btn_browser", "🌐 Settings & Integration"),
+            font=("Segoe UI", 9, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            command=self._open_browser_integration_dialog
+        )
+        self.btn_browser.pack(side=tk.RIGHT)
 
 
 __all__ = ["ControlsPanelMixin"]

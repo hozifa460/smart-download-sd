@@ -27,7 +27,7 @@ from ...utils.file_ops import (
 from ...core.html_resolver import resolve_real_download_url
 from ...core.engine import TurboDownloadEngine
 from ...core.history import DownloadHistoryManager
-from ...utils.tk_helpers import _detach_photo_tk
+from ...utils.tk_helpers import _detach_photo_tk, animate_window_open
 
 from .confirm_modal_logic import ConfirmModalLogicMixin
 
@@ -120,6 +120,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, tk.Toplevel):
             x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
 
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        animate_window_open(self)
         self.minsize(min(480, dlg_w), min(270, dlg_h))
 
         # Apply application icon to modal window

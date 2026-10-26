@@ -49,6 +49,11 @@ class DispatchControllerMixin:
             self._gui_dispatch_queue.put((fn, args, kwargs))
         if threading.current_thread() == threading.main_thread():
             self._drain_dispatch_queue()
+        elif hasattr(self, "root") and self.root and self.root.winfo_exists():
+            try:
+                self.root.after(0, self._drain_dispatch_queue)
+            except Exception:
+                pass
 
     def _drain_dispatch_queue(self):
         """Executes all pending dispatch tasks on the main thread."""

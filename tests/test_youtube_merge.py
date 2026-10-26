@@ -100,21 +100,12 @@ class TestYouTubeSafeConcurrencyAndErrorHandling(unittest.TestCase):
 
     def test_googlevideo_caps_concurrency_and_disables_dynamic_splitting(self):
         url = "https://rr1---sn-mock.googlevideo.com/videoplayback?id=123"
-        engine = TurboDownloadEngine(url, "video.mp4", max_connections=8)
+        engine = TurboDownloadEngine(url, "video.mp4", max_connections=8, allow_dynamic_split=True)
 
         self.assertTrue(engine.is_googlevideo)
-        self.assertEqual(engine.max_connections, 1, "Googlevideo streams must be capped to 1 connection max")
-        self.assertFalse(engine.allow_dynamic_split, "Dynamic splitting must be disabled for googlevideo streams")
-
-        # Verify _dynamic_split_check refuses to split chunks
-        from turbo_downloader import DownloadChunk
-        c0 = DownloadChunk(0, 0, 10000000, 1000, "active", "video.mp4.part_0")
-        engine.chunks = [c0]
-        engine.total_size = 10000000
-        engine.supports_ranges = True
-        engine._dynamic_split_check()
-
-        self.assertEqual(len(engine.chunks), 1, "Must not split chunks when allow_dynamic_split is False or is_googlevideo is True")
+        # In Stage 9.1, single-thread lock is removed; max_connections is preserved
+        self.assertEqual(engine.max_connections, 8)
+        self.assertTrue(engine.allow_dynamic_split)
 
     def test_coordinator_youtube_stream_safe_concurrency(self):
         stream_info = YouTubeStreamInfo(
@@ -129,7 +120,8 @@ class TestYouTubeSafeConcurrencyAndErrorHandling(unittest.TestCase):
         )
         coord = StreamDownloadCoordinator(stream_info, "Safe_Test.mp4", max_connections=8)
         self.assertTrue(coord.is_youtube_stream)
-        self.assertEqual(coord.max_connections, 1, "Coordinator must cap YouTube stream concurrency to 1")
+        # In Stage 9.1, single-thread clamp is removed; max_connections is preserved
+        self.assertEqual(coord.max_connections, 8)
 
     def test_safemodal_dialog_with_overrideredirect(self):
         """Verifies SafeModalDialog displays on overrideredirect(True) window without Win32 crash."""
@@ -217,10 +209,10 @@ class TestYouTubeSafeConcurrencyAndErrorHandling(unittest.TestCase):
         engine = TurboDownloadEngine(url, "video.mp4", max_connections=1)
         self.assertTrue(engine.is_googlevideo)
         self.assertEqual(engine.max_connections, 1)
-        self.assertFalse(engine.allow_dynamic_split)
+        self.assertTrue(engine.allow_dynamic_split)
 
     def test_coordinator_detects_youtube_stream_by_video_id_alone(self):
-        """Verifies StreamDownloadCoordinator caps concurrency to 1 based on video_id even without googlevideo domain."""
+        """Verifies StreamDownloadCoordinator detects youtube stream by video_id alone without single-thread clamp."""
         stream_info = YouTubeStreamInfo(
             video_id="GTNypvv2Nbg",
             title="Mirror URL Test",
@@ -231,7 +223,8 @@ class TestYouTubeSafeConcurrencyAndErrorHandling(unittest.TestCase):
         )
         coord = StreamDownloadCoordinator(stream_info, "Mirror_Test.mp4", max_connections=16)
         self.assertTrue(coord.is_youtube_stream)
-        self.assertEqual(coord.max_connections, 1)
+        # In Stage 9.1, single-thread clamp is removed
+        self.assertEqual(coord.max_connections, 16)
 
     def test_safemodal_dialog_destroy_releases_grab(self):
         """Verifies calling destroy() directly on SafeModalDialog safely releases grab without TclError."""

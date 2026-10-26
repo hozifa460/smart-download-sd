@@ -10,7 +10,7 @@ from typing import Optional, Callable, Dict, Any
 
 from ...locales.i18n import tr
 from ...utils.dpi import get_windows_work_area
-from ...utils.tk_helpers import _detach_photo_tk
+from ...utils.tk_helpers import _detach_photo_tk, animate_window_open
 
 class FetchingLinkToast(tk.Toplevel):
     """
@@ -80,6 +80,7 @@ class FetchingLinkToast(tk.Toplevel):
         x = max(0, (sw - dlg_w) // 2)
         y = max(0, (sh - dlg_h) // 2)
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        animate_window_open(self)
 
         try:
             self.attributes("-topmost", True)

@@ -35,7 +35,12 @@ class YouTubeDownloadControllerMixin:
         bytes_limit: float = 0.0,
         modal: Optional[Any] = None
     ):
-        """Resolves available YouTube qualities and displays modern format selection modal."""
+        # Instant 0ms cached reopen if metadata context is already available
+        cached_ctx = self._get_cached_media_context(url) if hasattr(self, "_get_cached_media_context") else None
+        if cached_ctx and cached_ctx.get("options") and hasattr(self, "_show_cached_quality_modal"):
+            self._show_cached_quality_modal(cached_ctx)
+            return
+
         if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
             try:
                 self._yt_cancel_event.set()
@@ -235,6 +240,8 @@ class YouTubeDownloadControllerMixin:
                             "resolver": resolver,
                             "final_dest": initial_dest
                         }
+                        if hasattr(self, "_cache_media_context"):
+                            self._cache_media_context(url, self._last_media_context)
 
                         self._quality_modal = QualitySelectionModal(
                             parent=self.root,
@@ -274,7 +281,10 @@ class YouTubeDownloadControllerMixin:
             finally:
                 if hasattr(self, "_close_fetching_toast"):
                     try:
-                        self.dispatch_to_main_thread(self._close_fetching_toast)
+                        if hasattr(self, "root") and self.root:
+                            self.root.after(0, self._close_fetching_toast)
+                        else:
+                            self.dispatch_to_main_thread(self._close_fetching_toast)
                     except Exception:
                         pass
 

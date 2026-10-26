@@ -423,6 +423,7 @@ class YouTubeStreamInfo:
     subtitle_track: Optional[Dict[str, Any]] = None
     audio_language: Optional[str] = None
     subtitle_embed_mode: str = "soft_embed"
+    webpage_url: str = ""
 
 
 # Clean alias

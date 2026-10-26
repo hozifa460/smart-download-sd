@@ -16,17 +16,10 @@ from ...config import get_resource_path
 from ...locales.i18n import tr
 from ...utils.file_ops import CATEGORY_SUBFOLDERS, resolve_categorized_path
 from ...services.youtube_service import VideoFormatOption, format_filesize, sanitize_filename
-from ...utils.tk_helpers import _detach_photo_tk
+from ...utils.tk_helpers import _detach_photo_tk, animate_window_open, animate_window_close
 
 class QualitySelectionModal(tk.Toplevel):
-    """
-    Modern dark-themed modal dialog for choosing video quality and format options:
-    - Lists all available video resolutions (4K, 1440p, 1080p, 720p, 480p, 360p) and Audio-only.
-    - Displays containers, estimated file sizes, frame rates, and stream types.
-    - Updates file extension dynamically when switching between video and audio.
-    - Default selects the optimal high-resolution format.
-    - Double-click or 'Download' button confirms selection.
-    """
+    """Modern dark-themed modal dialog for choosing video quality, audio dubbing, and subtitle options."""
     def __init__(
         self,
         parent: tk.Tk,
@@ -77,58 +70,44 @@ class QualitySelectionModal(tk.Toplevel):
         dlg_w = min(int(740 * dpi_scale), max(640, int(sw * 0.92)))
         dlg_h = min(int(620 * dpi_scale), max(520, int(sh * 0.88)))
 
-        is_parent_visible = False
+        is_parent_vis = False
         try:
             if parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal":
-                is_parent_visible = True
+                is_parent_vis = True
         except Exception:
-            is_parent_visible = False
+            pass
 
-        if is_parent_visible:
+        if is_parent_vis:
             try:
                 self.transient(parent)
+                px, py = parent.winfo_x(), parent.winfo_y()
+                pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
+                x, y = max(0, px + (pw - dlg_w) // 2), max(0, py + (ph - dlg_h) // 2)
             except Exception:
-                pass
+                x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
         else:
             try:
                 self.transient("")
                 self.deiconify()
             except Exception:
                 pass
-
-        if is_parent_visible:
-            try:
-                px, py = parent.winfo_x(), parent.winfo_y()
-                pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
-                x = max(0, px + (pw - dlg_w) // 2)
-                y = max(0, py + (ph - dlg_h) // 2)
-            except Exception:
-                x = max(0, (sw - dlg_w) // 2)
-                y = max(0, (sh - dlg_h) // 2)
-        else:
-            x = max(0, (sw - dlg_w) // 2)
-            y = max(0, (sh - dlg_h) // 2)
+            x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
 
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
         self.minsize(min(640, dlg_w), min(520, dlg_h))
 
-        # Apply application icon to modal window
         ico_path = get_resource_path("app_icon.ico")
         png_path = get_resource_path("app_icon.png")
         if os.path.isfile(ico_path):
-            try:
-                self.iconbitmap(ico_path)
-            except Exception:
-                pass
+            try: self.iconbitmap(ico_path)
+            except Exception: pass
         if os.path.isfile(png_path):
             try:
                 from PIL import ImageTk
                 self._modal_icon_photo = ImageTk.PhotoImage(file=png_path)
                 self.iconphoto(True, self._modal_icon_photo)
-            except Exception:
-                pass
+            except Exception: pass
 
-        # Elevate and focus to ensure modal stays above borderless parent window
         self.lift()
         self.attributes("-topmost", True)
         self.focus_force()
@@ -136,6 +115,7 @@ class QualitySelectionModal(tk.Toplevel):
         self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
 
         self._build_ui()
+        animate_window_open(self, duration_ms=130)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", lambda e: self._on_close())
         self.bind("<Return>", lambda e: self._on_download())
@@ -293,6 +273,21 @@ class QualitySelectionModal(tk.Toplevel):
                 command=self._on_download_mp3
             )
             self.btn_download_mp3.pack(side=tk.LEFT, padx=(8, 0))
+
+        self.btn_preview = tk.Button(
+            btn_row,
+            text=tr("btn_live_preview", "▶️ معاينة (Live Preview)"),
+            font=("Segoe UI", 9, "bold"),
+            bg=c_panel_light,
+            fg=c_accent,
+            relief="flat",
+            activebackground=c_accent_dark,
+            cursor="hand2",
+            padx=12,
+            pady=6,
+            command=self._open_live_preview
+        )
+        self.btn_preview.pack(side=tk.LEFT, padx=(8, 0))
 
         self.btn_cancel = tk.Button(
             btn_row,
@@ -467,76 +462,81 @@ class QualitySelectionModal(tk.Toplevel):
             pass
         self.on_confirm(self.selected_option, final_dest)
 
+    def _open_live_preview(self):
+        """Opens live video, audio, and subtitle preview player for selected options."""
+        if not self.selected_option:
+            return
+        self._attach_selected_tracks()
+        stream_url = getattr(self.selected_option, "url", "") or ""
+        if not stream_url and self.parent_app:
+            ctx = getattr(self.parent_app, "_pending_media_context", None) or getattr(self.parent_app, "_last_media_context", None)
+            if ctx:
+                stream_url = ctx.get("url") or ""
+        if not stream_url and hasattr(self, "dest_path"):
+            stream_url = self.dest_path
+
+        from .video_preview_modal import VideoPreviewModal
+        sel_audio = getattr(self.selected_option, "selected_audio_track", None)
+        sel_sub = getattr(self.selected_option, "selected_subtitle_track", None)
+        VideoPreviewModal(
+            parent=self.master or self,
+            video_title=self.video_title,
+            duration=self.duration,
+            media_url=stream_url,
+            selected_option=self.selected_option,
+            selected_audio=sel_audio,
+            selected_subtitle=sel_sub,
+            theme=self.theme,
+            on_download_now=self._on_download
+        )
+
     def _on_open_in_main(self):
         if not self.selected_option:
             return
         self._attach_selected_tracks()
         final_dest = self._resolve_final_dest()
         self._confirmed = True
-        try:
-            self.grab_release()
-        except Exception:
-            pass
-        try:
-            self.destroy()
-        except Exception:
-            pass
+        try: self.grab_release()
+        except Exception: pass
+        try: self.destroy()
+        except Exception: pass
         if self.on_open_in_main:
-            try:
-                self.on_open_in_main(self.selected_option, final_dest)
-            except Exception:
-                pass
+            try: self.on_open_in_main(self.selected_option, final_dest)
+            except Exception: pass
         else:
             if self.master and hasattr(self.master, "restore_window"):
-                try:
-                    self.master.restore_window()
-                except Exception:
-                    pass
+                try: self.master.restore_window()
+                except Exception: pass
             self.on_confirm(self.selected_option, final_dest)
 
-    def grab_set(self):
-        """No-op: Eliminates Win32 input capture and message pump locking."""
-        pass
-
-    def grab_set_global(self):
-        """No-op: Eliminates Win32 input capture and message pump locking."""
-        pass
+    def grab_set(self): pass
+    def grab_set_global(self): pass
 
     def destroy(self):
         for job_attr in ("_idle_job", "_topmost_job"):
             job = getattr(self, job_attr, None)
             if job:
-                try:
-                    self.after_cancel(job)
-                except Exception:
-                    pass
+                try: self.after_cancel(job)
+                except Exception: pass
                 setattr(self, job_attr, None)
         if hasattr(self, "_modal_icon_photo"):
             _detach_photo_tk(self._modal_icon_photo)
             self._modal_icon_photo = None
-        try:
-            self.grab_release()
-        except Exception:
-            pass
+        try: self.grab_release()
+        except Exception: pass
         if self.parent_app and getattr(self.parent_app, "_quality_modal", None) is self:
             self.parent_app._quality_modal = None
         super().destroy()
 
     def _on_close(self):
-        self.destroy()
-        if self.parent_app and hasattr(self.parent_app, "clear_last_clipboard_url"):
-            try:
-                self.parent_app.clear_last_clipboard_url()
-            except Exception:
-                pass
-        elif self.master and hasattr(self.master, "clear_last_clipboard_url"):
-            try:
-                self.master.clear_last_clipboard_url()
-            except Exception:
-                pass
-        if self.on_cancel:
-            try:
-                self.on_cancel()
-            except Exception:
-                pass
+        def _cleanup():
+            self.destroy()
+            for host in (self.parent_app, self.master):
+                if host and hasattr(host, "clear_last_clipboard_url"):
+                    try: host.clear_last_clipboard_url()
+                    except Exception: pass
+            if self.on_cancel:
+                try: self.on_cancel()
+                except Exception: pass
+        animate_window_close(self, on_done=_cleanup)
 

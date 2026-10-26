@@ -277,7 +277,7 @@ class EngineWorkersMixin(EngineResumerMixin):
         6. New connection spawned immediately on new chunk.
         """
         with self._lock:
-            if not self.allow_dynamic_split or self.is_googlevideo or not getattr(self, "supports_ranges", False):
+            if not self.allow_dynamic_split or not getattr(self, "supports_ranges", False):
                 return
 
         while True:

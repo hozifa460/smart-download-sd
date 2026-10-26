@@ -25,15 +25,7 @@ from ..services.youtube_service import (
 )
 
 class StreamDownloadCoordinator:
-    """
-    Coordinates multi-part YouTube & media stream downloads:
-    - If stream is progressive: delegates directly to TurboDownloadEngine for full dynamic chunking.
-    - If stream is split (separate video and audio): downloads video stream with TurboDownloadEngine,
-      then downloads audio stream with TurboDownloadEngine, and losslessly merges them via FFmpeg (-c copy).
-    - Fully compatible interface with ModernFramelessGUI (is_running, is_paused, chunks, total_size,
-      rate limiter, pause, resume, cancel).
-    - Provides unified multi-stream progress reporting (no jumping backwards on stream change).
-    """
+    """Coordinates multi-part YouTube & media stream downloads, dynamic chunking, and FFmpeg multiplexing."""
     def __init__(
         self,
         stream_info: YouTubeStreamInfo,
@@ -67,10 +59,8 @@ class StreamDownloadCoordinator:
             or "googlevideo.com" in (self.stream_info.video_url or "")
             or getattr(self.stream_info, "platform", "").lower() == "youtube"
         )
-        if self.is_youtube_stream:
-            self.max_connections = min(self.max_connections, 1)
-
         self.current_engine: Optional[TurboDownloadEngine] = None
+        self._active_subproc: Optional[Any] = None
         self._lock = threading.RLock()
         self._cancel_event = threading.Event()
         self._pause_event = threading.Event()
@@ -174,6 +164,10 @@ class StreamDownloadCoordinator:
         with self._lock:
             self._is_running = False
             self._cancel_event.set()
+            if self._active_subproc:
+                try: self._active_subproc.kill()
+                except Exception: pass
+                self._active_subproc = None
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
             for eng in targets:
                 try: eng.cancel()
@@ -183,6 +177,10 @@ class StreamDownloadCoordinator:
         with self._lock:
             self._is_running = False
             self._cancel_event.set()
+            if self._active_subproc:
+                try: self._active_subproc.kill()
+                except Exception: pass
+                self._active_subproc = None
             targets = list(self._active_engines) if self._active_engines else ([self.current_engine] if self.current_engine else [])
             for eng in targets:
                 try:
@@ -204,9 +202,11 @@ class StreamDownloadCoordinator:
     @property
     def url(self) -> str:
         with self._lock:
-            if self.current_engine and getattr(self.current_engine, "url", None):
-                return self.current_engine.url
-            return getattr(self.stream_info, "video_url", "")
+            return getattr(self.stream_info, "webpage_url", "") or (
+                f"https://www.youtube.com/watch?v={self.stream_info.video_id}"
+                if getattr(self.stream_info, "video_id", "")
+                else getattr(self.stream_info, "video_url", "")
+            )
 
     @property
     def supports_ranges(self) -> bool:
@@ -298,9 +298,8 @@ class StreamDownloadCoordinator:
                         if self.on_complete:
                             self.on_complete(path, size, elapsed)
 
-                req_conn = getattr(self, "_requested_max_connections", self.max_connections)
-                safe_conn = min(max(1, req_conn), 8)
-                allow_split = True
+                safe_conn = max(1, self.max_connections)
+                allow_split = (self.max_connections > 1)
 
                 def _on_single_prog(downloaded, total, speed, eta, active):
                     if speed > 0:
@@ -426,13 +425,12 @@ class StreamDownloadCoordinator:
                     self._a_active = active
                 _report_combined()
 
-            req_conn = getattr(self, "_requested_max_connections", self.max_connections)
-            v_conn = min(max(1, req_conn), 8)
+            v_conn = max(1, self.max_connections)
             v_engine = TurboDownloadEngine(
                 url=self.stream_info.video_url,
                 destination_path=video_tmp,
                 max_connections=v_conn,
-                allow_dynamic_split=True,
+                allow_dynamic_split=(self.max_connections > 1),
                 rate_limit_bytes_per_sec=self.rate_limit,
                 ssl_context=self.ssl_context,
                 headers=self.stream_info.video_headers,
@@ -443,12 +441,12 @@ class StreamDownloadCoordinator:
                 on_error=_on_v_error
             )
 
-            a_conn = min(max(1, req_conn // 2), 4)
+            a_conn = max(1, min(4, self.max_connections // 2))
             a_engine = TurboDownloadEngine(
                 url=self.stream_info.audio_url,
                 destination_path=audio_tmp,
                 max_connections=a_conn,
-                allow_dynamic_split=True,
+                allow_dynamic_split=(self.max_connections > 1),
                 rate_limit_bytes_per_sec=self.rate_limit,
                 ssl_context=self.ssl_context,
                 headers=self.stream_info.audio_headers,
@@ -500,7 +498,7 @@ class StreamDownloadCoordinator:
                 self.on_progress(combined_total, combined_total, rep_spd, "Merging...", 0)
 
             self.log(f"[{tag}] Phase 2/2: Merging video and audio streams into final container...")
-            YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log)
+            YouTubeResolver.merge_video_audio(video_tmp, audio_tmp, self.destination_path, on_log=self.log, cancel_event=self._cancel_event)
             self._process_subtitles(self.destination_path)
 
             elapsed = max(0.01, time.time() - self.start_time)
@@ -538,7 +536,7 @@ class StreamDownloadCoordinator:
         if sub and sub.get("sub_id") not in (None, "none") and sub.get("url"):
             try:
                 from ..services.youtube_tracks import handle_subtitles_post_download
-                handle_subtitles_post_download(self.stream_info, target_path, on_log=self.log)
+                handle_subtitles_post_download(self.stream_info, target_path, on_log=self.log, cancel_event=self._cancel_event)
             except Exception as e:
                 self.log(f"[SUBTITLES] Warning: {e}")
 

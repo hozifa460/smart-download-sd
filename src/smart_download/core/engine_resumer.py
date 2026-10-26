@@ -26,10 +26,6 @@ class EngineResumerMixin:
             else:
                 self.is_googlevideo = "googlevideo.com" in self.url.lower()
 
-            if self.is_googlevideo:
-                self.allow_dynamic_split = False
-                self.max_connections = min(self.max_connections, 1)
-
             for conn in list(self._active_connections):
                 try:
                     conn.close()

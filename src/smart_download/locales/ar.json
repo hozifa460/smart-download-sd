@@ -251,5 +251,7 @@
   "opt_sub_soft": "دمج برمجي",
   "opt_sub_srt": "ملف SRT فقط",
   "opt_sub_burn": "حرق دائم على الفيديو",
-  "ctx_redownload_quality": "🎞️ إعادة التحميل بجودة مختلفة"
+  "ctx_redownload_quality": "🎞️ إعادة التحميل بجودة مختلفة",
+  "btn_quality_reopen": "🎞️ الجودة / الصوت والترجمة",
+  "btn_live_preview": "▶️ معاينة الفيديو بالصوت والترجمة"
 }
