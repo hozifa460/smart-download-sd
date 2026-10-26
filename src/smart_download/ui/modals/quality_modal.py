@@ -12,7 +12,7 @@ except ImportError:
     Image = None
     ImageTk = None
 
-from ...config import get_resource_path, is_test_environment
+from ...config import get_resource_path
 from ...locales.i18n import tr
 from ...utils.file_ops import CATEGORY_SUBFOLDERS, resolve_categorized_path
 from ...services.youtube_service import VideoFormatOption, format_filesize, sanitize_filename
@@ -108,14 +108,15 @@ class QualitySelectionModal(tk.Toplevel):
                 self.iconphoto(True, self._modal_icon_photo)
             except Exception: pass
 
-        self.lift()
-        self.attributes("-topmost", True)
-        if not is_test_environment():
+        self._topmost_job = None
+        self._idle_job = None
+        try:
+            self.lift()
+            self.attributes("-topmost", True)
             self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
             self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
-        else:
-            self._topmost_job = None
-            self._idle_job = None
+        except Exception:
+            pass
 
         self._build_ui()
         animate_window_open(self, duration_ms=130)
