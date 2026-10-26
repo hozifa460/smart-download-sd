@@ -384,6 +384,7 @@ class YouTubeFormatBuilderMixin:
 
         sel_audio = getattr(option, "selected_audio_track", None)
         sub_track = getattr(option, "selected_subtitle_track", None)
+        sub_mode = getattr(option, "subtitle_embed_mode", "soft_embed")
         audio_lang = sel_audio.get("language") if sel_audio else None
 
         if sel_audio and sel_audio.get("url"):
@@ -434,6 +435,7 @@ class YouTubeFormatBuilderMixin:
                 platform=platform,
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
+                subtitle_embed_mode=sub_mode,
             )
         elif option.is_progressive or not option.audio_url:
             out_fn = f"{clean_title}.{option.ext}"
@@ -457,6 +459,7 @@ class YouTubeFormatBuilderMixin:
                 platform=platform,
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
+                subtitle_embed_mode=sub_mode,
             )
         else:
             out_fn = f"{clean_title}.{option.ext}"
@@ -481,5 +484,6 @@ class YouTubeFormatBuilderMixin:
                 platform=platform,
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
+                subtitle_embed_mode=sub_mode,
             )
 

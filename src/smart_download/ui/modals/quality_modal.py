@@ -431,20 +431,31 @@ class QualitySelectionModal(tk.Toplevel):
             idx = self.cb_sub.current()
             if 0 <= idx < len(self.subtitle_tracks):
                 self.selected_option.selected_subtitle_track = self.subtitle_tracks[idx]
+        sub_mode = "soft_embed"
+        if hasattr(self, "cb_sub") and self.cb_sub:
+            mode_fn = getattr(self.cb_sub, "get_selected_mode", None)
+            if callable(mode_fn):
+                sub_mode = mode_fn()
+            else:
+                sub_mode = getattr(self.cb_sub, "_selected_mode", "soft_embed")
+        self.selected_option.subtitle_embed_mode = sub_mode
+
+    def _resolve_final_dest(self) -> str:
+        final_dest = self.entry_dest.get().strip()
+        if not final_dest:
+            if self.dest_path:
+                base, _ = os.path.splitext(self.dest_path)
+                return f"{base}.{self.selected_option.ext}"
+            downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+            clean_title = sanitize_filename(self.video_title)
+            return os.path.join(downloads_dir, f"{clean_title}.{self.selected_option.ext}")
+        return final_dest
 
     def _on_download(self):
         if not self.selected_option:
             return
         self._attach_selected_tracks()
-        final_dest = self.entry_dest.get().strip()
-        if not final_dest:
-            if self.dest_path:
-                base, _ = os.path.splitext(self.dest_path)
-                final_dest = f"{base}.{self.selected_option.ext}"
-            else:
-                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-                clean_title = sanitize_filename(self.video_title)
-                final_dest = os.path.join(downloads_dir, f"{clean_title}.{self.selected_option.ext}")
+        final_dest = self._resolve_final_dest()
         self._confirmed = True
         try:
             self.grab_release()
@@ -460,15 +471,7 @@ class QualitySelectionModal(tk.Toplevel):
         if not self.selected_option:
             return
         self._attach_selected_tracks()
-        final_dest = self.entry_dest.get().strip()
-        if not final_dest:
-            if self.dest_path:
-                base, _ = os.path.splitext(self.dest_path)
-                final_dest = f"{base}.{self.selected_option.ext}"
-            else:
-                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-                clean_title = sanitize_filename(self.video_title)
-                final_dest = os.path.join(downloads_dir, f"{clean_title}.{self.selected_option.ext}")
+        final_dest = self._resolve_final_dest()
         self._confirmed = True
         try:
             self.grab_release()

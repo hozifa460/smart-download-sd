@@ -238,5 +238,9 @@
   "modal_status_paused": "Status: Paused",
   "lbl_audio_track": "🎙️ Audio / Dubbing:",
   "lbl_subtitle_track": "💬 Subtitles:",
-  "sub_none": "None"
+  "sub_none": "None",
+  "lbl_subtitle_mode": "⚙️ Mode:",
+  "sub_mode_soft": "External SRT + Fast Embed",
+  "sub_mode_srt_only": "External .srt File Only",
+  "sub_mode_burn": "External SRT + Burn into Video"
 }

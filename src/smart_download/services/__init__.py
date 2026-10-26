@@ -69,8 +69,12 @@ from .youtube_tracks import (
     convert_vtt_to_srt,
     download_subtitle_as_srt,
     embed_subtitle_into_mp4,
+    burn_subtitle_into_video,
     handle_subtitles_post_download,
     build_audio_subtitle_row,
+)
+from .subtitle_processor import (
+    burn_subtitle_into_video as burn_subtitle_into_video,
 )
 from .browser import (
     BrowserBridgeServer,
@@ -155,6 +159,7 @@ __all__ = [
     "convert_vtt_to_srt",
     "download_subtitle_as_srt",
     "embed_subtitle_into_mp4",
+    "burn_subtitle_into_video",
     "handle_subtitles_post_download",
     "build_audio_subtitle_row",
     "BrowserBridgeServer",

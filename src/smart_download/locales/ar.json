@@ -238,5 +238,9 @@
   "modal_status_paused": "الحالة: متوقف مؤقتاً",
   "lbl_audio_track": "🎙️ لغة الصوت (الدبلجة):",
   "lbl_subtitle_track": "💬 الترجمة (Subtitles):",
-  "sub_none": "بدون ترجمة (None)"
+  "sub_none": "بدون ترجمة (None)",
+  "lbl_subtitle_mode": "⚙️ وضع الترجمة:",
+  "sub_mode_soft": "ملف منفصل + دمج سريع (MP4)",
+  "sub_mode_srt_only": "ملف ترجمة منفصل فقط (.srt)",
+  "sub_mode_burn": "ملف منفصل + طباعة بالفيديو (Burn-in)"
 }

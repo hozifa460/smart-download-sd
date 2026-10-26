@@ -158,6 +158,14 @@ FILE_METADATA: Dict[str, Dict[str, str]] = {
         "responsibility": "High-level YouTubeResolver and MediaResolver coordinating yt-dlp and FFmpeg.",
         "when_to_edit": "Edit when changing media stream extraction, cookie passing, or FFmpeg merging."
     },
+    "src/smart_download/services/youtube_tracks.py": {
+        "responsibility": "YouTube audio dubbing and subtitle tracks extraction, language mapping, and UI track selectors.",
+        "when_to_edit": "Edit when modifying audio dubbing languages, subtitle tracks parsing, or quality modal track selectors."
+    },
+    "src/smart_download/services/subtitle_processor.py": {
+        "responsibility": "Subtitle processing, VTT-to-SRT conversion, FFmpeg soft-muxing, and frame burn-in delivery modes.",
+        "when_to_edit": "Edit when modifying subtitle delivery modes (srt_only, soft_embed, hard_burn) or FFmpeg subtitle embedding."
+    },
     "src/smart_download/services/ytdlp_updater.py": {
         "responsibility": "YtDlpAutoUpdater managing dynamic in-process yt-dlp package updates in %APPDATA%.",
         "when_to_edit": "Edit when changing yt-dlp PyPI/GitHub download logic or sys.meta_path finder hooks."

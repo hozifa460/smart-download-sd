@@ -134,6 +134,7 @@ def load_settings() -> Dict[str, Any]:
         "auto_categorize_folders": True,
         "language": "ar",
         "auto_unpack_archives": False,
+        "subtitle_embed_mode": "soft_embed",
     }
 
     with _settings_lock:

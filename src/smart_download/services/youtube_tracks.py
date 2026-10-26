@@ -5,15 +5,7 @@ subtitle soft-embedding via FFmpeg, and UI selector helpers.
 import os
 import re
 import sys
-import html
-import subprocess
 from typing import Dict, List, Optional, Tuple, Callable, Any
-
-try:
-    import requests
-except ImportError:
-    requests = None
-import urllib.request
 
 try:
     import tkinter as tk
@@ -28,14 +20,15 @@ except Exception:
     def tr(key: str, default: str = "") -> str:  # type: ignore
         return default
 
-try:
-    from .youtube_models import find_ffmpeg_bin
-except Exception:
-    import shutil
-    def find_ffmpeg_bin() -> Optional[str]:  # type: ignore
-        return shutil.which("ffmpeg")
-
-IS_WINDOWS = sys.platform.startswith("win")
+from .subtitle_processor import (
+    ISO_639_2,
+    _format_srt_timestamp,
+    convert_vtt_to_srt,
+    download_subtitle_as_srt,
+    embed_subtitle_into_mp4,
+    burn_subtitle_into_video,
+    handle_subtitles_post_download,
+)
 
 LANG_NAMES: Dict[str, Tuple[str, str]] = {
     "en": ("English", "الإنجليزية"), "ar": ("Arabic", "العربية"), "es": ("Spanish", "الإسبانية"),
@@ -45,13 +38,6 @@ LANG_NAMES: Dict[str, Tuple[str, str]] = {
     "zh-hant": ("Chinese (Traditional)", "الصينية التقليدية"), "hi": ("Hindi", "الهندية"),
     "tr": ("Turkish", "التركية"), "id": ("Indonesian", "الإندونيسية"), "nl": ("Dutch", "الهولندية"),
     "pl": ("Polish", "البولندية"), "vi": ("Vietnamese", "الفيتنامية"), "th": ("Thai", "التايلاندية"),
-}
-
-ISO_639_2: Dict[str, str] = {
-    "en": "eng", "ar": "ara", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", "pt": "por",
-    "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi", "zh-hans": "chi", "zh-hant": "chi",
-    "hi": "hin", "tr": "tur", "id": "ind", "nl": "nld", "pl": "pol", "vi": "vie", "th": "tha",
-    "sv": "swe", "no": "nor", "da": "dan", "fi": "fin",
 }
 
 POPULAR_AUTO_LANGS = (
@@ -220,163 +206,102 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sorted(tracks, key=_sub_sort_key)
 
 
-def _format_srt_timestamp(ts: str) -> str:
-    """Converts MM:SS.mmm or HH:MM:SS.mmm into standard SRT HH:MM:SS,mmm."""
-    parts = ts.strip().split(":")
-    if len(parts) == 2:
-        h, m, s = "00", parts[0].zfill(2), parts[1]
-    elif len(parts) == 3:
-        h, m, s = parts[0].zfill(2), parts[1].zfill(2), parts[2]
-    else:
-        return ts
-    if "." in s:
-        sec, ms = s.split(".", 1)
-        return f"{h}:{m}:{sec.zfill(2)},{ms[:3].ljust(3, '0')}"
-    return f"{h}:{m}:{s.zfill(2)},000"
-
-
-def convert_vtt_to_srt(vtt_text: str) -> str:
-    """Converts WebVTT subtitle text cleanly into standard SubRip (.srt) format."""
-    blocks = re.split(r'\r?\n\r?\n+', vtt_text.strip())
-    srt_cues: List[str] = []
-    cue_index = 1
-    timestamp_pat = re.compile(
-        r'((?:\d+:)?\d{1,2}:\d{2}\.\d+)\s*-->\s*((?:\d+:)?\d{1,2}:\d{2}\.\d+)'
-    )
-
-    for block in blocks:
-        lines = [line.strip() for line in block.splitlines() if line.strip()]
-        if not lines:
-            continue
-        ts_line_idx, ts_match = -1, None
-        for idx, line in enumerate(lines):
-            m = timestamp_pat.search(line)
-            if m:
-                ts_line_idx, ts_match = idx, m
-                break
-        if ts_line_idx == -1 or not ts_match:
-            continue
-
-        start_ts = _format_srt_timestamp(ts_match.group(1))
-        end_ts = _format_srt_timestamp(ts_match.group(2))
-        srt_timing = f"{start_ts} --> {end_ts}"
-
-        cue_lines = lines[ts_line_idx + 1:]
-        cleaned = [html.unescape(re.sub(r'<[^>]+>', '', cl)).strip() for cl in cue_lines]
-        valid_lines = [l for l in cleaned if l]
-        if not valid_lines:
-            continue
-
-        srt_cues.append(f"{cue_index}\n{srt_timing}\n" + "\n".join(valid_lines))
-        cue_index += 1
-
-    return "\n\n".join(srt_cues) + ("\n" if srt_cues else "")
-
-
-def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> Optional[str]:
-    """Downloads subtitle, converts VTT to SRT, and saves alongside video in UTF-8-SIG."""
-    if not sub_track or sub_track.get("sub_id") in (None, "none") or not sub_track.get("url"):
-        return None
-    url = sub_track["url"]
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"}
-    raw_text = None
-    if requests is not None:
-        try:
-            resp = requests.get(url, headers=headers, timeout=15)
-            if resp.status_code == 200:
-                raw_text = resp.content.decode("utf-8", errors="replace")
-        except Exception:
-            raw_text = None
-    if raw_text is None:
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                raw_text = resp.read().decode("utf-8", errors="replace")
-        except Exception:
-            return None
-
-    ext = str(sub_track.get("ext") or "").lower()
-    srt_content = convert_vtt_to_srt(raw_text) if (ext == "vtt" or "WEBVTT" in raw_text[:120]) else raw_text
-    srt_path = f"{os.path.splitext(video_filepath)[0]}.{sub_track.get('language') or 'sub'}.srt"
-    try:
-        with open(srt_path, "w", encoding="utf-8-sig") as f:
-            f.write(srt_content)
-        return srt_path
-    except Exception:
-        return None
-
-
-def embed_subtitle_into_mp4(
-    video_path: str, srt_path: str, lang_code: str, ffmpeg_path: str,
-    on_log: Optional[Callable[[str], None]] = None
-) -> bool:
-    """Muxes .srt into MP4 as soft subtitle stream via FFmpeg, atomically replacing video file."""
-    if not ffmpeg_path or not video_path.lower().endswith(".mp4") or not os.path.isfile(srt_path):
-        return False
-    norm_lang = str(lang_code or "und").strip().lower()
-    base_lang = norm_lang.split("-")[0].split("_")[0]
-    iso3 = ISO_639_2.get(norm_lang) or ISO_639_2.get(base_lang) or (base_lang if len(base_lang) == 3 and base_lang.isalpha() else "und")
-    temp_mp4 = video_path + ".submux.tmp"
-    cmd = [
-        ffmpeg_path, "-y", "-i", video_path, "-i", srt_path,
-        "-map", "0", "-map", "1:0", "-c", "copy", "-c:s", "mov_text",
-        "-metadata:s:s:0", f"language={iso3}", temp_mp4
-    ]
-    try:
-        cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=cflags)
-        if res.returncode == 0 and os.path.isfile(temp_mp4) and os.path.getsize(temp_mp4) > 0:
-            os.replace(temp_mp4, video_path)
-            if on_log: on_log(f"[SUBTITLES] Successfully embedded soft subtitle ({iso3}) into MP4 container.")
-            return True
-        if os.path.exists(temp_mp4):
-            try: os.remove(temp_mp4)
-            except Exception: pass
-        return False
-    except Exception as exc:
-        if on_log: on_log(f"[SUBTITLES] FFmpeg soft-muxing skipped: {exc}")
-        if os.path.exists(temp_mp4):
-            try: os.remove(temp_mp4)
-            except Exception: pass
-        return False
-
-
-def handle_subtitles_post_download(
-    stream_info: Any, output_path: str, on_log: Optional[Callable[[str], None]] = None
-) -> None:
-    """Post-download pipeline: downloads chosen subtitle track and soft-muxes into MP4 if available."""
-    sub = getattr(stream_info, "subtitle_track", None)
-    if not sub or sub.get("sub_id") in (None, "none") or not sub.get("url"):
-        return
-    try:
-        if on_log: on_log(f"[SUBTITLES] Downloading subtitle track: {sub.get('label', sub.get('language', 'sub'))}...")
-        srt_path = download_subtitle_as_srt(sub, output_path)
-        if srt_path and os.path.isfile(srt_path):
-            if on_log: on_log(f"[SUBTITLES] Saved subtitle to {os.path.basename(srt_path)}")
-            ffmpeg_bin = find_ffmpeg_bin()
-            if ffmpeg_bin and output_path.lower().endswith(".mp4"):
-                embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log)
-    except Exception as exc:
-        if on_log: on_log(f"[SUBTITLES] Warning: Subtitle handling encountered an issue: {exc}")
-
-
 def build_audio_subtitle_row(
     parent_frame: Any, theme: Dict[str, str],
     audio_tracks: List[Dict[str, Any]], subtitle_tracks: List[Dict[str, Any]]
 ) -> Tuple[Optional[Any], Optional[Any]]:
-    """Renders compact themed Audio Track and Subtitles selectors for QualitySelectionModal."""
+    """Renders compact themed Audio Track, Subtitles, and Delivery Mode selectors for QualitySelectionModal."""
     if tk is None or ttk is None or (not audio_tracks and not subtitle_tracks):
         return None, None
-    c_panel, c_border, c_text_bright = theme.get("c_panel", "#1e293b"), theme.get("c_border", "#475569"), theme.get("c_text_bright", "#f8fafc")
+    c_panel = theme.get("c_panel", "#1e293b")
+    c_border = theme.get("c_border", "#475569")
+    c_text_bright = theme.get("c_text_bright", "#f8fafc")
     card = tk.Frame(parent_frame, bg=c_panel, padx=10, pady=6, highlightbackground=c_border, highlightthickness=1)
     card.pack(fill=tk.X, pady=(0, 10))
     cb_audio, cb_sub = None, None
     if audio_tracks:
         tk.Label(card, text=tr("lbl_audio_track", "🎙️ Audio / Dubbing:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 4))
         cb_audio = ttk.Combobox(card, values=[t.get("label", "") for t in audio_tracks], state="readonly", font=("Segoe UI", 8), width=24)
-        cb_audio.current(0); cb_audio.pack(side=tk.LEFT, padx=(0, 12))
+        cb_audio.current(0)
+        cb_audio.pack(side=tk.LEFT, padx=(0, 12))
     if subtitle_tracks:
         tk.Label(card, text=tr("lbl_subtitle_track", "💬 Subtitles:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 4))
-        cb_sub = ttk.Combobox(card, values=[s.get("label", "") for s in subtitle_tracks], state="readonly", font=("Segoe UI", 8), width=22)
-        cb_sub.current(0); cb_sub.pack(side=tk.LEFT)
+        cb_sub = ttk.Combobox(card, values=[s.get("label", "") for s in subtitle_tracks], state="readonly", font=("Segoe UI", 8), width=20)
+        cb_sub.current(0)
+        cb_sub.pack(side=tk.LEFT, padx=(0, 8))
+
+        # Subtitle delivery mode selector
+        mode_options = [
+            ("soft_embed", tr("sub_mode_soft", "ملف منفصل + دمج سريع (Soft-Mux)")),
+            ("srt_only", tr("sub_mode_srt_only", "ملف ترجمة منفصل فقط (.srt)")),
+            ("hard_burn", tr("sub_mode_burn", "ملف منفصل + طباعة بالفيديو (Burn-in)")),
+        ]
+        mode_codes = [m[0] for m in mode_options]
+        mode_labels = [m[1] for m in mode_options]
+
+        try:
+            from ..config import get_setting, set_setting
+        except Exception:
+            try:
+                from ...config import get_setting, set_setting
+            except Exception:
+                def get_setting(k: str, d: Any = None) -> Any: return d  # type: ignore
+                def set_setting(k: str, v: Any) -> bool: return True  # type: ignore
+
+        saved_mode = get_setting("subtitle_embed_mode", "soft_embed")
+        initial_idx = mode_codes.index(saved_mode) if saved_mode in mode_codes else 0
+        current_mode = mode_codes[initial_idx]
+
+        tk.Label(card, text=tr("lbl_subtitle_mode", "⚙️ Mode:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 4))
+        cb_sub_mode = ttk.Combobox(card, values=mode_labels, state="disabled", font=("Segoe UI", 8), width=24)
+        cb_sub_mode.current(initial_idx)
+        cb_sub_mode.pack(side=tk.LEFT)
+
+        def _get_active_mode() -> str:
+            cur_idx = cb_sub_mode.current()
+            if 0 <= cur_idx < len(mode_codes):
+                return mode_codes[cur_idx]
+            return getattr(cb_sub, "_selected_mode", "soft_embed")
+
+        cb_sub._mode_combobox = cb_sub_mode
+        cb_sub._selected_mode = current_mode
+        cb_sub._mode_codes = mode_codes
+        cb_sub.get_selected_mode = _get_active_mode
+
+        def _on_sub_changed(event=None):
+            idx = cb_sub.current()
+            if idx > 0:
+                cb_sub_mode.configure(state="readonly")
+            else:
+                cb_sub_mode.configure(state="disabled")
+
+        def _on_mode_changed(event=None):
+            cur_idx = cb_sub_mode.current()
+            if 0 <= cur_idx < len(mode_codes):
+                code = mode_codes[cur_idx]
+                cb_sub._selected_mode = code
+                try:
+                    set_setting("subtitle_embed_mode", code)
+                except Exception:
+                    pass
+
+        cb_sub._update_mode_state = _on_sub_changed
+        cb_sub.bind("<<ComboboxSelected>>", _on_sub_changed)
+        cb_sub_mode.bind("<<ComboboxSelected>>", _on_mode_changed)
+
     return cb_audio, cb_sub
+
+
+__all__ = [
+    "LANG_NAMES",
+    "POPULAR_AUTO_LANGS",
+    "ISO_639_2",
+    "extract_audio_tracks",
+    "extract_subtitle_tracks",
+    "convert_vtt_to_srt",
+    "download_subtitle_as_srt",
+    "embed_subtitle_into_mp4",
+    "burn_subtitle_into_video",
+    "handle_subtitles_post_download",
+    "build_audio_subtitle_row",
+]

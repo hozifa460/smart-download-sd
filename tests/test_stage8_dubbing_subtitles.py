@@ -19,6 +19,7 @@ from smart_download.services.youtube_tracks import (
     convert_vtt_to_srt,
     download_subtitle_as_srt,
     embed_subtitle_into_mp4,
+    burn_subtitle_into_video,
     handle_subtitles_post_download,
 )
 
@@ -228,6 +229,9 @@ Hello world from <i>smart</i> download!
             self.assertIsNotNone(out_srt)
             self.assertTrue(os.path.isfile(out_srt))
             self.assertTrue(out_srt.endswith("test_video.ar.srt"))
+            # Both <video_stem>.<lang>.srt and <video_stem>.srt must be written
+            default_srt = os.path.join(tmpdir, "test_video.srt")
+            self.assertTrue(os.path.isfile(default_srt))
 
             # Check UTF-8-SIG encoding (BOM)
             with open(out_srt, "rb") as f:
@@ -332,7 +336,9 @@ Hello world from <i>smart</i> download!
             with open(srt_path, "wb") as sf:
                 sf.write(b"1\n00:00:01,000 --> 00:00:02,000\nSub\n")
 
+            captured_cmd = []
             def mock_run(cmd, **kwargs):
+                captured_cmd.extend(cmd)
                 # Simulate creating target file
                 out_path = cmd[-1]
                 with open(out_path, "wb") as out_f:
@@ -346,6 +352,12 @@ Hello world from <i>smart</i> download!
                 self.assertTrue(ok)
                 self.assertTrue(os.path.isfile(video_path))
                 self.assertTrue(os.path.isfile(srt_path))  # External srt preserved
+                # Verify .submux.mp4, -f mp4, and -disposition:s:0 default
+                self.assertTrue(captured_cmd[-1].endswith(".submux.mp4"))
+                self.assertIn("-f", captured_cmd)
+                self.assertEqual(captured_cmd[captured_cmd.index("-f") + 1], "mp4")
+                self.assertIn("-disposition:s:0", captured_cmd)
+                self.assertEqual(captured_cmd[captured_cmd.index("-disposition:s:0") + 1], "default")
 
     def test_quality_modal_tracks_selection(self):
         """Verifies QualitySelectionModal displays audio/sub comboboxes and attaches selections."""
@@ -402,11 +414,13 @@ Hello world from <i>smart</i> download!
 
             modal.cb_audio.current(1)
             modal.cb_sub.current(1)
+            modal.cb_sub._mode_combobox.current(1)  # "srt_only"
 
             modal._on_download()
             self.assertEqual(len(confirmed_opt), 1)
             self.assertEqual(confirmed_opt[0].selected_audio_track["track_id"], "ar")
             self.assertEqual(confirmed_opt[0].selected_subtitle_track["sub_id"], "ar")
+            self.assertEqual(confirmed_opt[0].subtitle_embed_mode, "srt_only")
         finally:
             try:
                 root.destroy()
@@ -505,6 +519,171 @@ Hello world from <i>smart</i> download!
         with patch("smart_download.services.youtube_format_builder.has_ffmpeg", return_value=False):
             stream_info = self.builder.build_stream_info(info, option)
             self.assertTrue(stream_info.is_progressive)
+
+    def test_handle_subtitles_post_download_srt_only(self):
+        """Verifies srt_only mode downloads .srt but skips FFmpeg entirely."""
+        stream_info = MagicMock()
+        stream_info.subtitle_track = {
+            "sub_id": "ar", "language": "ar", "url": "http://sub_ar", "ext": "vtt"
+        }
+        stream_info.subtitle_embed_mode = "srt_only"
+        logs = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            v_path = os.path.join(tmpdir, "test.mp4")
+            srt_path = os.path.join(tmpdir, "test.ar.srt")
+            with open(v_path, "wb") as f: f.write(b"fake_video")
+            with open(srt_path, "wb") as sf: sf.write(b"fake_srt")
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin") as mock_ffmpeg, \
+                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4") as mock_embed, \
+                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video") as mock_burn:
+                handle_subtitles_post_download(stream_info, v_path, on_log=logs.append)
+                mock_ffmpeg.assert_not_called()
+                mock_embed.assert_not_called()
+                mock_burn.assert_not_called()
+                self.assertTrue(any("SRT-only mode selected" in l for l in logs))
+
+    def test_handle_subtitles_post_download_soft_embed(self):
+        """Verifies soft_embed mode downloads .srt and calls embed_subtitle_into_mp4."""
+        stream_info = MagicMock()
+        stream_info.subtitle_track = {
+            "sub_id": "ar", "language": "ar", "url": "http://sub_ar", "ext": "vtt"
+        }
+        stream_info.subtitle_embed_mode = "soft_embed"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            v_path = os.path.join(tmpdir, "test.mp4")
+            srt_path = os.path.join(tmpdir, "test.ar.srt")
+            with open(v_path, "wb") as f: f.write(b"fake_video")
+            with open(srt_path, "wb") as sf: sf.write(b"fake_srt")
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True) as mock_embed, \
+                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video") as mock_burn:
+                handle_subtitles_post_download(stream_info, v_path)
+                mock_embed.assert_called_once_with(v_path, srt_path, "ar", "ffmpeg", on_log=None)
+                mock_burn.assert_not_called()
+
+    def test_handle_subtitles_post_download_hard_burn_success(self):
+        """Verifies hard_burn mode downloads .srt and calls burn_subtitle_into_video."""
+        stream_info = MagicMock()
+        stream_info.subtitle_track = {
+            "sub_id": "ar", "language": "ar", "url": "http://sub_ar", "ext": "vtt"
+        }
+        stream_info.subtitle_embed_mode = "hard_burn"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            v_path = os.path.join(tmpdir, "test.mp4")
+            srt_path = os.path.join(tmpdir, "test.ar.srt")
+            with open(v_path, "wb") as f: f.write(b"fake_video")
+            with open(srt_path, "wb") as sf: sf.write(b"fake_srt")
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=True) as mock_burn, \
+                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4") as mock_embed:
+                handle_subtitles_post_download(stream_info, v_path)
+                mock_burn.assert_called_once_with(v_path, srt_path, "ffmpeg", on_log=None)
+                mock_embed.assert_not_called()
+
+    def test_handle_subtitles_post_download_hard_burn_fallback(self):
+        """Verifies hard_burn mode falls back to soft_embed if burn_subtitle_into_video fails."""
+        stream_info = MagicMock()
+        stream_info.subtitle_track = {
+            "sub_id": "ar", "language": "ar", "url": "http://sub_ar", "ext": "vtt"
+        }
+        stream_info.subtitle_embed_mode = "hard_burn"
+        logs = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            v_path = os.path.join(tmpdir, "test.mp4")
+            srt_path = os.path.join(tmpdir, "test.ar.srt")
+            with open(v_path, "wb") as f: f.write(b"fake_video")
+            with open(srt_path, "wb") as sf: sf.write(b"fake_srt")
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=False) as mock_burn, \
+                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True) as mock_embed:
+                handle_subtitles_post_download(stream_info, v_path, on_log=logs.append)
+                mock_burn.assert_called_once()
+                mock_embed.assert_called_once_with(v_path, srt_path, "ar", "ffmpeg", on_log=logs.append)
+                self.assertTrue(any("falling back" in l for l in logs))
+
+    def test_burn_subtitle_into_video_command(self):
+        """Verifies burn_subtitle_into_video constructs correct FFmpeg args and replaces file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "movie.mp4")
+            srt_path = os.path.join(tmpdir, "movie.ara.srt")
+            with open(video_path, "wb") as vf: vf.write(b"mp4_raw")
+            with open(srt_path, "wb") as sf: sf.write(b"1\n00:00:01,000 --> 00:00:02,000\nSub\n")
+
+            captured_cmd = []
+            captured_cwd = []
+            def mock_run(cmd, **kwargs):
+                captured_cmd.extend(cmd)
+                captured_cwd.append(kwargs.get("cwd"))
+                out_path = cmd[-1]
+                with open(out_path, "wb") as out_f:
+                    out_f.write(b"mp4_burned")
+                res = MagicMock()
+                res.returncode = 0
+                return res
+
+            with patch("subprocess.run", side_effect=mock_run):
+                ok = burn_subtitle_into_video(video_path, srt_path, "ffmpeg")
+                self.assertTrue(ok)
+                self.assertTrue(captured_cmd[-1].endswith(".burn.mp4"))
+                self.assertIn("-vf", captured_cmd)
+                vf_idx = captured_cmd.index("-vf")
+                self.assertIn("subtitles=", captured_cmd[vf_idx + 1])
+                self.assertIn("movie.ara.srt", captured_cmd[vf_idx + 1])
+                self.assertIn("-c:v", captured_cmd)
+                self.assertIn("libx264", captured_cmd)
+                self.assertIn("-preset", captured_cmd)
+                self.assertIn("veryfast", captured_cmd)
+                self.assertIn("-crf", captured_cmd)
+                self.assertIn("22", captured_cmd)
+                self.assertIn("-f", captured_cmd)
+                self.assertEqual(captured_cmd[captured_cmd.index("-f") + 1], "mp4")
+                self.assertEqual(captured_cwd[0], tmpdir)
+
+    def test_build_audio_subtitle_row_sub_mode(self):
+        """Verifies build_audio_subtitle_row creates mode selector and toggles state."""
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+        except Exception:
+            return
+        try:
+            from smart_download.services.youtube_tracks import build_audio_subtitle_row
+            audio = [{"track_id": "original", "language": "en", "label": "Original", "url": "u1", "is_original": True}]
+            subs = [
+                {"sub_id": "none", "language": "none", "label": "None", "url": "", "is_auto": False},
+                {"sub_id": "ar", "language": "ar", "label": "Arabic", "url": "u2", "is_auto": False},
+            ]
+            theme = {"c_bg": "#0f172a", "c_panel": "#1e293b", "c_border": "#475569", "c_text_bright": "#fff"}
+            cb_audio, cb_sub = build_audio_subtitle_row(root, theme, audio, subs)
+            self.assertIsNotNone(cb_sub)
+            self.assertTrue(hasattr(cb_sub, "_mode_combobox"))
+            mode_cb = cb_sub._mode_combobox
+            self.assertIsNotNone(mode_cb)
+            # Initially disabled because sub is 'none' (idx 0)
+            self.assertEqual(str(mode_cb.cget("state")), "disabled")
+            # Select Arabic (idx 1)
+            cb_sub.current(1)
+            cb_sub._update_mode_state()
+            self.assertEqual(str(mode_cb.cget("state")), "readonly")
+            # Select hard_burn (idx 2)
+            mode_cb.current(2)
+            self.assertEqual(cb_sub.get_selected_mode(), "hard_burn")
+        finally:
+            try: root.destroy()
+            except Exception: pass
 
 
 if __name__ == "__main__":
