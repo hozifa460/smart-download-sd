@@ -411,20 +411,25 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 res = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=creationflags)
                 return res.returncode, res.stderr
             p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=creationflags)
-            while True:
-                try:
-                    _, err = p.communicate(timeout=0.05)
-                    return p.returncode, err
-                except subprocess.TimeoutExpired:
-                    if cancel_event and cancel_event.is_set():
-                        try: p.kill()
-                        except Exception: pass
-                        try: p.communicate()
-                        except Exception: pass
-                        if os.path.exists(output_path):
-                            try: os.remove(output_path)
+            try:
+                while True:
+                    try:
+                        _, err = p.communicate(timeout=0.05)
+                        return p.returncode, err
+                    except subprocess.TimeoutExpired:
+                        if cancel_event and cancel_event.is_set():
+                            try: p.kill()
                             except Exception: pass
-                        return -999, "Cancelled"
+                            try: p.communicate()
+                            except Exception: pass
+                            if os.path.exists(output_path):
+                                try: os.remove(output_path)
+                                except Exception: pass
+                            return -999, "Cancelled"
+            finally:
+                if p and p.poll() is None:
+                    try: p.kill()
+                    except Exception: pass
 
         rc, primary_err = _run_proc(cmd)
         if cancel_event and cancel_event.is_set():

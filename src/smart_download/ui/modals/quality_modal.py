@@ -86,8 +86,7 @@ class QualitySelectionModal(tk.Toplevel):
         try:
             if parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal":
                 is_parent_vis = True
-        except Exception:
-            pass
+        except Exception: pass
 
         if is_parent_vis:
             try:
@@ -98,11 +97,8 @@ class QualitySelectionModal(tk.Toplevel):
             except Exception:
                 x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
         else:
-            try:
-                self.transient("")
-                self.deiconify()
-            except Exception:
-                pass
+            try: self.transient(""); self.deiconify()
+            except Exception: pass
             x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
 
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
@@ -239,6 +235,24 @@ class QualitySelectionModal(tk.Toplevel):
         self.entry_dest = tk.Entry(card_dest, font=("Segoe UI", 9), bg=c_input_bg, fg=c_text_bright, insertbackground=c_accent, relief="flat")
         self.entry_dest.insert(0, self.dest_path)
         self.entry_dest.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 8), ipady=3)
+
+        if self.cb_sub and hasattr(self.cb_sub, "_mode_var"):
+            def _on_sub_mode_modal_changed(*_):
+                if hasattr(self, "entry_dest") and self.selected_option:
+                    sub_mode = getattr(self.cb_sub, "_selected_mode", "soft_embed")
+                    if hasattr(self.cb_sub, "get_selected_mode"): sub_mode = self.cb_sub.get_selected_mode()
+                    cur = self.entry_dest.get().strip()
+                    updated = apply_media_filename_tags(
+                        cur, quality_label=self.selected_option.resolution_label,
+                        is_sub_burned=(sub_mode == "hard_burn"), ext=self.selected_option.ext
+                    )
+                    self.entry_dest.delete(0, tk.END)
+                    self.entry_dest.insert(0, updated)
+                    if self.dest_path: self.dest_path = updated
+            try: self.cb_sub._mode_var.trace_add("write", _on_sub_mode_modal_changed)
+            except Exception:
+                try: self.cb_sub._mode_var.trace("w", _on_sub_mode_modal_changed)
+                except Exception: pass
 
         btn_browse = tk.Button(
             card_dest,
@@ -469,14 +483,10 @@ class QualitySelectionModal(tk.Toplevel):
         self._attach_selected_tracks()
         final_dest = self._resolve_final_dest()
         self._confirmed = True
-        try:
-            self.grab_release()
-        except Exception:
-            pass
-        try:
-            self.destroy()
-        except Exception:
-            pass
+        try: self.grab_release()
+        except Exception: pass
+        try: self.destroy()
+        except Exception: pass
         self.on_confirm(self.selected_option, final_dest)
 
     def _on_open_in_main(self):
@@ -502,10 +512,8 @@ class QualitySelectionModal(tk.Toplevel):
     def grab_set_global(self): pass
 
     def destroy(self):
-        try:
-            self.withdraw()
-        except Exception:
-            pass
+        try: self.withdraw()
+        except Exception: pass
         for job_attr in ("_idle_job", "_topmost_job"):
             job = getattr(self, job_attr, None)
             if job:

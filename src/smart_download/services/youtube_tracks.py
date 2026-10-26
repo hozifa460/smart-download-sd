@@ -195,6 +195,12 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     auto_subs = info.get("automatic_captions") or {}
     popular_lower = [x.lower() for x in POPULAR_AUTO_LANGS]
     base_headers = dict(info.get("http_headers") or {})
+    if "Cookie" not in base_headers and "cookie" not in base_headers:
+        cookie_val = info.get("cookies")
+        if isinstance(cookie_val, dict):
+            base_headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookie_val.items())
+        elif isinstance(cookie_val, str) and cookie_val.strip():
+            base_headers["Cookie"] = cookie_val.strip()
 
     for is_auto, sub_dict in ((False, manual_subs), (True, auto_subs)):
         for lang, flist in sub_dict.items():
@@ -213,7 +219,7 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
                 f_url = f.get("url")
                 if f_url and f_url not in fallback_urls:
                     fallback_urls.append(f_url)
-                if f_url == url and isinstance(f.get("http_headers"), dict):
+                if isinstance(f.get("http_headers"), dict):
                     sub_headers.update(f["http_headers"])
 
             if is_auto:
@@ -389,7 +395,8 @@ def build_audio_subtitle_row(
                 if cb_sub_mode.current() != idx:
                     cb_sub_mode.current(idx)
                 if cb_sub.current() <= 0 and len(subtitle_tracks) > 1:
-                    cb_sub.current(1)
+                    ar_idx = next((i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
+                    cb_sub.current(ar_idx if ar_idx is not None else 1)
                     _on_sub_changed()
 
         try:
@@ -425,7 +432,8 @@ def build_audio_subtitle_row(
                 except Exception:
                     pass
                 if cb_sub.current() <= 0 and len(subtitle_tracks) > 1:
-                    cb_sub.current(1)
+                    ar_idx = next((i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
+                    cb_sub.current(ar_idx if ar_idx is not None else 1)
                     _on_sub_changed()
 
         cb_sub._mode_combobox = cb_sub_mode

@@ -101,20 +101,23 @@ class DownloadHistoryManager:
 
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
+            incomplete_statuses = {"paused", "in progress", "failed", "queued", "متوقف مؤقتاً", "قيد التحميل", "فشل", "في الانتظار"}
             match_idx = -1
             matched_id = None
             old_entry = None
             for idx, entry in enumerate(self._entries):
+                e_id = entry.get("id")
                 e_path = entry.get("file_path", "")
                 e_url = entry.get("url", "")
                 e_fn = entry.get("filename", "")
                 e_status = str(entry.get("status", "")).strip()
+                e_status_lower = e_status.lower()
                 e_path_norm = os.path.normcase(os.path.abspath(e_path)) if e_path else ""
 
                 if norm_path_case and e_path_norm and e_path_norm == norm_path_case:
-                    # If existing entry is Completed, do not pop or replace it when a new download
-                    # is starting, queued, or paused. Only update if the existing entry is incomplete.
-                    if e_status in ("Completed", "مكتمل") and status in ("Queued", "In Progress", "Paused"):
+                    # Never pop or replace an existing completed download entry.
+                    # Only update if the existing entry is incomplete (Paused, In Progress, Failed, Queued).
+                    if e_status_lower in ("completed", "مكتمل") or e_status_lower not in incomplete_statuses:
                         continue
                     match_idx = idx
                     matched_id = entry.get("id")
@@ -122,7 +125,9 @@ class DownloadHistoryManager:
                     break
 
                 if raw_url and e_url == raw_url and filename and e_fn == filename:
-                    if e_status not in ("Completed", "مكتمل") and (not norm_path_case or not e_path_norm or e_path_norm == norm_path_case):
+                    if e_status_lower in ("completed", "مكتمل") or e_status_lower not in incomplete_statuses:
+                        continue
+                    if not norm_path_case or not e_path_norm or e_path_norm == norm_path_case:
                         match_idx = idx
                         matched_id = entry.get("id")
                         old_entry = entry

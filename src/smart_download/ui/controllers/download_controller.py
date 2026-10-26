@@ -46,6 +46,12 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         else:
             self._download_queue.append((url, dest, max_conn, bytes_limit))
             self.log(f"[QUEUE] Task queued: {os.path.basename(dest)} ({len(self._download_queue)} queued)")
+            if hasattr(self, "history_manager") and self.history_manager:
+                try:
+                    self.history_manager.add_or_update_entry(url=url, file_path=dest, size_bytes=0, status="Queued", elapsed_sec=0.0)
+                    self._refresh_history_table()
+                except Exception:
+                    pass
 
     def _on_start_download(self, skip_resolver: bool = False):
         if getattr(self, "_is_resolving_start", False) or (self.engine and self.engine.is_running):
@@ -145,13 +151,10 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             return
 
         if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
-            try:
-                self._yt_cancel_event.set()
-            except Exception:
-                pass
+            try: self._yt_cancel_event.set()
+            except Exception: pass
 
-        if not is_media_url(url, check_ytdlp_extractors=False):
-            dest = generate_unique_destination_path(dest)
+        dest = generate_unique_destination_path(dest)
         # Populate GUI entry fields
         try:
             self.entry_url.delete(0, tk.END)
@@ -238,6 +241,11 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             modal.attach_engine(self.engine)
 
         self.engine.start()
+        if hasattr(self, "history_manager") and self.history_manager and not is_media_url(url, check_ytdlp_extractors=False):
+            try:
+                self.history_manager.add_or_update_entry(url=url, file_path=dest, size_bytes=getattr(self.engine, "total_size", 0) or 0, status="In Progress", elapsed_sec=0.0)
+                self._refresh_history_table()
+            except Exception: pass
 
     def _resolve_history_url(self) -> str:
         u = (self.engine.url if self.engine and getattr(self.engine, "url", None) else (self.entry_url.get() if hasattr(self, "entry_url") else "")).strip()
@@ -464,39 +472,27 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     pass
                 self._quality_modal = None
             if hasattr(self, "btn_start"):
-                try:
-                    self.btn_start.configure(state="normal")
-                except Exception:
-                    pass
+                try: self.btn_start.configure(state="normal")
+                except Exception: pass
             if hasattr(self, "btn_pause"):
-                try:
-                    self.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"), bg=getattr(self, "c_panel_light", "#334155"))
-                except Exception:
-                    pass
+                try: self.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"), bg=getattr(self, "c_panel_light", "#334155"))
+                except Exception: pass
             if hasattr(self, "btn_cancel"):
-                try:
-                    self.btn_cancel.configure(state="disabled")
-                except Exception:
-                    pass
+                try: self.btn_cancel.configure(state="disabled")
+                except Exception: pass
             is_expired = any(k in str(error_msg) for k in ("401", "403", "410", "Forbidden", "Expired", "Unauthorized"))
             if hasattr(self, "btn_refresh_link"):
                 try:
-                    if is_expired:
-                        self.btn_refresh_link.configure(state="normal", bg=getattr(self, "c_warning", "#f59e0b"), fg="#0f172a")
-                    else:
-                        self.btn_refresh_link.configure(state="normal", bg=getattr(self, "c_panel_light", "#334155"), fg=getattr(self, "c_accent", "#38bdf8"))
-                except Exception:
-                    pass
+                    b_bg = getattr(self, "c_warning", "#f59e0b") if is_expired else getattr(self, "c_panel_light", "#334155")
+                    b_fg = "#0f172a" if is_expired else getattr(self, "c_accent", "#38bdf8")
+                    self.btn_refresh_link.configure(state="normal", bg=b_bg, fg=b_fg)
+                except Exception: pass
             if hasattr(self, "card_size"):
-                try:
-                    self.card_size.configure(text=tr("status_ready", "Ready"))
-                except Exception:
-                    pass
+                try: self.card_size.configure(text=tr("status_ready", "Ready"))
+                except Exception: pass
             if hasattr(self, "log"):
-                try:
-                    self.log(f"[ERROR] Download Error: {error_msg}")
-                except Exception:
-                    pass
+                try: self.log(f"[ERROR] Download Error: {error_msg}")
+                except Exception: pass
 
             try:
                 dl_url = self._resolve_history_url()

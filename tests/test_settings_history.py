@@ -430,12 +430,12 @@ class TestDownloadHistoryAndCategorization(unittest.TestCase):
             url="https://example.com/sample.mp4",
             file_path=file1,
             size_bytes=2048,
-            status="Completed",
+            status="In Progress",
             elapsed_sec=1.5
         )
         self.assertEqual(entry1["filename"], "sample.mp4")
         self.assertEqual(entry1["category"], "Video")
-        self.assertEqual(entry1["status"], "Completed")
+        self.assertEqual(entry1["status"], "In Progress")
         self.assertEqual(entry1["size_bytes"], 2048)
 
         file2 = os.path.join(self.temp_dir, "song.mp3")
@@ -458,7 +458,7 @@ class TestDownloadHistoryAndCategorization(unittest.TestCase):
         self.assertEqual(entries[0]["id"], entry2["id"])
         self.assertEqual(entries[1]["id"], entry1["id"])
 
-        # 3. Deduplication / update moves matching entry to index 0
+        # 3. Deduplication / update moves matching incomplete entry to index 0
         updated_entry1 = mgr.add_or_update_entry(
             url="https://example.com/sample.mp4",
             file_path=file1,
@@ -470,6 +470,18 @@ class TestDownloadHistoryAndCategorization(unittest.TestCase):
         self.assertEqual(len(entries), 2)
         self.assertEqual(entries[0]["id"], entry1["id"])
         self.assertAlmostEqual(entries[0]["elapsed_sec"], 3.2)
+
+        # 3b. Re-downloading completed file creates unique new entry without clobbering old completed entry
+        redownload_entry = mgr.add_or_update_entry(
+            url="https://example.com/sample.mp4",
+            file_path=file1,
+            size_bytes=2048,
+            status="Completed",
+            elapsed_sec=4.0
+        )
+        self.assertEqual(len(mgr.get_entries()), 3)
+        self.assertNotEqual(redownload_entry["id"], entry1["id"])
+        mgr.remove_entry(redownload_entry["id"])
 
         # 4. Category filtering
         video_entries = mgr.get_entries(category_filter="Video")
@@ -659,8 +671,8 @@ class TestDownloadHistoryAndCategorization(unittest.TestCase):
         path_upper = os.path.join(self.temp_dir, "Clip.mp4")
         path_lower = os.path.join(self.temp_dir, "clip.mp4")
 
-        mgr.add_or_update_entry(url="https://example.com/Clip.mp4", file_path=path_upper, size_bytes=1000)
-        mgr.add_or_update_entry(url="https://example.com/Clip.mp4", file_path=path_lower, size_bytes=2000)
+        mgr.add_or_update_entry(url="https://example.com/Clip.mp4", file_path=path_upper, size_bytes=1000, status="In Progress")
+        mgr.add_or_update_entry(url="https://example.com/Clip.mp4", file_path=path_lower, size_bytes=2000, status="Completed")
 
         entries = mgr.get_entries()
         self.assertEqual(len(entries), 1, "Differing path case must deduplicate on Windows")

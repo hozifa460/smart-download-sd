@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ...locales.i18n import tr
-from ...utils.file_ops import open_downloaded_file, open_containing_folder
+from ...utils.file_ops import open_downloaded_file, open_containing_folder, generate_unique_destination_path
 from ...services.youtube_service import format_filesize, is_media_url
 
 
@@ -215,12 +215,13 @@ class HistoryPanelMixin:
                     self.log("[HISTORY] Cannot redownload expired googlevideo.com stream URL. Please provide original media URL.")
                 return
 
+        unique_dest = generate_unique_destination_path(file_path) if file_path else ""
         if hasattr(self, "entry_url"):
             self.entry_url.delete(0, tk.END)
             self.entry_url.insert(0, url)
-        if file_path and hasattr(self, "entry_dest"):
+        if unique_dest and hasattr(self, "entry_dest"):
             self.entry_dest.delete(0, tk.END)
-            self.entry_dest.insert(0, file_path)
+            self.entry_dest.insert(0, unique_dest)
         elif hasattr(self, "_on_url_change"):
             self._on_url_change()
         if hasattr(self, "notebook"):
@@ -235,7 +236,7 @@ class HistoryPanelMixin:
                 self._show_cached_quality_modal(ctx)
                 return
             if hasattr(self, "_start_youtube_download"):
-                self._start_youtube_download(url, file_path or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""))
+                self._start_youtube_download(url, unique_dest or file_path or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""))
                 return
 
         self._on_start_download()

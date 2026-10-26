@@ -389,6 +389,13 @@ class YouTubeDownloadControllerMixin:
         if yt_modal and hasattr(yt_modal, "attach_engine"):
             yt_modal.attach_engine(coordinator)
         coordinator.start()
+        if hasattr(self, "history_manager") and self.history_manager:
+            try:
+                q_url = getattr(stream_info, "webpage_url", "") or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
+                est_sz = (getattr(stream_info, "video_size", 0) or 0) + (getattr(stream_info, "audio_size", 0) or 0)
+                self.history_manager.add_or_update_entry(url=q_url, file_path=final_dest, size_bytes=est_sz, status="In Progress", elapsed_sec=0.0)
+                self._refresh_history_table()
+            except Exception: pass
 
 
 __all__ = ["YouTubeDownloadControllerMixin"]

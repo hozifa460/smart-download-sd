@@ -158,7 +158,8 @@ def generate_unique_destination_path(dest_path: str) -> str:
     while True:
         candidate = os.path.join(dirname, f"{root_base} ({counter}){ext}")
         c_parts = candidate + ".sd_parts"
-        if not os.path.exists(candidate) and not os.path.isdir(c_parts):
+        c_tdm = candidate + ".tdm_parts"
+        if not os.path.exists(candidate) and not os.path.isdir(c_parts) and not os.path.isdir(c_tdm):
             return candidate
         counter += 1
 
