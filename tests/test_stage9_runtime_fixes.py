@@ -20,6 +20,8 @@ from smart_download.services.subtitle_processor import (
     convert_vtt_to_srt,
     download_subtitle_as_srt,
     burn_subtitle_into_video,
+    _parse_timestamp_or_seconds,
+    _format_srt_timestamp,
 )
 from smart_download.services.youtube_tracks import (
     _normalize_sub_url_and_ext,
@@ -129,6 +131,27 @@ class TestSubtitleConversionStage9(unittest.TestCase):
         url2, ext2 = _normalize_sub_url_and_ext("https://yt.com/timedtext?lang=en&fmt=json3", "json3")
         self.assertEqual(ext2, "vtt")
         self.assertIn("fmt=vtt", url2)
+
+    def test_parse_timestamp_ms_and_timecode(self):
+        self.assertAlmostEqual(_parse_timestamp_or_seconds("1500ms"), 1.5)
+        self.assertAlmostEqual(_parse_timestamp_or_seconds("500ms"), 0.5)
+        self.assertAlmostEqual(_parse_timestamp_or_seconds("00:01:02:15"), 62.5)
+
+    def test_format_srt_timestamp_comma(self):
+        self.assertEqual(_format_srt_timestamp("00:01:02,500"), "00:01:02,500")
+        self.assertEqual(_format_srt_timestamp("01:02,500"), "00:01:02,500")
+
+    def test_convert_srt_with_commas(self):
+        srt_data = "1\n00:00:01,000 --> 00:00:03,500\nHello comma SRT\n"
+        converted = convert_vtt_to_srt(srt_data)
+        self.assertIn("00:00:01,000 --> 00:00:03,500", converted)
+        self.assertIn("Hello comma SRT", converted)
+
+    def test_convert_ttml_with_namespace_and_unquoted_attrs(self):
+        xml_data = "<tt><tt:body><tt:p begin=1.5s dur=2.0s>Namespaced TTML</tt:p></tt:body></tt>"
+        converted = convert_vtt_to_srt(xml_data)
+        self.assertIn("00:00:01,500 --> 00:00:03,500", converted)
+        self.assertIn("Namespaced TTML", converted)
 
 
 class TestBurnSubtitleEncodingAndPaths(unittest.TestCase):

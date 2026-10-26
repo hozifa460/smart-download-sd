@@ -33,7 +33,7 @@ ISO_639_2: Dict[str, str] = {
 
 
 def _format_srt_timestamp(ts: str) -> str:
-    """Converts MM:SS.mmm or HH:MM:SS.mmm into standard SRT HH:MM:SS,mmm."""
+    """Converts MM:SS.mmm, MM:SS,mmm, HH:MM:SS.mmm, or HH:MM:SS,mmm into standard SRT HH:MM:SS,mmm."""
     parts = ts.strip().split(":")
     if len(parts) == 2:
         h, m, s = "00", parts[0].zfill(2), parts[1]
@@ -41,6 +41,7 @@ def _format_srt_timestamp(ts: str) -> str:
         h, m, s = parts[0].zfill(2), parts[1].zfill(2), parts[2]
     else:
         return ts
+    s = s.replace(",", ".")
     if "." in s:
         sec, ms = s.split(".", 1)
         return f"{h}:{m}:{sec.zfill(2)},{ms[:3].ljust(3, '0')}"
@@ -62,8 +63,14 @@ def _format_seconds_to_srt(seconds: float) -> str:
 
 
 def _parse_timestamp_or_seconds(val: str) -> float:
-    """Parses seconds string (e.g. '1.5s', '12.4') or HH:MM:SS.mmm into float seconds."""
-    s = str(val or "").strip().rstrip("sS").replace(",", ".")
+    """Parses seconds string (e.g. '1.5s', '12.4', '1500ms') or HH:MM:SS.mmm into float seconds."""
+    s = str(val or "").strip().replace(",", ".")
+    if s.lower().endswith("ms"):
+        try:
+            return float(s[:-2].strip()) / 1000.0
+        except Exception:
+            return 0.0
+    s = s.rstrip("sS")
     if ":" in s:
         parts = s.split(":")
         try:
@@ -71,6 +78,8 @@ def _parse_timestamp_or_seconds(val: str) -> float:
                 return int(parts[0]) * 60 + float(parts[1])
             if len(parts) == 3:
                 return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+            if len(parts) == 4:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2]) + float(parts[3]) / 30.0
         except Exception:
             return 0.0
     try:
@@ -83,15 +92,16 @@ def _parse_xml_subtitles_to_srt(text: str) -> str:
     """Parses YouTube timedtext XML (<transcript>, <tt>, <text>, <p>) into valid SRT."""
     cues: List[str] = []
     cue_idx = 1
-    # Match <text ...>...</text> or <p ...>...</p> tags regardless of attribute order or quote style
-    text_matches = list(re.finditer(r'<text\s+([^>]*?)>(.*?)</text>', text, re.DOTALL | re.IGNORECASE))
-    if not text_matches:
-        text_matches = list(re.finditer(r'<p\s+([^>]*?)>(.*?)</p>', text, re.DOTALL | re.IGNORECASE))
+    tag_pat = re.compile(
+        r'<(?:[a-zA-Z0-9_-]+:)?(?:text|p)\b([^>]*?)>(.*?)</(?:[a-zA-Z0-9_-]+:)?(?:text|p)>',
+        re.DOTALL | re.IGNORECASE
+    )
+    attr_pat = re.compile(r'([a-zA-Z0-9_:-]+)\s*=\s*(?:[\'"]([^\'"]*)[\'"]|([^\s>]+))')
 
-    for m in text_matches:
+    for m in tag_pat.finditer(text):
         attrs_str = m.group(1)
         raw_body = m.group(2)
-        attrs = dict(re.findall(r'([a-zA-Z0-9_:-]+)\s*=\s*[\'"]([^\'"]*)[\'"]', attrs_str))
+        attrs = {k: v1 if v1 != "" else v2 for k, v1, v2 in attr_pat.findall(attrs_str)}
         start_val = attrs.get("start") or attrs.get("begin")
         if not start_val:
             continue
@@ -174,7 +184,7 @@ def convert_vtt_to_srt(vtt_text: str) -> str:
     srt_cues: List[str] = []
     cue_index = 1
     timestamp_pat = re.compile(
-        r'((?:\d+:)?\d{1,2}:\d{2}\.\d+)\s*-->\s*((?:\d+:)?\d{1,2}:\d{2}\.\d+)'
+        r'((?:\d+:)?\d{1,2}:\d{2}[.,]\d+)\s*-->\s*((?:\d+:)?\d{1,2}:\d{2}[.,]\d+)'
     )
 
     for block in blocks:
