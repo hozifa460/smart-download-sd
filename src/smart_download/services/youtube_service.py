@@ -411,19 +411,20 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 res = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
                 return res.returncode, res.stderr
             p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creationflags)
-            while p.poll() is None:
-                if cancel_event and cancel_event.is_set():
-                    try: p.kill()
-                    except Exception: pass
-                    try: p.communicate()
-                    except Exception: pass
-                    if os.path.exists(output_path):
-                        try: os.remove(output_path)
+            while True:
+                try:
+                    _, err = p.communicate(timeout=0.05)
+                    return p.returncode, err
+                except subprocess.TimeoutExpired:
+                    if cancel_event and cancel_event.is_set():
+                        try: p.kill()
                         except Exception: pass
-                    return -999, "Cancelled"
-                time.sleep(0.05)
-            _, err = p.communicate()
-            return p.returncode, err
+                        try: p.communicate()
+                        except Exception: pass
+                        if os.path.exists(output_path):
+                            try: os.remove(output_path)
+                            except Exception: pass
+                        return -999, "Cancelled"
 
         rc, primary_err = _run_proc(cmd)
         if cancel_event and cancel_event.is_set():

@@ -203,7 +203,8 @@ class FetchingLinkToast(tk.Toplevel):
         self._start_animations()
 
     def _start_animations(self):
-        """Initiates pulsing progress marquee and animated status dots."""
+        """Initiates pulsing progress marquee, window fade-in, and animated status dots."""
+        animate_window_open(self, duration_ms=130)
         self._animate_pulse()
         self._animate_dots()
 

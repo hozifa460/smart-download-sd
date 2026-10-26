@@ -300,6 +300,71 @@ Enjoy downloading!
             except Exception:
                 pass
 
+    def test_merge_video_audio_pipe_deadlock_free(self):
+        """Verify merge_video_audio handles subprocess.TimeoutExpired without deadlocking on pipes."""
+        import subprocess
+        cancel_ev = threading.Event()
+        mock_proc = MagicMock()
+        # Simulate 2 timeouts followed by successful finish
+        mock_proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="ffmpeg", timeout=0.05),
+            subprocess.TimeoutExpired(cmd="ffmpeg", timeout=0.05),
+            ("", "")
+        ]
+        mock_proc.returncode = 0
+
+        with patch("smart_download.services.youtube_service.find_ffmpeg_bin", return_value="fake_ffmpeg"):
+            with patch("subprocess.Popen", return_value=mock_proc):
+                with patch("os.path.exists", return_value=True):
+                    with patch("os.path.getsize", return_value=1024):
+                        res = YouTubeResolver.merge_video_audio(
+                            "dummy_v.mp4", "dummy_a.mp4", "dummy_out.mp4",
+                            cancel_event=cancel_ev
+                        )
+                        self.assertTrue(res)
+                        self.assertEqual(mock_proc.communicate.call_count, 3)
+
+    def test_download_controller_cancel_with_dummy_ui(self):
+        """Verify _on_cancel_download executes without AttributeError on partial/dummy UI objects."""
+        from smart_download.ui.main_window import ModernFramelessGUI
+
+        class MinimalDummyUI:
+            def __init__(self):
+                self._yt_cancel_event = threading.Event()
+                self.engine = None
+                self.btn_start = MagicMock()
+                self.btn_pause = MagicMock()
+                self.btn_cancel = MagicMock()
+                self.logs = []
+            def log(self, m):
+                self.logs.append(m)
+
+        dummy = MinimalDummyUI()
+        ModernFramelessGUI._on_cancel_download(dummy)
+        self.assertTrue(dummy._yt_cancel_event.is_set())
+        dummy.btn_start.configure.assert_called_with(state="normal")
+        dummy.btn_cancel.configure.assert_called_with(state="disabled")
+
+    def test_animate_window_fallback_in_test_env(self):
+        """Verify animate_window_open and animate_window_close execute callbacks synchronously in test env."""
+        from smart_download.utils.tk_helpers import animate_window_open, animate_window_close
+        mock_win = MagicMock()
+        mock_win.winfo_exists.return_value = True
+
+        animate_window_open(mock_win)
+        mock_win.wm_attributes.assert_called_with("-alpha", 1.0)
+        # after should not be called to avoid invalid command name Tcl timers
+        mock_win.after.assert_not_called()
+
+        closed = False
+        def on_done():
+            nonlocal closed
+            closed = True
+
+        animate_window_close(mock_win, on_done=on_done)
+        self.assertTrue(closed)
+        mock_win.after.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

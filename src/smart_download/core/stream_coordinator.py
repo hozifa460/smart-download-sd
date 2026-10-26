@@ -190,44 +190,36 @@ class StreamDownloadCoordinator:
 
     def update_url(self, new_url: str, headers: Optional[Dict[str, str]] = None):
         with self._lock:
-            if self.current_engine:
-                self.current_engine.update_url(new_url, headers)
+            if self.current_engine: self.current_engine.update_url(new_url, headers)
 
     def refresh_link(self, new_url: str, headers: Optional[Dict[str, str]] = None, auto_resume: bool = True) -> bool:
         with self._lock:
-            if self.current_engine:
-                return self.current_engine.refresh_link(new_url, headers, auto_resume)
-            return False
+            return self.current_engine.refresh_link(new_url, headers, auto_resume) if self.current_engine else False
 
     @property
     def url(self) -> str:
         with self._lock:
-            return getattr(self.stream_info, "webpage_url", "") or (
-                f"https://www.youtube.com/watch?v={self.stream_info.video_id}"
-                if getattr(self.stream_info, "video_id", "")
-                else getattr(self.stream_info, "video_url", "")
-            )
+            if getattr(self.stream_info, "webpage_url", ""):
+                return self.stream_info.webpage_url
+            v_url = getattr(self.stream_info, "video_url", "")
+            if (TurboDownloadEngine.is_googlevideo_url(v_url) or "youtube.com" in v_url or "googlevideo.com" in v_url) and getattr(self.stream_info, "video_id", ""):
+                return f"https://www.youtube.com/watch?v={self.stream_info.video_id}"
+            return self.current_engine.url if (self.current_engine and getattr(self.current_engine, "url", None)) else v_url
 
     @property
     def supports_ranges(self) -> bool:
         with self._lock:
-            if self.current_engine:
-                return getattr(self.current_engine, "supports_ranges", True)
-            return True
+            return getattr(self.current_engine, "supports_ranges", True) if self.current_engine else True
 
     @property
     def has_expired_link(self) -> bool:
         with self._lock:
-            if self.current_engine:
-                return getattr(self.current_engine, "has_expired_link", False)
-            return False
+            return getattr(self.current_engine, "has_expired_link", False) if self.current_engine else False
 
     @property
     def last_http_status(self) -> int:
         with self._lock:
-            if self.current_engine:
-                return getattr(self.current_engine, "last_http_status", 0)
-            return 0
+            return getattr(self.current_engine, "last_http_status", 0) if self.current_engine else 0
 
     def _run_coordinator(self):
         video_tmp = ""

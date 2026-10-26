@@ -291,19 +291,21 @@ def embed_subtitle_into_mp4(
             rc, err = res.returncode, res.stderr
         else:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=cflags)
-            while p.poll() is None:
-                if cancel_event and cancel_event.is_set():
-                    try: p.kill()
-                    except Exception: pass
-                    try: p.communicate()
-                    except Exception: pass
-                    if os.path.exists(temp_mp4):
-                        try: os.remove(temp_mp4)
+            while True:
+                try:
+                    _, err = p.communicate(timeout=0.05)
+                    rc = p.returncode
+                    break
+                except subprocess.TimeoutExpired:
+                    if cancel_event and cancel_event.is_set():
+                        try: p.kill()
                         except Exception: pass
-                    return False
-                time.sleep(0.05)
-            _, err = p.communicate()
-            rc = p.returncode
+                        try: p.communicate()
+                        except Exception: pass
+                        if os.path.exists(temp_mp4):
+                            try: os.remove(temp_mp4)
+                            except Exception: pass
+                        return False
         if rc == 0 and os.path.isfile(temp_mp4) and os.path.getsize(temp_mp4) > 0:
             os.replace(temp_mp4, video_path)
             if on_log: on_log(f"[SUBTITLES] Successfully embedded soft subtitle ({iso3}) into MP4 container.")
@@ -366,19 +368,21 @@ def burn_subtitle_into_video(
             rc, err = res.returncode, res.stderr
         else:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=srt_dir, creationflags=cflags)
-            while p.poll() is None:
-                if cancel_event and cancel_event.is_set():
-                    try: p.kill()
-                    except Exception: pass
-                    try: p.communicate()
-                    except Exception: pass
-                    if os.path.exists(temp_burn_mp4):
-                        try: os.remove(temp_burn_mp4)
+            while True:
+                try:
+                    _, err = p.communicate(timeout=0.05)
+                    rc = p.returncode
+                    break
+                except subprocess.TimeoutExpired:
+                    if cancel_event and cancel_event.is_set():
+                        try: p.kill()
                         except Exception: pass
-                    return False
-                time.sleep(0.05)
-            _, err = p.communicate()
-            rc = p.returncode
+                        try: p.communicate()
+                        except Exception: pass
+                        if os.path.exists(temp_burn_mp4):
+                            try: os.remove(temp_burn_mp4)
+                            except Exception: pass
+                        return False
         if rc == 0 and os.path.isfile(temp_burn_mp4) and os.path.getsize(temp_burn_mp4) > 0:
             os.replace(temp_burn_mp4, abs_video)
             if on_log:

@@ -190,10 +190,15 @@ if not getattr(tk.Misc, "_sd_safe_destroy_patched", False):
 
 
 def animate_window_open(win: Any, duration_ms: int = 140) -> None:
-    """Smoothly steps -alpha from 0.05 to 1.0 over ~4 frames using win.after."""
+    """Smoothly steps -alpha from 0.05 to 1.0 over ~4 frames using win.after (falling back in test/headless environments)."""
     if not win:
         return
     try:
+        from ..config import is_test_environment
+        if is_test_environment():
+            try: win.wm_attributes("-alpha", 1.0)
+            except Exception: pass
+            return
         if not hasattr(win, "wm_attributes") or not win.winfo_exists():
             return
         try:
@@ -222,12 +227,17 @@ def animate_window_open(win: Any, duration_ms: int = 140) -> None:
 
 
 def animate_window_close(win: Any, on_done: Callable[[], None], duration_ms: int = 110) -> None:
-    """Smoothly steps -alpha from 1.0 to 0.0 before invoking on_done callback."""
+    """Smoothly steps -alpha from 1.0 to 0.0 before invoking on_done callback (falling back in test/headless environments)."""
     if not win:
         if on_done:
             on_done()
         return
     try:
+        from ..config import is_test_environment
+        if is_test_environment():
+            if on_done:
+                on_done()
+            return
         if not hasattr(win, "wm_attributes") or not win.winfo_exists() or getattr(win, "_closing", False):
             if on_done:
                 on_done()

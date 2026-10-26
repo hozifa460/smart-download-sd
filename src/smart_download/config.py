@@ -59,7 +59,7 @@ def is_test_environment() -> bool:
         return False
     if os.environ.get("SD_TESTING") == "1":
         return True
-    if "pytest" in sys.modules:
+    if "pytest" in sys.modules or "unittest" in sys.modules:
         return True
     args = [arg.lower() for arg in sys.argv[:3]] if hasattr(sys, "argv") and sys.argv else []
     return any(

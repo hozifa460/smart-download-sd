@@ -355,8 +355,12 @@ class MediaOptionsBarMixin:
         if not stream_url:
             stream_url = ctx.get("url") or ""
 
+        if getattr(self, "_preview_modal", None) and self._preview_modal.winfo_exists():
+            try: self._preview_modal.lift(); self._preview_modal.focus_force(); return
+            except Exception: pass
+
         theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
-        VideoPreviewModal(
+        self._preview_modal = VideoPreviewModal(
             parent=self.root,
             video_title=info.get("title") or "Media Preview",
             duration=int(info.get("duration") or 0),

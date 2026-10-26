@@ -289,16 +289,17 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             if hasattr(self.engine, "_active_subproc") and self.engine._active_subproc:
                 try: self.engine._active_subproc.kill()
                 except Exception: pass
-        self.btn_start.configure(state="normal")
-        self.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"), bg=self.c_panel_light)
-        self.btn_cancel.configure(state="disabled")
-        if hasattr(self, "btn_refresh_link"):
-            self.btn_refresh_link.configure(state="disabled", bg=self.c_panel_light, fg=self.c_text_muted)
-        self.card_size.configure(text=tr("status_ready", "Ready"))
-        self.card_speed.configure(text="0 B/s")
-        self.card_eta.configure(text="--:--:--")
-        self.card_threads.configure(text="0 / 0 Threads")
-        self._draw_main_progress(0.0)
+        c_light = getattr(self, "c_panel_light", "#334155")
+        c_muted = getattr(self, "c_text_muted", "#94a3b8")
+        if hasattr(self, "btn_start"): self.btn_start.configure(state="normal")
+        if hasattr(self, "btn_pause"): self.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"), bg=c_light)
+        if hasattr(self, "btn_cancel"): self.btn_cancel.configure(state="disabled")
+        if hasattr(self, "btn_refresh_link"): self.btn_refresh_link.configure(state="disabled", bg=c_light, fg=c_muted)
+        if hasattr(self, "card_size"): self.card_size.configure(text=tr("status_ready", "Ready"))
+        if hasattr(self, "card_speed"): self.card_speed.configure(text="0 B/s")
+        if hasattr(self, "card_eta"): self.card_eta.configure(text="--:--:--")
+        if hasattr(self, "card_threads"): self.card_threads.configure(text="0 / 0 Threads")
+        if hasattr(self, "_draw_main_progress"): self._draw_main_progress(0.0)
         self.log("[CANCEL] Operation cancelled by user.")
 
     def _engine_progress_cb(self, downloaded: int, total: int, speed: float, eta: str, active_chunks: int):
@@ -334,12 +335,11 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                 return f"{b} B"
 
             size_str = f"{_fmt_size(d)} / {_fmt_size(t)} ({pct:.1f}%)" if t > 0 else f"{_fmt_size(d)} (Streaming...)"
-            self.card_size.configure(text=size_str)
-            self.card_eta.configure(text=et)
-
+            if hasattr(self, "card_size"): self.card_size.configure(text=size_str)
+            if hasattr(self, "card_eta"): self.card_eta.configure(text=et)
             snap = self.engine.get_chunks_snapshot() if hasattr(self.engine, "get_chunks_snapshot") else (self.engine.chunks if self.engine else [])
             total_chunks = max(ac, len(snap))
-            self.card_threads.configure(text=f"{ac} / {total_chunks} Threads")
+            if hasattr(self, "card_threads"): self.card_threads.configure(text=f"{ac} / {total_chunks} Threads")
 
         try:
             if self.root.winfo_exists():

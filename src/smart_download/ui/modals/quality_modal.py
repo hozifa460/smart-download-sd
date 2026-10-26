@@ -12,7 +12,7 @@ except ImportError:
     Image = None
     ImageTk = None
 
-from ...config import get_resource_path
+from ...config import get_resource_path, is_test_environment
 from ...locales.i18n import tr
 from ...utils.file_ops import CATEGORY_SUBFOLDERS, resolve_categorized_path
 from ...services.youtube_service import VideoFormatOption, format_filesize, sanitize_filename
@@ -110,9 +110,12 @@ class QualitySelectionModal(tk.Toplevel):
 
         self.lift()
         self.attributes("-topmost", True)
-        self.focus_force()
-        self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
-        self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
+        if not is_test_environment():
+            self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
+            self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
+        else:
+            self._topmost_job = None
+            self._idle_job = None
 
         self._build_ui()
         animate_window_open(self, duration_ms=130)
@@ -466,28 +469,24 @@ class QualitySelectionModal(tk.Toplevel):
         """Opens live video, audio, and subtitle preview player for selected options."""
         if not self.selected_option:
             return
+        if getattr(self, "_preview_modal", None) and self._preview_modal.winfo_exists():
+            try: self._preview_modal.lift(); self._preview_modal.focus_force(); return
+            except Exception: pass
         self._attach_selected_tracks()
         stream_url = getattr(self.selected_option, "url", "") or ""
         if not stream_url and self.parent_app:
             ctx = getattr(self.parent_app, "_pending_media_context", None) or getattr(self.parent_app, "_last_media_context", None)
-            if ctx:
-                stream_url = ctx.get("url") or ""
+            if ctx: stream_url = ctx.get("url") or ""
         if not stream_url and hasattr(self, "dest_path"):
             stream_url = self.dest_path
 
         from .video_preview_modal import VideoPreviewModal
         sel_audio = getattr(self.selected_option, "selected_audio_track", None)
         sel_sub = getattr(self.selected_option, "selected_subtitle_track", None)
-        VideoPreviewModal(
-            parent=self.master or self,
-            video_title=self.video_title,
-            duration=self.duration,
-            media_url=stream_url,
-            selected_option=self.selected_option,
-            selected_audio=sel_audio,
-            selected_subtitle=sel_sub,
-            theme=self.theme,
-            on_download_now=self._on_download
+        self._preview_modal = VideoPreviewModal(
+            parent=self.master or self, video_title=self.video_title, duration=self.duration,
+            media_url=stream_url, selected_option=self.selected_option, selected_audio=sel_audio,
+            selected_subtitle=sel_sub, theme=self.theme, on_download_now=self._on_download
         )
 
     def _on_open_in_main(self):
@@ -529,6 +528,8 @@ class QualitySelectionModal(tk.Toplevel):
         super().destroy()
 
     def _on_close(self):
+        if self.parent_app and getattr(self.parent_app, "_quality_modal", None) is self:
+            self.parent_app._quality_modal = None
         def _cleanup():
             self.destroy()
             for host in (self.parent_app, self.master):

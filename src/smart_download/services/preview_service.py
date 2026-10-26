@@ -27,11 +27,9 @@ def _parse_timestamp(ts: str) -> float:
     ts = ts.strip().replace(",", ".")
     parts = ts.split(":")
     if len(parts) == 3:
-        h, m, s = parts
-        return float(h) * 3600.0 + float(m) * 60.0 + float(s)
+        return float(parts[0]) * 3600.0 + float(parts[1]) * 60.0 + float(parts[2])
     elif len(parts) == 2:
-        m, s = parts
-        return float(m) * 60.0 + float(s)
+        return float(parts[0]) * 60.0 + float(parts[1])
     return float(parts[0]) if parts else 0.0
 
 
@@ -39,7 +37,6 @@ def parse_srt_cues(content_or_path: str) -> List[SubtitleCue]:
     """Parses SRT or VTT content / file path into ordered SubtitleCue list."""
     if not content_or_path:
         return []
-
     text = content_or_path
     if os.path.exists(content_or_path) and os.path.isfile(content_or_path):
         try:
@@ -47,19 +44,15 @@ def parse_srt_cues(content_or_path: str) -> List[SubtitleCue]:
                 text = f.read()
         except Exception:
             return []
-
     cues: List[SubtitleCue] = []
     pattern = re.compile(
         r"(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3}|\d{1,2}:\d{2}[,\.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,\.]\d{1,3}|\d{1,2}:\d{2}[,\.]\d{1,3})"
     )
-
-    blocks = re.split(r"\n\s*\n", text.strip())
-    for block in blocks:
+    for block in re.split(r"\n\s*\n", text.strip()):
         lines = [ln.strip() for ln in block.strip().splitlines() if ln.strip()]
         if not lines:
             continue
-        time_idx = -1
-        m = None
+        time_idx, m = -1, None
         for idx, line in enumerate(lines):
             m = pattern.search(line)
             if m:
@@ -70,14 +63,11 @@ def parse_srt_cues(content_or_path: str) -> List[SubtitleCue]:
         try:
             start_s = _parse_timestamp(m.group(1))
             end_s = _parse_timestamp(m.group(2))
-            body_lines = lines[time_idx + 1:]
-            clean_text = " ".join(body_lines)
-            clean_text = re.sub(r"<[^>]+>", "", clean_text).strip()
+            clean_text = re.sub(r"<[^>]+>", "", " ".join(lines[time_idx + 1:])).strip()
             if clean_text:
                 cues.append(SubtitleCue(start_sec=start_s, end_sec=end_s, text=clean_text))
         except Exception:
             continue
-
     cues.sort(key=lambda c: c.start_sec)
     return cues
 
@@ -98,18 +88,32 @@ def fetch_cues_for_track(sub_track: Optional[Dict[str, Any]]) -> List[SubtitleCu
             import urllib.request
             req = urllib.request.Request(sub_url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=5) as resp:
-                data = resp.read().decode("utf-8", errors="replace")
-                return parse_srt_cues(data)
+                return parse_srt_cues(resp.read().decode("utf-8", errors="replace"))
         except Exception as e:
             logger.debug("Failed to fetch subtitle cues from URL: %s", e)
     return []
 
 
+def _find_ffplay_bin() -> Optional[str]:
+    """Resolves ffplay executable from PATH or next to bundled FFmpeg."""
+    p = shutil.which("ffplay")
+    if p:
+        return p
+    try:
+        from .youtube_models import find_ffmpeg_bin
+        ff = find_ffmpeg_bin()
+        if ff:
+            d = os.path.dirname(ff)
+            cand = os.path.join(d, "ffplay.exe" if os.name == "nt" else "ffplay")
+            if os.path.isfile(cand):
+                return cand
+    except Exception:
+        pass
+    return None
+
+
 class PreviewSession:
-    """
-    Manages live playback clock, seeking, subtitle synchronization,
-    and optional ffplay video/audio execution.
-    """
+    """Manages live playback clock, seeking, subtitle synchronization, and ffplay video/audio execution."""
 
     def __init__(
         self,
@@ -125,8 +129,7 @@ class PreviewSession:
         self.cues: List[SubtitleCue] = list(cues or [])
         self.on_time_update = on_time_update
         self.on_state_change = on_state_change
-        self.use_ffplay = use_ffplay and bool(shutil.which("ffplay"))
-
+        self.use_ffplay = use_ffplay and bool(_find_ffplay_bin())
         self.current_time: float = 0.0
         self.is_playing: bool = False
         self._lock = threading.Lock()
@@ -135,88 +138,64 @@ class PreviewSession:
         self._proc: Optional[subprocess.Popen] = None
 
     def start(self):
-        """Starts preview session playback."""
         self.play()
 
     def play(self):
-        """Resumes or starts playback."""
         with self._lock:
             if self.is_playing:
                 return
             self.is_playing = True
             self._stop_event.clear()
-
             if self.use_ffplay and self.media_url:
                 self._launch_ffplay(self.current_time)
-
             if not self._clock_thread or not self._clock_thread.is_alive():
                 self._clock_thread = threading.Thread(target=self._clock_loop, daemon=True)
                 self._clock_thread.start()
-
         if self.on_state_change:
-            try:
-                self.on_state_change(True)
-            except Exception:
-                pass
+            try: self.on_state_change(True)
+            except Exception: pass
 
     def pause(self):
-        """Pauses playback without resetting clock."""
         with self._lock:
             if not self.is_playing:
                 return
             self.is_playing = False
             self._stop_event.set()
             self._kill_proc()
-
         if self.on_state_change:
-            try:
-                self.on_state_change(False)
-            except Exception:
-                pass
+            try: self.on_state_change(False)
+            except Exception: pass
 
     def stop(self):
-        """Stops playback and resets to beginning."""
         with self._lock:
             self.is_playing = False
             self._stop_event.set()
             self._kill_proc()
             self.current_time = 0.0
-
         if self.on_state_change:
-            try:
-                self.on_state_change(False)
-            except Exception:
-                pass
+            try: self.on_state_change(False)
+            except Exception: pass
         if self.on_time_update:
-            try:
-                self.on_time_update(0.0, self.get_active_subtitle(0.0))
-            except Exception:
-                pass
+            try: self.on_time_update(0.0, self.get_active_subtitle(0.0))
+            except Exception: pass
 
     def seek(self, delta_sec: float):
-        """Seeks relative to current timestamp."""
         self.seek_to(self.current_time + delta_sec)
 
     def seek_to(self, target_time: float):
-        """Seeks to absolute timestamp in seconds."""
         with self._lock:
             max_d = self.duration if self.duration > 0 else 86400.0
             self.current_time = max(0.0, min(float(target_time), max_d))
             was_playing = self.is_playing
-
             self._kill_proc()
             if was_playing and self.use_ffplay and self.media_url:
                 self._launch_ffplay(self.current_time)
-
         cue = self.get_active_subtitle(self.current_time)
         if self.on_time_update:
-            try:
-                self.on_time_update(self.current_time, cue)
-            except Exception:
-                pass
+            try: self.on_time_update(self.current_time, cue)
+            except Exception: pass
 
     def get_active_subtitle(self, timestamp: Optional[float] = None) -> str:
-        """Returns the text of any subtitle cue active at the specified timestamp."""
         t = self.current_time if timestamp is None else timestamp
         for cue in self.cues:
             if cue.start_sec <= t <= cue.end_sec:
@@ -224,7 +203,6 @@ class PreviewSession:
         return ""
 
     def _clock_loop(self):
-        """Background thread updating playback position and subtitle text at ~80ms ticks."""
         last_tick = time.time()
         while not self._stop_event.is_set():
             time.sleep(0.08)
@@ -234,7 +212,6 @@ class PreviewSession:
                 now = time.time()
                 elapsed = now - last_tick
                 last_tick = now
-
                 self.current_time += elapsed
                 if self.duration > 0 and self.current_time >= self.duration:
                     self.current_time = self.duration
@@ -243,38 +220,29 @@ class PreviewSession:
                     reached_end = True
                 else:
                     reached_end = False
-
                 t = self.current_time
-
             cue = self.get_active_subtitle(t)
             if self.on_time_update:
-                try:
-                    self.on_time_update(t, cue)
-                except Exception:
-                    pass
-
+                try: self.on_time_update(t, cue)
+                except Exception: pass
             if reached_end:
                 if self.on_state_change:
-                    try:
-                        self.on_state_change(False)
-                    except Exception:
-                        pass
+                    try: self.on_state_change(False)
+                    except Exception: pass
                 break
 
     def _launch_ffplay(self, start_pos: float):
-        """Launches ffplay subprocess at start_pos."""
         self._kill_proc()
-        ffplay_exe = shutil.which("ffplay")
+        ffplay_exe = _find_ffplay_bin()
         if not ffplay_exe:
             return
         cmd = [
-            ffplay_exe,
-            "-ss", f"{start_pos:.2f}",
-            "-autoexit",
-            "-window_title", "Smart Download - Live Preview",
-            "-loglevel", "quiet",
-            self.media_url
+            ffplay_exe, "-ss", f"{start_pos:.2f}", "-autoexit",
+            "-window_title", "Smart Download - Live Preview", "-loglevel", "quiet"
         ]
+        if self.media_url.startswith(("http://", "https://")):
+            cmd.extend(["-headers", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"])
+        cmd.append(self.media_url)
         try:
             self._proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
@@ -282,12 +250,9 @@ class PreviewSession:
             self._proc = None
 
     def _kill_proc(self):
-        """Kills active ffplay subprocess without blocking."""
         if self._proc:
-            try:
-                self._proc.kill()
-            except Exception:
-                pass
+            try: self._proc.kill()
+            except Exception: pass
             self._proc = None
 
 
