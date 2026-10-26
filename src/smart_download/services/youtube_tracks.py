@@ -366,9 +366,13 @@ def build_audio_subtitle_row(
             val = mode_var.get()
             if val in mode_codes:
                 cb_sub._selected_mode = val
+                cb_sub._user_touched_mode = True
                 idx = mode_codes.index(val)
                 if cb_sub_mode.current() != idx:
                     cb_sub_mode.current(idx)
+                if cb_sub.current() <= 0 and len(subtitle_tracks) > 1:
+                    cb_sub.current(1)
+                    _on_sub_changed()
 
         try:
             mode_var.trace_add("write", _on_mode_var_changed)

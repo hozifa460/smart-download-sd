@@ -80,8 +80,11 @@ class TestClipboardNonBlockingInterception(unittest.TestCase):
                 mock_yesno.assert_not_called()
                 self.assertIsNotNone(gui._confirm_modal)
                 self.assertIsNone(root.grab_current(), "Grab must not be held on root")
-                # Open in Main App delegates download to main GUI:
+                # Open in Main App delegates download to main GUI without auto-starting:
                 gui._confirm_modal._on_open_in_main()
+                mock_start.assert_not_called()
+                self.assertEqual(gui.btn_start["state"], "normal")
+                gui._on_start_download()
                 mock_start.assert_called_once()
 
             gui._cleanup_resources()
@@ -464,8 +467,11 @@ class TestClipboardSnifferAndUrlValidation(unittest.TestCase):
 
                 # User chooses to open in main app via modal
                 gui._confirm_modal._on_open_in_main()
-                mock_start.assert_called_once()
+                mock_start.assert_not_called()
                 self.assertIsNone(gui._confirm_modal)
+                self.assertEqual(gui.btn_start["state"], "normal")
+                gui._on_start_download()
+                mock_start.assert_called_once()
 
             gui._cleanup_resources()
         finally:

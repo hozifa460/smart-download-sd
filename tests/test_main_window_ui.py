@@ -125,9 +125,12 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             self.assertTrue(gui._confirm_modal.winfo_exists())
             self.assertEqual(gui.entry_url.get().strip(), target_url)
 
-            # User chooses 'Open in Main App': restores window
+            # User chooses 'Open in Main App': restores window without auto-start
             with patch.object(gui, "_on_start_download") as mock_start:
                 gui._confirm_modal._on_open_in_main()
+                mock_start.assert_not_called()
+                self.assertEqual(gui.btn_start["state"], "normal")
+                gui._on_start_download()
                 mock_start.assert_called_once()
             self.assertFalse(gui._start_hidden)
             self.assertEqual(self.root.state(), "normal")
@@ -159,9 +162,12 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             self.assertTrue(gui._confirm_modal.winfo_exists())
             self.assertEqual(gui.entry_url.get().strip(), target_url)
 
-            # User chooses 'Open in Main App': restores window
+            # User chooses 'Open in Main App': restores window without auto-start
             with patch.object(gui, "_on_start_download") as mock_start:
                 gui._confirm_modal._on_open_in_main()
+                mock_start.assert_not_called()
+                self.assertEqual(gui.btn_start["state"], "normal")
+                gui._on_start_download()
                 mock_start.assert_called_once()
             self.assertFalse(gui._start_hidden)
             self.assertEqual(self.root.state(), "normal")

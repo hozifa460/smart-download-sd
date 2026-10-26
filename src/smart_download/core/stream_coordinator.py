@@ -59,7 +59,7 @@ class StreamDownloadCoordinator:
         self.on_complete = on_complete
         self.on_error = on_error
 
-        # YouTube googlevideo CDN detection and concurrency safety
+        # YouTube googlevideo CDN detection
         self.is_youtube_stream = (
             TurboDownloadEngine.is_googlevideo_url(self.stream_info.video_url)
             or (bool(self.stream_info.audio_url) and TurboDownloadEngine.is_googlevideo_url(self.stream_info.audio_url))

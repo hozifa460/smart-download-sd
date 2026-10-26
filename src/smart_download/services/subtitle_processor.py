@@ -63,7 +63,7 @@ def _format_seconds_to_srt(seconds: float) -> str:
 
 def _parse_timestamp_or_seconds(val: str) -> float:
     """Parses seconds string (e.g. '1.5s', '12.4') or HH:MM:SS.mmm into float seconds."""
-    s = str(val or "").strip().rstrip("sS")
+    s = str(val or "").strip().rstrip("sS").replace(",", ".")
     if ":" in s:
         parts = s.split(":")
         try:
@@ -106,7 +106,8 @@ def _parse_xml_subtitles_to_srt(text: str) -> str:
                 end = _parse_timestamp_or_seconds(end_val)
             else:
                 end = start + 2.0
-            body = html.unescape(re.sub(r'<[^>]+>', '', raw_body)).strip()
+            body = re.sub(r'<br\s*/?>', '\n', raw_body, flags=re.IGNORECASE)
+            body = html.unescape(re.sub(r'<[^>]+>', '', body)).strip()
             if body:
                 timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
                 cues.append(f"{cue_idx}\n{timing}\n{body}")

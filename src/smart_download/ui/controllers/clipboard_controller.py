@@ -115,9 +115,14 @@ class ClipboardControllerMixin:
             return
 
         url = text.strip()
-        if not url or (not force and not seq_changed and (url == getattr(self, "_last_clipboard_url", None))):
+        if not url:
+            return
+        if not force and not seq_changed and (url == getattr(self, "_last_clipboard_url", None)):
+            return
+        if not seq_changed and (url == getattr(self, "_last_detected_url", None)):
             return
         self._last_clipboard_url = url
+        self._last_detected_url = url
         if is_downloadable_url(url):
             self._on_clipboard_url_detected(url)
 
@@ -128,6 +133,7 @@ class ClipboardControllerMixin:
                 self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
             except Exception:
                 pass
+        self._last_detected_url = None
         try:
             if url:
                 self._last_clipboard_url = url.strip()
