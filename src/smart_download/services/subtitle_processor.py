@@ -83,40 +83,36 @@ def _parse_xml_subtitles_to_srt(text: str) -> str:
     """Parses YouTube timedtext XML (<transcript>, <tt>, <text>, <p>) into valid SRT."""
     cues: List[str] = []
     cue_idx = 1
-    # Match classic YouTube XML <text start="1.5" dur="2.0">...</text>
-    text_pat = re.compile(r'<text\s+[^>]*start="([^"]+)"(?:\s+dur="([^"]+)")?[^>]*>(.*?)</text>', re.DOTALL | re.IGNORECASE)
-    for m in text_pat.finditer(text):
+    # Match <text ...>...</text> or <p ...>...</p> tags regardless of attribute order or quote style
+    text_matches = list(re.finditer(r'<text\s+([^>]*?)>(.*?)</text>', text, re.DOTALL | re.IGNORECASE))
+    if not text_matches:
+        text_matches = list(re.finditer(r'<p\s+([^>]*?)>(.*?)</p>', text, re.DOTALL | re.IGNORECASE))
+
+    for m in text_matches:
+        attrs_str = m.group(1)
+        raw_body = m.group(2)
+        attrs = dict(re.findall(r'([a-zA-Z0-9_:-]+)\s*=\s*[\'"]([^\'"]*)[\'"]', attrs_str))
+        start_val = attrs.get("start") or attrs.get("begin")
+        if not start_val:
+            continue
         try:
-            start = float(m.group(1))
-            dur = float(m.group(2)) if m.group(2) else 2.0
-            end = start + max(0.5, dur)
-            body = html.unescape(re.sub(r'<[^>]+>', '', m.group(3))).strip()
+            start = _parse_timestamp_or_seconds(start_val)
+            dur_val = attrs.get("dur")
+            end_val = attrs.get("end")
+            if dur_val:
+                dur = _parse_timestamp_or_seconds(dur_val)
+                end = start + max(0.5, dur)
+            elif end_val:
+                end = _parse_timestamp_or_seconds(end_val)
+            else:
+                end = start + 2.0
+            body = html.unescape(re.sub(r'<[^>]+>', '', raw_body)).strip()
             if body:
                 timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
                 cues.append(f"{cue_idx}\n{timing}\n{body}")
                 cue_idx += 1
         except Exception:
             continue
-    if not cues:
-        # Match TTML <p begin="..." dur="..." end="...">...</p>
-        p_pat = re.compile(r'<p\s+[^>]*begin="([^"]+)"(?:\s+(?:dur="([^"]+)"|end="([^"]+)"))?[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE)
-        for m in p_pat.finditer(text):
-            try:
-                start = _parse_timestamp_or_seconds(m.group(1))
-                if m.group(2):
-                    dur = _parse_timestamp_or_seconds(m.group(2))
-                    end = start + max(0.5, dur)
-                elif m.group(3):
-                    end = _parse_timestamp_or_seconds(m.group(3))
-                else:
-                    end = start + 2.0
-                body = html.unescape(re.sub(r'<[^>]+>', '', m.group(4))).strip()
-                if body:
-                    timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
-                    cues.append(f"{cue_idx}\n{timing}\n{body}")
-                    cue_idx += 1
-            except Exception:
-                continue
     return "\n\n".join(cues) + ("\n" if cues else "")
 
 
@@ -124,7 +120,7 @@ def _parse_json_subtitles_to_srt(text: str) -> str:
     """Parses YouTube json3 timedtext into valid SRT."""
     import json
     try:
-        data = json.loads(text)
+        data = json.loads(text.lstrip("\ufeff"))
     except Exception:
         return ""
     events = data.get("events")
@@ -156,7 +152,7 @@ def _parse_json_subtitles_to_srt(text: str) -> str:
 
 def convert_vtt_to_srt(vtt_text: str) -> str:
     """Converts WebVTT, YouTube XML (srv1/srv3/transcript/ttml), or JSON3 into standard SubRip (.srt)."""
-    raw = str(vtt_text or "").strip()
+    raw = str(vtt_text or "").lstrip("\ufeff").strip()
     if not raw:
         return ""
 

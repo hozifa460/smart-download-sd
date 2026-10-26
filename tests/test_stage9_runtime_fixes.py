@@ -98,6 +98,29 @@ class TestSubtitleConversionStage9(unittest.TestCase):
         self.assertIn("1\n00:00:01,200 --> 00:00:04,000\nFirst JSON3 segment", srt)
         self.assertIn("2\n00:00:05,000 --> 00:00:08,500\nSecond segment", srt)
 
+    def test_convert_xml_with_dur_before_start_and_single_quotes(self):
+        xml_data = "<transcript><text dur='4.5' start='2.0'>Single quotes &amp; reversed</text></transcript>"
+        srt = convert_vtt_to_srt(xml_data)
+        self.assertIn("1\n00:00:02,000 --> 00:00:06,500\nSingle quotes & reversed", srt)
+
+    def test_convert_xml_with_intervening_attributes(self):
+        xml_data = '<transcript><text start="1.5" id="c1" extra="val" dur="5.0">Intervening attrs</text></transcript>'
+        srt = convert_vtt_to_srt(xml_data)
+        self.assertIn("1\n00:00:01,500 --> 00:00:06,500\nIntervening attrs", srt)
+
+    def test_convert_ttml_with_single_quotes_and_intervening_attributes(self):
+        ttml_data = "<tt><body><div><p xml:id='p1' begin='00:01.000' region='bot' dur='00:04.000'>TTML single</p></div></body></tt>"
+        srt = convert_vtt_to_srt(ttml_data)
+        self.assertIn("00:00:01,000 --> 00:00:05,000", srt)
+        self.assertIn("TTML single", srt)
+
+    def test_convert_json3_with_utf8_bom(self):
+        json_data = "\ufeff" + json.dumps({
+            "events": [{"tStartMs": 1000, "dDurationMs": 3000, "segs": [{"utf8": "BOM JSON3"}]}]
+        })
+        srt = convert_vtt_to_srt(json_data)
+        self.assertIn("1\n00:00:01,000 --> 00:00:04,000\nBOM JSON3", srt)
+
     def test_normalize_sub_url_rewrites_formats(self):
         url1, ext1 = _normalize_sub_url_and_ext("https://yt.com/timedtext?fmt=srv3&lang=ar", "srv3")
         self.assertEqual(ext1, "vtt")
@@ -243,6 +266,50 @@ class TestStreamCoordinatorMultiThreading(unittest.TestCase):
         self.assertEqual(snapshots[0].chunk_id, 0)
         self.assertEqual(snapshots[1].chunk_id, 1)
 
+    def test_chunk_snapshot_no_duplicate_ids_with_dynamic_split(self):
+        from smart_download.core.chunk import DownloadChunk
+        stream_info = YouTubeStreamInfo(
+            video_id="vid123", title="Test", clean_filename="t", is_progressive=False,
+            video_url="https://example.com/video", audio_url="https://example.com/audio"
+        )
+        coord = StreamDownloadCoordinator(stream_info=stream_info, destination_path="t.mp4")
+        mock_v_engine = MagicMock()
+        mock_v_engine._lock = threading.RLock()
+        mock_a_engine = MagicMock()
+        mock_a_engine._lock = threading.RLock()
+
+        # Engine 1 has chunks 0 and 2 (from dynamic splitting)
+        mock_v_engine.chunks = [
+            DownloadChunk(chunk_id=0, start_byte=0, end_byte=50),
+            DownloadChunk(chunk_id=2, start_byte=51, end_byte=100)
+        ]
+        # Engine 2 has chunk 0
+        mock_a_engine.chunks = [DownloadChunk(chunk_id=0, start_byte=0, end_byte=30)]
+        coord._active_engines = [mock_v_engine, mock_a_engine]
+
+        snapshots = coord.get_chunks_snapshot()
+        ids = [c.chunk_id for c in snapshots]
+        self.assertEqual(len(ids), len(set(ids)), f"Duplicate chunk IDs found: {ids}")
+        self.assertEqual(ids, [0, 2, 3])
+
+    def test_speed_fallback_when_start_time_is_zero(self):
+        import time
+        coord = StreamDownloadCoordinator(
+            stream_info=YouTubeStreamInfo(
+                video_id="vid123", title="Test", clean_filename="t", is_progressive=False,
+                video_url="https://example.com/v", audio_url="https://example.com/a"
+            ),
+            destination_path="t.mp4"
+        )
+        coord.start_time = 0.0
+        coord._v_total_size = 1_000_000
+        coord._a_total_size = 500_000
+        combined_total = max(1, coord._v_total_size + coord._a_total_size)
+        st = coord.start_time
+        el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
+        rep_spd = coord._last_active_speed if coord._last_active_speed > 0 else (combined_total / max(0.05, el))
+        self.assertGreater(rep_spd, 100_000)
+
 
 class DummyMockApp(
     MediaOptionsBarMixin,
@@ -278,6 +345,18 @@ class DummyMockApp(
         self.engine = None
         self._pending_media_context = None
 
+        self.media_options_frame = MagicMock()
+        self._main_sub_mode_codes = ["soft_embed", "srt_only", "hard_burn"]
+        self.cb_main_quality = MagicMock()
+        self.cb_main_quality.current.return_value = 0
+        self.cb_main_audio = MagicMock()
+        self.cb_main_audio.current.return_value = 0
+        self.cb_main_sub = MagicMock()
+        self.cb_main_sub.current.return_value = 0
+        self.cb_main_sub_mode = MagicMock()
+        self.cb_main_sub_mode.current.return_value = 0
+        self.btn_reopen_quality = MagicMock()
+
     def log(self, msg):
         self.logs.append(msg)
 
@@ -293,8 +372,6 @@ class TestOpenInMainAppAndMediaOptionsBar(unittest.TestCase):
 
     def test_open_in_main_populates_ready_state(self):
         app = DummyMockApp()
-        mock_populate = MagicMock()
-        app.populate_main_media_bar = mock_populate
 
         test_opt = VideoFormatOption(
             format_id="137+140",
@@ -304,24 +381,25 @@ class TestOpenInMainAppAndMediaOptionsBar(unittest.TestCase):
             filesize_approx=50000000,
         )
 
-        # Trigger simulated open in main
-        app.entry_url.delete = MagicMock()
-        app.entry_url.insert = MagicMock()
-        app.entry_dest.delete = MagicMock()
-        app.entry_dest.insert = MagicMock()
-
         app.populate_main_media_bar(
             url="https://youtube.com/watch?v=abcdef",
             dest="C:/Downloads/video.mp4",
             info={"title": "Test Video"},
             options=[test_opt],
             selected_opt=test_opt,
-            audio_tracks=[],
-            subtitle_tracks=[]
+            audio_tracks=[{"label": "English"}],
+            subtitle_tracks=[{"label": "None"}, {"label": "Arabic"}],
+            resolver=MagicMock()
         )
 
-        self.assertTrue(mock_populate.called)
-        # Verify app controls are normal and not started
+        # Verify real populate_main_media_bar ran and set media context correctly
+        self.assertIsNotNone(app._pending_media_context)
+        self.assertEqual(app._pending_media_context["url"], "https://youtube.com/watch?v=abcdef")
+        self.assertEqual(app._pending_media_context["final_dest"], "C:/Downloads/video.mp4")
+        self.assertEqual(app._pending_media_context["selected_option"], test_opt)
+        self.assertTrue(app.cb_main_quality.configure.called)
+        self.assertTrue(app.cb_main_audio.configure.called)
+        self.assertTrue(app.cb_main_sub.configure.called)
         self.assertIsNone(app.engine)
 
     def test_start_pending_media_download_triggered_by_start(self):
@@ -351,6 +429,26 @@ class TestOpenInMainAppAndMediaOptionsBar(unittest.TestCase):
         self.assertEqual(len(launched), 1)
         self.assertEqual(launched[0][0], "C:/Downloads/test.mp4")
         self.assertIsNone(app._pending_media_context)
+        self.assertIsNotNone(app._last_media_context)
+
+    def test_reopen_quality_uses_cached_context_without_reprobing(self):
+        app = DummyMockApp()
+        app.entry_url.get.return_value = "https://youtube.com/watch?v=cached123"
+        app.entry_dest.get.return_value = "C:/Downloads/cached.mp4"
+        cached_modal_opened = []
+        app._show_cached_quality_modal = lambda ctx: cached_modal_opened.append(ctx)
+        app._start_youtube_download = MagicMock()
+
+        app._last_media_context = {
+            "url": "https://youtube.com/watch?v=cached123",
+            "info": {"title": "Cached Video"},
+            "options": [MagicMock()],
+        }
+
+        app._reopen_media_quality_modal()
+
+        self.assertEqual(len(cached_modal_opened), 1)
+        self.assertFalse(app._start_youtube_download.called)
 
 
 class TestFetchingToastSafety(unittest.TestCase):

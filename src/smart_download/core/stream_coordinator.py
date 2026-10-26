@@ -108,12 +108,12 @@ class StreamDownloadCoordinator:
             for eng in targets:
                 try:
                     with eng._lock:
+                        max_id = -1
                         for c in eng.chunks:
-                            if offset > 0:
-                                res.append(dataclasses.replace(c, chunk_id=c.chunk_id + offset))
-                            else:
-                                res.append(c)
-                        offset += len(eng.chunks)
+                            res.append(dataclasses.replace(c, chunk_id=c.chunk_id + offset) if offset > 0 else c)
+                            if c.chunk_id > max_id:
+                                max_id = c.chunk_id
+                        offset += max(0, max_id + 1)
                 except Exception:
                     pass
             return res
@@ -306,7 +306,8 @@ class StreamDownloadCoordinator:
                     if speed > 0:
                         self._last_active_speed = speed
                     elif downloaded > 0 and self._last_active_speed <= 0.0:
-                        self._last_active_speed = downloaded / max(0.05, time.time() - self.start_time)
+                        st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
+                        self._last_active_speed = downloaded / max(0.05, el)
                     if self.on_progress:
                         self.on_progress(downloaded, total, speed, eta, active)
 
@@ -362,7 +363,8 @@ class StreamDownloadCoordinator:
                     if combined_speed > 0:
                         self._last_active_speed = combined_speed
                     elif combined_dl > 0 and self._last_active_speed <= 0.0:
-                        self._last_active_speed = combined_dl / max(0.05, time.time() - self.start_time)
+                        st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
+                        self._last_active_speed = combined_dl / max(0.05, el)
                     if combined_speed <= 0.0 and self._last_active_speed > 0 and (v_completed.is_set() or a_completed.is_set()):
                         combined_speed = self._last_active_speed
                 rem_bytes = max(0, combined_total - combined_dl)
@@ -492,7 +494,8 @@ class StreamDownloadCoordinator:
             with self._lock:
                 self._active_engines.clear()
             combined_total = max(1, self._v_total_size + self._a_total_size)
-            rep_spd = self._last_active_speed if self._last_active_speed > 0 else (combined_total / max(0.05, time.time() - self.start_time))
+            st = self.start_time; el = (time.time() - st) if (isinstance(st, (int, float)) and st > 0) else 0.1
+            rep_spd = self._last_active_speed if self._last_active_speed > 0 else (combined_total / max(0.05, el))
             if self.on_progress:
                 self.on_progress(combined_total, combined_total, rep_spd, "Merging...", 0)
 

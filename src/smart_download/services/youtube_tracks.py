@@ -326,6 +326,7 @@ def build_audio_subtitle_row(
                 cb_sub_mode.configure(state="readonly")
             else:
                 cb_sub_mode.configure(state="disabled")
+                cb_sub._user_touched_mode = False
 
         def _on_radio_click():
             chosen = mode_var.get()

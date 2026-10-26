@@ -123,6 +123,8 @@ class LocaleControllerMixin:
             self.btn_hist_folder.configure(text=tr("btn_hist_folder"))
         if hasattr(self, "btn_hist_redownload") and self.btn_hist_redownload.winfo_exists():
             self.btn_hist_redownload.configure(text=tr("btn_hist_redownload"))
+        if hasattr(self, "btn_hist_quality") and self.btn_hist_quality.winfo_exists():
+            self.btn_hist_quality.configure(text=tr("ctx_redownload_quality"))
         if hasattr(self, "btn_hist_remove") and self.btn_hist_remove.winfo_exists():
             self.btn_hist_remove.configure(text=tr("btn_hist_remove"))
         if hasattr(self, "btn_hist_clear") and self.btn_hist_clear.winfo_exists():

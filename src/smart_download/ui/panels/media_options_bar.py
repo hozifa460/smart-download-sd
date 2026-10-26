@@ -121,21 +121,41 @@ class MediaOptionsBarMixin:
 
     def populate_main_media_bar(
         self,
-        info: Dict[str, Any],
-        options: List[VideoFormatOption],
-        audio_tracks: List[Dict[str, Any]],
-        subtitle_tracks: List[Dict[str, Any]],
-        selected_option: Optional[VideoFormatOption] = None
+        info: Optional[Dict[str, Any]] = None,
+        options: Optional[List[VideoFormatOption]] = None,
+        audio_tracks: Optional[List[Dict[str, Any]]] = None,
+        subtitle_tracks: Optional[List[Dict[str, Any]]] = None,
+        selected_option: Optional[VideoFormatOption] = None,
+        url: Optional[str] = None,
+        dest: Optional[str] = None,
+        selected_opt: Optional[VideoFormatOption] = None,
+        resolver: Optional[Any] = None,
+        **kwargs
     ):
         """Displays and populates the Main Window Media Settings Bar with resolved formats."""
         if not hasattr(self, "media_options_frame"):
             return
 
-        self._main_media_info = info
+        self._main_media_info = info or {}
         self._main_media_options = list(options or [])
         self._main_audio_tracks = list(audio_tracks or [])
         self._main_subtitle_tracks = list(subtitle_tracks or [])
         self._last_yt_info = info
+        sel_opt = selected_opt or selected_option or (self._main_media_options[0] if self._main_media_options else None)
+
+        media_url = url or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
+        final_dest = dest or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "")
+        self._pending_media_context = {
+            "url": media_url,
+            "info": info or {},
+            "options": self._main_media_options,
+            "audio_tracks": self._main_audio_tracks,
+            "subtitle_tracks": self._main_subtitle_tracks,
+            "selected_option": sel_opt,
+            "resolver": resolver,
+            "final_dest": final_dest
+        }
+        self._last_media_context = dict(self._pending_media_context)
 
         # Show frame in layout
         self.media_options_frame.pack(fill=tk.X, pady=(4, 2))
@@ -143,12 +163,15 @@ class MediaOptionsBarMixin:
         # 1. Populate Quality Combobox
         q_vals = []
         for opt in self._main_media_options:
-            sz = format_filesize(opt.filesize) if opt.filesize else (format_filesize(opt.approx_filesize) if opt.approx_filesize else "~")
-            q_vals.append(f"{opt.resolution_name} ({opt.ext.upper()}) — {sz}")
+            fs = getattr(opt, "filesize_approx", 0) or getattr(opt, "filesize", 0)
+            sz = format_filesize(fs) if fs else "~"
+            res_lbl = getattr(opt, "resolution_label", "") or getattr(opt, "resolution_name", "Video")
+            ext = getattr(opt, "ext", "mp4").upper()
+            q_vals.append(f"{res_lbl} ({ext}) — {sz}")
         self.cb_main_quality.configure(values=q_vals)
         sel_idx = 0
-        if selected_option and selected_option in self._main_media_options:
-            sel_idx = self._main_media_options.index(selected_option)
+        if sel_opt and sel_opt in self._main_media_options:
+            sel_idx = self._main_media_options.index(sel_opt)
         if q_vals:
             self.cb_main_quality.current(sel_idx)
 
@@ -162,13 +185,13 @@ class MediaOptionsBarMixin:
         s_vals = [s.get("label", "") for s in self._main_subtitle_tracks]
         self.cb_main_sub.configure(values=s_vals)
         sub_idx = 0
-        if selected_option and getattr(selected_option, "selected_subtitle_track", None) in self._main_subtitle_tracks:
-            sub_idx = self._main_subtitle_tracks.index(selected_option.selected_subtitle_track)
+        if sel_opt and getattr(sel_opt, "selected_subtitle_track", None) in self._main_subtitle_tracks:
+            sub_idx = self._main_subtitle_tracks.index(sel_opt.selected_subtitle_track)
         if s_vals:
             self.cb_main_sub.current(sub_idx)
 
         # 4. Mode Selection
-        mode = getattr(selected_option, "subtitle_embed_mode", None) or get_setting("subtitle_embed_mode", "soft_embed")
+        mode = getattr(sel_opt, "subtitle_embed_mode", None) or get_setting("subtitle_embed_mode", "soft_embed")
         if mode in self._main_sub_mode_codes:
             self.cb_main_sub_mode.current(self._main_sub_mode_codes.index(mode))
         else:
@@ -224,13 +247,13 @@ class MediaOptionsBarMixin:
 
     def _reopen_media_quality_modal(self):
         """Opens or re-opens QualitySelectionModal so user can reconfigure quality and subtitles."""
-        url = self.entry_url.get().strip()
-        dest = self.entry_dest.get().strip()
+        url = self.entry_url.get().strip() if hasattr(self, "entry_url") else ""
+        dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
         if not url:
             return
 
-        ctx = getattr(self, "_pending_media_context", None)
-        if ctx and ctx.get("url") == url and ctx.get("options"):
+        ctx = getattr(self, "_pending_media_context", None) or getattr(self, "_last_media_context", None)
+        if ctx and (ctx.get("url") == url or not ctx.get("url")) and ctx.get("options"):
             self._show_cached_quality_modal(ctx)
             return
 
@@ -244,13 +267,20 @@ class MediaOptionsBarMixin:
         raw_title = info.get("title") or "Video"
         duration = int(info.get("duration") or 0)
         theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
-        dest = self.entry_dest.get().strip() or ctx.get("final_dest", "")
+        dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ctx.get("final_dest", "")
+        resolver = ctx.get("resolver")
+        if not resolver and hasattr(self, "log"):
+            resolver = YouTubeResolver(
+                on_log=self.log,
+                cookies_from_browser=getattr(self, "cookies_browser", "auto"),
+                cookies_file=getattr(self, "cookies_file", "")
+            )
 
         def _on_confirm(selected_opt: VideoFormatOption, final_dest: str):
             self._quality_modal = None
             if hasattr(self, "clear_last_clipboard_url"):
                 self.clear_last_clipboard_url()
-            stream_info = ctx["resolver"].build_stream_info(info, selected_opt)
+            stream_info = resolver.build_stream_info(info, selected_opt) if resolver else None
             try:
                 max_conn = int(self.conn_var.get())
             except Exception:
@@ -259,7 +289,8 @@ class MediaOptionsBarMixin:
                 kb_lim = float(self.entry_custom_speed.get().strip())
             except Exception:
                 kb_lim = 0.0
-            self._launch_stream_coordinator(stream_info, final_dest, max_conn, kb_lim * 1024.0)
+            if stream_info and hasattr(self, "_launch_stream_coordinator"):
+                self._launch_stream_coordinator(stream_info, final_dest, max_conn, kb_lim * 1024.0)
 
         def _on_open_in_main(selected_opt: VideoFormatOption, final_dest: str):
             self._quality_modal = None
@@ -330,45 +361,51 @@ class MediaOptionsBarMixin:
             q_idx = self.cb_main_quality.current()
             if 0 <= q_idx < len(options):
                 selected_opt = options[q_idx]
+        if selected_opt is None and options:
+            selected_opt = options[0]
 
-        if hasattr(self, "cb_main_audio") and audio_tracks:
-            a_idx = self.cb_main_audio.current()
-            if 0 <= a_idx < len(audio_tracks):
-                selected_opt.selected_audio_track = audio_tracks[a_idx]
+        if selected_opt:
+            if hasattr(self, "cb_main_audio") and audio_tracks:
+                a_idx = self.cb_main_audio.current()
+                if 0 <= a_idx < len(audio_tracks):
+                    selected_opt.selected_audio_track = audio_tracks[a_idx]
 
-        sub_mode = "soft_embed"
-        if hasattr(self, "cb_main_sub_mode"):
-            m_idx = self.cb_main_sub_mode.current()
-            if 0 <= m_idx < len(self._main_sub_mode_codes):
-                sub_mode = self._main_sub_mode_codes[m_idx]
-        selected_opt.subtitle_embed_mode = sub_mode
+            sub_mode = "soft_embed"
+            if hasattr(self, "cb_main_sub_mode"):
+                m_idx = self.cb_main_sub_mode.current()
+                if 0 <= m_idx < len(self._main_sub_mode_codes):
+                    sub_mode = self._main_sub_mode_codes[m_idx]
+            selected_opt.subtitle_embed_mode = sub_mode
 
-        if hasattr(self, "cb_main_sub") and subtitle_tracks:
-            s_idx = self.cb_main_sub.current()
-            if s_idx <= 0 and len(subtitle_tracks) > 1 and sub_mode == "hard_burn":
-                s_idx = 1
-                try: self.cb_main_sub.current(1)
-                except Exception: pass
-            if 0 <= s_idx < len(subtitle_tracks):
-                selected_opt.selected_subtitle_track = subtitle_tracks[s_idx]
+            if hasattr(self, "cb_main_sub") and subtitle_tracks:
+                s_idx = self.cb_main_sub.current()
+                if s_idx <= 0 and len(subtitle_tracks) > 1 and sub_mode == "hard_burn":
+                    s_idx = 1
+                    try: self.cb_main_sub.current(1)
+                    except Exception: pass
+                if 0 <= s_idx < len(subtitle_tracks):
+                    selected_opt.selected_subtitle_track = subtitle_tracks[s_idx]
 
-        final_dest = self.entry_dest.get().strip() or ctx.get("final_dest", "")
+        final_dest = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or ctx.get("final_dest", "")
         try: max_conn = int(self.conn_var.get())
         except Exception: max_conn = 8
         try: kb_lim = float(self.entry_custom_speed.get().strip())
         except Exception: kb_lim = 0.0
         bytes_limit = kb_lim * 1024.0 if kb_lim > 0 else 0.0
 
-        if not resolver:
+        if not resolver and hasattr(self, "log"):
             resolver = YouTubeResolver(
                 on_log=self.log,
                 cookies_from_browser=getattr(self, "cookies_browser", "auto"),
                 cookies_file=getattr(self, "cookies_file", "")
             )
-        stream_info = resolver.build_stream_info(info, selected_opt)
+        stream_info = resolver.build_stream_info(info, selected_opt) if resolver else None
+        self._last_media_context = dict(ctx)
+        self._last_media_context["selected_option"] = selected_opt
+        self._last_media_context["final_dest"] = final_dest
         self._pending_media_context = None
 
-        if hasattr(self, "_launch_stream_coordinator"):
+        if stream_info and hasattr(self, "_launch_stream_coordinator"):
             self._launch_stream_coordinator(stream_info, final_dest, max_conn, bytes_limit)
 
 

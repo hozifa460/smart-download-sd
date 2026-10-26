@@ -162,6 +162,17 @@ class YouTubeDownloadControllerMixin:
                                 self.btn_pause.configure(state="disabled")
                                 self.btn_cancel.configure(state="disabled")
                                 self.card_size.configure(text=tr("status_ready", "Ready"))
+                                self._pending_media_context = {
+                                    "url": url,
+                                    "info": info,
+                                    "options": options,
+                                    "audio_tracks": audio_tracks,
+                                    "subtitle_tracks": subtitle_tracks,
+                                    "selected_option": selected_opt,
+                                    "resolver": resolver,
+                                    "final_dest": final_dest
+                                }
+                                self._last_media_context = dict(self._pending_media_context)
                                 if hasattr(self, "populate_main_media_bar"):
                                     self.populate_main_media_bar(
                                         url=url,
@@ -213,6 +224,17 @@ class YouTubeDownloadControllerMixin:
                             except Exception:
                                 pass
                             self._quality_modal = None
+
+                        self._last_media_context = {
+                            "url": url,
+                            "info": info,
+                            "options": options,
+                            "audio_tracks": audio_tracks,
+                            "subtitle_tracks": subtitle_tracks,
+                            "selected_option": options[0] if options else None,
+                            "resolver": resolver,
+                            "final_dest": initial_dest
+                        }
 
                         self._quality_modal = QualitySelectionModal(
                             parent=self.root,

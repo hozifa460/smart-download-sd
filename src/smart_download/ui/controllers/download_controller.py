@@ -163,6 +163,10 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         except Exception:
             pass
 
+        if hasattr(self, "hide_main_media_bar"):
+            try: self.hide_main_media_bar()
+            except Exception: pass
+
         # UI state transitions in main window
         try:
             self.btn_start.configure(state="disabled")

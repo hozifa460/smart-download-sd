@@ -245,6 +245,22 @@ class ChunksPanelMixin(MetricsPanelMixin):
         )
         self.btn_hist_redownload.pack(side=tk.LEFT, padx=(0, 6))
 
+        self.btn_hist_quality = tk.Button(
+            hist_toolbar,
+            text=tr("ctx_redownload_quality", "🎞️ Re-Download Quality"),
+            command=self._history_redownload_with_quality,
+            font=btn_font,
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=8,
+            pady=2
+        )
+        self.btn_hist_quality.pack(side=tk.LEFT, padx=(0, 6))
+
         self.btn_hist_remove = tk.Button(
             hist_toolbar,
             text=tr("btn_hist_remove", "🗑️ Remove"),
