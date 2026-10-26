@@ -45,6 +45,7 @@ class FetchingLinkToast(tk.Toplevel):
         self._pulse_job = None
         self._dot_count = 0
         self._dot_job = None
+        self._topmost_job = None
         self._safety_close_job = self.after(15000, self.close)
 
         th = theme or {}
@@ -84,7 +85,7 @@ class FetchingLinkToast(tk.Toplevel):
 
         try:
             self.attributes("-topmost", True)
-            self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
+            self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
         except Exception:
             pass
 
@@ -314,6 +315,12 @@ class FetchingLinkToast(tk.Toplevel):
             except Exception:
                 pass
             self._pulse_job = None
+        if getattr(self, "_topmost_job", None):
+            try:
+                self.after_cancel(self._topmost_job)
+            except Exception:
+                pass
+            self._topmost_job = None
         if self._dot_job:
             try:
                 self.after_cancel(self._dot_job)
@@ -353,6 +360,12 @@ class FetchingLinkToast(tk.Toplevel):
             except Exception:
                 pass
             self._pulse_job = None
+        if getattr(self, "_topmost_job", None):
+            try:
+                self.after_cancel(self._topmost_job)
+            except Exception:
+                pass
+            self._topmost_job = None
         if hasattr(self, "_dot_job") and self._dot_job:
             try:
                 self.after_cancel(self._dot_job)

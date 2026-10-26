@@ -285,6 +285,42 @@ class TestStage9_2Stabilization(unittest.TestCase):
             )
             self.assertEqual(coord.max_connections, conn)
 
+    def test_fetching_toast_topmost_job_cancelled_on_immediate_close(self):
+        """
+        Verify that dismissing FetchingLinkToast immediately cancels the 250ms topmost job
+        and causes no orphaned Tcl timer exceptions.
+        """
+        toast = FetchingLinkToast(
+            parent=self.root,
+            url="https://example.com/test",
+            theme={},
+            on_cancel=lambda: None
+        )
+        self.assertIsNotNone(toast._topmost_job)
+        toast.close()
+        self.assertIsNone(toast._topmost_job)
+
+    def test_drain_bg_tk_callbacks_supports_none_widget(self):
+        """
+        Verify that _drain_bg_tk_callbacks executes queued callables even if widget is None.
+        """
+        import smart_download.utils.tk_helpers as helpers
+        ran = []
+        helpers._BG_TK_CALLBACK_QUEUE.put((None, lambda: ran.append("called"), ()))
+        helpers._drain_bg_tk_callbacks()
+        self.assertEqual(ran, ["called"])
+
+    def test_animate_window_close_withdraws_immediately(self):
+        """
+        Verify that animate_window_close immediately withdraws the window to eliminate flicker.
+        """
+        top = tk.Toplevel(self.root)
+        self.root.update()
+        self.assertEqual(top.state(), "normal")
+        animate_window_close(top)
+        self.root.update()
+        self.assertFalse(top.winfo_exists())
+
 
 if __name__ == "__main__":
     unittest.main()

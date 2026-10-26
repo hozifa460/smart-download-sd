@@ -75,7 +75,7 @@ def _drain_bg_tk_callbacks() -> None:
             break
         try:
             w = w_ref() if callable(w_ref) else w_ref
-            if w is not None and getattr(w, "tk", None) is not None and not getattr(w, "_closing", False):
+            if w is None or (getattr(w, "tk", None) is not None and not getattr(w, "_closing", False)):
                 func(*args)
         except Exception:
             pass
@@ -310,6 +310,11 @@ def animate_window_close(
 
     if win is not None:
         try:
+            if hasattr(win, "withdraw"):
+                try:
+                    win.withdraw()
+                except Exception:
+                    pass
             job = getattr(win, "_sd_anim_job", None)
             if job and hasattr(win, "after_cancel"):
                 try:

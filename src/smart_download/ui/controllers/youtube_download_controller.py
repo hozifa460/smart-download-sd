@@ -221,6 +221,13 @@ class YouTubeDownloadControllerMixin:
                             "c_input_bg": getattr(self, "c_input_bg", "#090d16")
                         }
 
+                        # Close fetching toast immediately before displaying quality modal
+                        if hasattr(self, "_close_fetching_toast") and callable(self._close_fetching_toast):
+                            try:
+                                self._close_fetching_toast()
+                            except Exception:
+                                pass
+
                         # Dismiss any previously open quality modal
                         if hasattr(self, "_quality_modal") and self._quality_modal:
                             try:
