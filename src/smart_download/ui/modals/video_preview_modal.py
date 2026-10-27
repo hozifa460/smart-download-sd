@@ -250,7 +250,7 @@ def open_video_preview(
     with open(temp_html, "w", encoding="utf-8") as hf:
         hf.write(html_content)
 
-    launch_uri = target_launch_url if (options is not None and target_launch_url) else f"file:///{temp_html.replace(os.sep, '/')}"
+    launch_uri = target_launch_url if target_launch_url else f"file:///{temp_html.replace(os.sep, '/')}"
     win_size = "920,720" if options else "860,560"
 
     # 1. Check pywebview
@@ -264,7 +264,7 @@ def open_video_preview(
     if pywebview_available:
         try:
             if getattr(sys, "frozen", False):
-                cmd = [sys.executable, "--preview-html", temp_html]
+                cmd = [sys.executable, "--preview-html", launch_uri]
             else:
                 w, h = map(int, win_size.split(","))
                 cmd = [

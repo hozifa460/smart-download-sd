@@ -54,6 +54,45 @@ def strip_burn_tag_from_filename(filepath: str) -> str:
     return filepath
 
 
+def _is_ascii_writable_dir(path: str) -> bool:
+    if not path or not os.path.isdir(path):
+        return False
+    abs_path = os.path.abspath(path)
+    if not all(ord(c) < 128 for c in abs_path):
+        return False
+    test_file = os.path.join(abs_path, f"_sd_test_{os.getpid()}_{int(time.time()*1000)}.tmp")
+    try:
+        with open(test_file, "w") as f:
+            f.write("ok")
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
+
+def _get_ascii_safe_temp_dir(fallback_dir: str) -> str:
+    """Returns the first existing writable 100% ASCII directory for libass safe fopen on Windows."""
+    import tempfile
+    candidates = [
+        tempfile.gettempdir(),
+        r"C:\Users\Public\Documents",
+        r"C:\Temp",
+        r"C:\Windows\Temp",
+    ]
+    for cand in candidates:
+        try:
+            if not os.path.isdir(cand) and cand == r"C:\Temp":
+                try:
+                    os.makedirs(cand, exist_ok=True)
+                except Exception:
+                    pass
+            if _is_ascii_writable_dir(cand):
+                return os.path.abspath(cand)
+        except Exception:
+            pass
+    return os.path.abspath(fallback_dir) if fallback_dir else os.getcwd()
+
+
 def embed_subtitle_into_mp4(
     video_path: str, srt_path: str, lang_code: str, ffmpeg_path: str,
     on_log: Optional[Callable[[str], None]] = None,
@@ -68,35 +107,66 @@ def embed_subtitle_into_mp4(
     base_lang = norm_lang.split("-")[0].split("_")[0]
     iso3 = ISO_639_2.get(norm_lang) or ISO_639_2.get(base_lang) or (base_lang if len(base_lang) == 3 and base_lang.isalpha() else "und")
     temp_mp4 = f"{os.path.splitext(video_path)[0]}.submux.mp4"
-    cmd = [
-        ffmpeg_path, "-y", "-i", video_path, "-i", srt_path,
+    video_dir = os.path.dirname(os.path.abspath(video_path))
+    ascii_work_dir = _get_ascii_safe_temp_dir(video_dir)
+    temp_srt = os.path.join(ascii_work_dir, f"_sd_mux_{os.getpid()}_{int(time.time() * 1000)}.srt")
+
+    try:
+        with open(os.path.abspath(srt_path), "r", encoding="utf-8-sig", errors="replace") as sf:
+            srt_content = sf.read()
+        with open(temp_srt, "w", encoding="utf-8") as df:
+            df.write(srt_content)
+    except Exception:
+        temp_srt = srt_path
+
+    cmd_copy = [
+        ffmpeg_path, "-y", "-i", video_path, "-i", temp_srt,
         "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
         "-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
         "-metadata:s:s:0", f"language={iso3}", "-disposition:s:0", "default", "-f", "mp4", temp_mp4
     ]
+    cmd_transcode = [
+        ffmpeg_path, "-y", "-i", video_path, "-i", temp_srt,
+        "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-c:s", "mov_text",
+        "-metadata:s:s:0", f"language={iso3}", "-disposition:s:0", "default", "-f", "mp4", temp_mp4
+    ]
+
     p: Optional[subprocess.Popen] = None
-    try:
-        cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
+    cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
+
+    def _exec(current_cmd: List[str]) -> Tuple[int, str]:
+        nonlocal p
+        p = None
         if cancel_event is None:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=cflags)
-            rc, err = res.returncode, res.stderr
-        else:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=cflags)
-            while True:
-                try:
-                    _, err = p.communicate(timeout=0.05)
-                    rc = p.returncode
-                    break
-                except subprocess.TimeoutExpired:
-                    if cancel_event and cancel_event.is_set():
-                        try: p.kill()
+            res = subprocess.run(current_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", cwd=ascii_work_dir, creationflags=cflags)
+            return res.returncode, res.stderr
+        p = subprocess.Popen(current_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", cwd=ascii_work_dir, creationflags=cflags)
+        while True:
+            try:
+                _, err = p.communicate(timeout=0.05)
+                return p.returncode, err
+            except subprocess.TimeoutExpired:
+                if cancel_event and cancel_event.is_set():
+                    try: p.kill()
+                    except Exception: pass
+                    try: p.communicate()
+                    except Exception: pass
+                    if os.path.exists(temp_mp4):
+                        try: os.remove(temp_mp4)
                         except Exception: pass
-                        try: p.communicate()
-                        except Exception: pass
-                        if os.path.exists(temp_mp4):
-                            try: os.remove(temp_mp4)
-                            except Exception: pass
-                        return False
+                    return -999, "Cancelled"
+
+    try:
+        rc, err = _exec(cmd_copy)
+        if rc != 0 and (not cancel_event or not cancel_event.is_set()):
+            if on_log:
+                on_log(f"[SUBTITLES] Soft-mux copy attempt failed, retrying with audio transcode AAC: {err[-160:].strip()}")
+            if os.path.exists(temp_mp4):
+                try: os.remove(temp_mp4)
+                except Exception: pass
+            rc, err = _exec(cmd_transcode)
+
         if rc == 0 and os.path.isfile(temp_mp4) and os.path.getsize(temp_mp4) > 0:
             os.replace(temp_mp4, video_path)
             if on_log: on_log(f"[SUBTITLES] Successfully embedded soft subtitle ({iso3}) into MP4 container.")
@@ -120,6 +190,10 @@ def embed_subtitle_into_mp4(
         if p and p.poll() is None:
             try: p.kill()
             except Exception: pass
+        if temp_srt != srt_path and os.path.exists(temp_srt):
+            try: os.remove(temp_srt)
+            except Exception: pass
+
 
 
 def burn_subtitle_into_video(
@@ -134,9 +208,10 @@ def burn_subtitle_into_video(
         return False
     abs_video = os.path.abspath(video_path)
     abs_srt = os.path.abspath(srt_path)
-    srt_dir = os.path.dirname(abs_video)
+    video_dir = os.path.dirname(abs_video)
+    ascii_work_dir = _get_ascii_safe_temp_dir(video_dir)
     burn_srt_name = f"_sd_burn_{os.getpid()}_{int(time.time() * 1000)}.srt"
-    burn_srt_path = os.path.join(srt_dir, burn_srt_name)
+    burn_srt_path = os.path.join(ascii_work_dir, burn_srt_name)
     temp_burn_mp4 = f"{os.path.splitext(abs_video)[0]}.burn.mp4"
 
     try:
@@ -174,7 +249,7 @@ def burn_subtitle_into_video(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                cwd=srt_dir,
+                cwd=ascii_work_dir,
                 creationflags=cflags
             )
             return res.returncode, res.stderr
@@ -185,7 +260,7 @@ def burn_subtitle_into_video(
             text=True,
             encoding="utf-8",
             errors="replace",
-            cwd=srt_dir,
+            cwd=ascii_work_dir,
             creationflags=cflags
         )
         while True:
@@ -297,17 +372,35 @@ def handle_subtitles_post_download(
             return
 
         sub_kwargs = {"cancel_event": cancel_event} if cancel_event is not None else {}
+        stem = os.path.splitext(output_path)[0]
+        default_srt = f"{stem}.srt"
+
+        def _cleanup_srt():
+            for p_path in (srt_path, default_srt):
+                if p_path and os.path.isfile(p_path):
+                    try:
+                        os.remove(p_path)
+                    except Exception:
+                        pass
+
         if mode == "hard_burn":
             if on_log:
                 on_log("[SUBTITLES] Burning subtitles permanently onto video frames...")
             ok = burn_subtitle_into_video(output_path, srt_path, ffmpeg_bin, on_log=on_log, **sub_kwargs)
-            if not ok and not (cancel_event and cancel_event.is_set()):
+            if ok:
+                _cleanup_srt()
+            elif not (cancel_event and cancel_event.is_set()):
                 if on_log:
                     on_log("[SUBTITLES] Hard burn failed; falling back to soft subtitle embedding.")
                 output_path = strip_burn_tag_from_filename(output_path)
-                embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)
+                soft_ok = embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)
+                if soft_ok:
+                    _cleanup_srt()
         else:
-            embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)
+            soft_ok = embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)
+            if soft_ok:
+                _cleanup_srt()
     except Exception as exc:
         if on_log:
             on_log(f"[SUBTITLES] Warning: Subtitle handling encountered an issue: {exc}")
+

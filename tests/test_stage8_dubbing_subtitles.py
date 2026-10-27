@@ -228,10 +228,9 @@ Hello world from <i>smart</i> download!
 
             self.assertIsNotNone(out_srt)
             self.assertTrue(os.path.isfile(out_srt))
-            self.assertTrue(out_srt.endswith("test_video.ar.srt"))
-            # Both <video_stem>.<lang>.srt and <video_stem>.srt must be written
+            # Only <video_stem>.<lang>.srt must be written, NOT duplicate <video_stem>.srt
             default_srt = os.path.join(tmpdir, "test_video.srt")
-            self.assertTrue(os.path.isfile(default_srt))
+            self.assertFalse(os.path.isfile(default_srt))
 
             # Check UTF-8-SIG encoding (BOM)
             with open(out_srt, "rb") as f:
@@ -651,7 +650,7 @@ Hello world from <i>smart</i> download!
                 self.assertIn("22", captured_cmd)
                 self.assertIn("-f", captured_cmd)
                 self.assertEqual(captured_cmd[captured_cmd.index("-f") + 1], "mp4")
-                self.assertEqual(captured_cwd[0], tmpdir)
+                self.assertTrue(all(ord(c) < 128 for c in captured_cwd[0]))
 
     def test_build_audio_subtitle_row_sub_mode(self):
         """Verifies build_audio_subtitle_row creates mode selector and toggles state."""

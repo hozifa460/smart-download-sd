@@ -66,12 +66,15 @@ video, iframe { width: 100%; height: 100%; border: none; outline: none; backgrou
 _JS_TEMPLATE = """
 const hasStream = __HAS_STREAM__, embedUrl = __EMBED_SRC__, initialDubAudioUrl = __DUB_URL__;
 const sid = __SID__, audioTracks = __AUDIO_TRACKS__, subtitleTracks = __SUBTITLE_TRACKS__;
+const bridgeBase = __BRIDGE_BASE__;
 const videoEl = document.getElementById("videoEl"), dubAudioEl = document.getElementById("dubAudioEl");
 const iframeEl = document.getElementById("iframeEl"), toggleBtn = document.getElementById("toggleBtn");
 const audioBadge = document.getElementById("badgeAudio"), subBadge = document.getElementById("badgeSub"), resBadge = document.getElementById("badgeRes");
 const audioSelect = document.getElementById("audioSelect"), subSelect = document.getElementById("subSelect"), modeSelect = document.getElementById("modeSelect"), destInput = document.getElementById("destInput");
 const muteBtn = document.getElementById("muteBtn"), volSlider = document.getElementById("volSlider");
 let isUsingVideo = hasStream, selected_q_idx = 0, hasDubAudio = Boolean(initialDubAudioUrl);
+let actionSubmitted = false;
+window._userTouchedMode = false;
 
 function updateUI() {
     if (isUsingVideo) {
@@ -151,7 +154,7 @@ function selectQualityRow(idx) {
     if (resCell && resBadge) resBadge.textContent = "🎞️ " + resCell.textContent;
     if (sid) {
         const savedTime = videoEl ? videoEl.currentTime : 0;
-        videoEl.src = `/stream_video?sid=${encodeURIComponent(sid)}&q_idx=${idx}`;
+        videoEl.src = `${bridgeBase}/stream_video?sid=${encodeURIComponent(sid)}&q_idx=${idx}`;
         if (savedTime > 0) {
             videoEl.addEventListener("loadedmetadata", () => {
                 try { videoEl.currentTime = savedTime; } catch (e) {}
@@ -161,48 +164,72 @@ function selectQualityRow(idx) {
             videoEl.play().catch(e => {});
         }
         requestUpdatedFilename();
+        syncStateToBridge();
     }
 }
 function onAudioChange() {
     if (!audioSelect) return;
     const a = parseInt(audioSelect.value);
     if (a <= 0 || a >= audioTracks.length) setDubAudioTrack(null, "Original Audio");
-    else { const t = audioTracks[a]; setDubAudioTrack(sid ? `/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=${a}` : (t.url || ""), t.label || t.language); }
+    else { const t = audioTracks[a]; setDubAudioTrack(sid ? `${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=${a}` : (t.url || ""), t.label || t.language); }
+    syncStateToBridge();
 }
 function onSubChange() {
     if (!subSelect) return;
-    const s = parseInt(subSelect.value); let trk = document.getElementById("vttTrack");
+    const s = parseInt(subSelect.value);
+    if (s > 0 && !window._userTouchedMode && modeSelect) {
+        modeSelect.value = "hard_burn";
+    }
+    let trk = document.getElementById("vttTrack");
     if (s <= 0 || s >= subtitleTracks.length) {
         if (trk) { trk.src = ""; try { trk.track.mode = "disabled"; } catch (e) {} }
         if (subBadge) { subBadge.textContent = "💬 No Subtitles"; subBadge.className = "badge badge-dim"; }
     } else {
-        const t = subtitleTracks[s], lbl = t.label || t.language || "Subtitles", vUrl = sid ? `/subtitle.vtt?sid=${encodeURIComponent(sid)}&s_idx=${s}` : (t.url || "");
+        const t = subtitleTracks[s], lbl = t.label || t.language || "Subtitles", vUrl = sid ? `${bridgeBase}/subtitle.vtt?sid=${encodeURIComponent(sid)}&s_idx=${s}` : (t.url || "");
         if (subBadge) { subBadge.textContent = "💬 " + lbl; subBadge.className = "badge badge-sub"; }
         if (!trk) { trk = document.createElement("track"); trk.id = "vttTrack"; trk.kind = "subtitles"; trk.default = true; videoEl.appendChild(trk); }
         trk.label = lbl; trk.srclang = (t.language || "ar").split("-")[0].split("_")[0]; trk.src = vUrl;
         try { trk.track.mode = "showing"; } catch (e) {}
     }
+    requestUpdatedFilename();
+    syncStateToBridge();
 }
 function onModeChange() {
     if (!modeSelect) return;
+    window._userTouchedMode = true;
     if (modeSelect.value === "hard_burn" && subSelect && parseInt(subSelect.value) <= 0 && subtitleTracks.length > 1) {
         let ar = 1; for (let i = 1; i < subtitleTracks.length; i++) { if (String(subtitleTracks[i].language || "").toLowerCase().startsWith("ar")) { ar = i; break; } }
-        subSelect.value = String(ar); onSubChange();
+        subSelect.value = String(ar); onSubChange(); return;
     }
     requestUpdatedFilename();
+    syncStateToBridge();
+}
+function syncStateToBridge() {
+    if (!sid) return;
+    fetch(`${bridgeBase}/api/sync_state?sid=${encodeURIComponent(sid)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            q_idx: selected_q_idx,
+            a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
+            s_idx: subSelect ? parseInt(subSelect.value) : 0,
+            sub_mode: modeSelect ? modeSelect.value : "soft_embed",
+            dest_path: destInput ? destInput.value.trim() : ""
+        })
+    }).catch(e => {});
 }
 function requestUpdatedFilename() {
     if (!sid || !destInput) return;
-    fetch(`/api/update_filename?sid=${encodeURIComponent(sid)}`, {
+    fetch(`${bridgeBase}/api/update_filename?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ q_idx: selected_q_idx, sub_mode: modeSelect ? modeSelect.value : "soft_embed", current_dest: destInput.value })
     }).then(r => r.json()).then(d => { if (d && d.dest_path) destInput.value = d.dest_path; }).catch(e => {});
 }
 function doAction(actionType) {
+    actionSubmitted = true;
     document.querySelectorAll(".action-bar button").forEach(b => { b.disabled = true; b.style.opacity = "0.6"; });
     try { if (videoEl) videoEl.pause(); if (dubAudioEl) dubAudioEl.pause(); } catch (e) {}
     if (!sid) { window.close(); return; }
-    fetch(`/api/action?sid=${encodeURIComponent(sid)}`, {
+    fetch(`${bridgeBase}/api/action?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             action: actionType, q_idx: selected_q_idx,
@@ -214,9 +241,10 @@ function doAction(actionType) {
     }).then(r => r.json()).then(() => { setTimeout(() => { window.close(); }, 120); }).catch(() => { window.close(); });
 }
 window.addEventListener("pagehide", () => {
-    if (sid) { try { navigator.sendBeacon(`/api/action?sid=${encodeURIComponent(sid)}`, JSON.stringify({ action: "cancel" })); } catch (e) {} }
+    if (sid && !actionSubmitted) { try { navigator.sendBeacon(`${bridgeBase}/api/action?sid=${encodeURIComponent(sid)}`, JSON.stringify({ action: "cancel" })); } catch (e) {} }
 });
 """.strip()
+
 
 
 def generate_preview_html(
@@ -282,6 +310,8 @@ def generate_preview_html(
 
     embed_src = f"https://www.youtube.com/embed/{video_id}?autoplay=1&cc_load_policy=1&cc_lang_pref={safe_sub_lang}&hl={safe_sub_lang}" if video_id else url
 
+    bridge_base = f"http://127.0.0.1:{bridge_port}" if bridge_port else ""
+
     track_html = ""
     if vtt_data_uri:
         track_html = f'<track label="{safe_sub_label}" kind="subtitles" srclang="{safe_sub_lang}" src="{vtt_data_uri}" default id="vttTrack">'
@@ -290,7 +320,7 @@ def generate_preview_html(
         st = subtitle_tracks[sel_s_idx]
         lbl = html.escape(st.get("label") or st.get("language") or "Subtitles")
         sc = html.escape((st.get("language") or "ar").split("-")[0].split("_")[0])
-        track_html = f'<track label="{lbl}" kind="subtitles" srclang="{sc}" src="/subtitle.vtt?sid={sid}&s_idx={sel_s_idx}" default id="vttTrack">'
+        track_html = f'<track label="{lbl}" kind="subtitles" srclang="{sc}" src="{bridge_base}/subtitle.vtt?sid={sid}&s_idx={sel_s_idx}" default id="vttTrack">'
         sub_badge = f'<span id="badgeSub" class="badge badge-sub">💬 {lbl}</span>'
     elif subtitle_tracks and len(subtitle_tracks) > 1 and sel_s_idx > 0:
         sub_badge = f'<span id="badgeSub" class="badge badge-sub">💬 {safe_sub_label}</span>'
@@ -314,7 +344,7 @@ def generate_preview_html(
             r_l = html.escape(getattr(opt, "resolution_label", "Unknown"))
             r_e = html.escape(str(getattr(opt, "ext", "mp4")).upper())
             fps_val = getattr(opt, "fps", 0)
-            r_f = str(fps_val) if fps_val and fps_val > 0 else "—"
+            r_f = str(fps_val) if isinstance(fps_val, (int, float)) and fps_val > 0 else "—"
             r_s = html.escape(format_filesize(getattr(opt, "filesize_approx", 0)))
             r_n = html.escape(getattr(opt, "note", ""))
             s_cls = "opt-row selected" if idx == 0 else "opt-row"
@@ -338,6 +368,7 @@ def generate_preview_html(
         .replace("__AUDIO_TRACKS__", json.dumps(audio_tracks or []))
         .replace("__SUBTITLE_TRACKS__", json.dumps(subtitle_tracks or []))
         .replace("__EFFECTIVE_AUDIO_LABEL__", json.dumps(eff_audio_lbl))
+        .replace("__BRIDGE_BASE__", json.dumps(bridge_base))
     )
 
     player_flex = "52 1 0" if options else "1"

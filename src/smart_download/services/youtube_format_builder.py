@@ -5,6 +5,7 @@ import os
 import sys
 import re
 import math
+import copy
 from typing import List, Dict, Any, Optional
 
 from .youtube_models import (
@@ -372,6 +373,7 @@ class YouTubeFormatBuilderMixin:
         Constructs a YouTubeStreamInfo instance ready for StreamDownloadCoordinator
         based on the selected VideoFormatOption.
         """
+        opt = copy.copy(option)
         web_url = info.get("webpage_url") or ""
         platform = extract_media_platform(web_url)
         video_id = str(info.get("id") or extract_youtube_id(web_url) or extract_media_id(web_url) or "video")
@@ -380,61 +382,68 @@ class YouTubeFormatBuilderMixin:
         duration = int(info.get("duration") or 0)
         thumbnail = info.get("thumbnail", "")
 
-        res_str = option.resolution_label if (option.resolution_label and "Vertical" in option.resolution_label) else (f"{option.height}p" if option.height > 0 else "Audio Only")
+        res_str = opt.resolution_label if (opt.resolution_label and "Vertical" in opt.resolution_label) else (f"{opt.height}p" if opt.height > 0 else "Audio Only")
 
-        sel_audio = getattr(option, "selected_audio_track", None)
-        sub_track = getattr(option, "selected_subtitle_track", None)
-        sub_mode = getattr(option, "subtitle_embed_mode", None)
+        sel_audio = getattr(opt, "selected_audio_track", None)
+        sub_track = getattr(opt, "selected_subtitle_track", None)
+        sub_mode = getattr(opt, "subtitle_embed_mode", None)
         if not sub_mode:
             try:
                 from ..config import get_setting
-                sub_mode = get_setting("subtitle_embed_mode", "soft_embed")
+                sub_mode = get_setting("subtitle_embed_mode", "hard_burn")
             except Exception:
-                sub_mode = "soft_embed"
+                sub_mode = "hard_burn"
         audio_lang = sel_audio.get("language") if sel_audio else None
 
-        if sel_audio and sel_audio.get("url"):
-            if option.is_audio_only:
-                option.video_url = sel_audio["url"]
-                option.video_headers = sel_audio.get("http_headers", {})
+        is_dubbed_selection = bool(
+            sel_audio and sel_audio.get("url") and (
+                sel_audio.get("track_id") != "original" or not sel_audio.get("is_original", True)
+            )
+        )
+
+        if opt.is_audio_only:
+            if sel_audio and sel_audio.get("url"):
+                opt.video_url = sel_audio["url"]
+                opt.video_headers = sel_audio.get("http_headers") or info.get("http_headers") or {}
                 if sel_audio.get("ext"):
-                    option.ext = sel_audio["ext"]
+                    opt.ext = sel_audio["ext"]
                 if sel_audio.get("filesize"):
-                    option.filesize_approx = int(sel_audio["filesize"])
-            elif not option.is_progressive:
-                option.audio_url = sel_audio["url"]
-                option.audio_ext = sel_audio.get("ext", "m4a")
-                option.audio_headers = sel_audio.get("http_headers", {})
-                if hasattr(option, "audio_format_id"):
-                    setattr(option, "audio_format_id", sel_audio.get("format_id", ""))
-                if sel_audio.get("filesize"):
-                    option.audio_size = int(sel_audio["filesize"])
-            elif not sel_audio.get("is_original", True) and has_ffmpeg():
-                option.is_progressive = False
-                option.audio_url = sel_audio["url"]
-                option.audio_ext = sel_audio.get("ext", "m4a")
-                option.audio_headers = sel_audio.get("http_headers", {})
-                if hasattr(option, "audio_format_id"):
-                    setattr(option, "audio_format_id", sel_audio.get("format_id", ""))
-                if sel_audio.get("filesize"):
-                    option.audio_size = int(sel_audio["filesize"])
+                    opt.filesize_approx = int(sel_audio["filesize"])
+        elif is_dubbed_selection and has_ffmpeg():
+            opt.is_progressive = False
+            opt.audio_url = sel_audio["url"]
+            opt.audio_ext = sel_audio.get("ext", "m4a")
+            opt.audio_headers = sel_audio.get("http_headers") or info.get("http_headers") or {}
+            if hasattr(opt, "audio_format_id"):
+                setattr(opt, "audio_format_id", sel_audio.get("format_id", ""))
+            if sel_audio.get("filesize"):
+                opt.audio_size = int(sel_audio["filesize"])
+        elif sel_audio and sel_audio.get("url") and not opt.is_progressive:
+            opt.audio_url = sel_audio["url"]
+            opt.audio_ext = sel_audio.get("ext", "m4a")
+            opt.audio_headers = sel_audio.get("http_headers") or info.get("http_headers") or {}
+            if hasattr(opt, "audio_format_id"):
+                setattr(opt, "audio_format_id", sel_audio.get("format_id", ""))
+            if sel_audio.get("filesize"):
+                opt.audio_size = int(sel_audio["filesize"])
 
         webpage_url = str(info.get("webpage_url") or info.get("original_url") or (f"https://www.youtube.com/watch?v={video_id}" if video_id else ""))
-        if option.is_audio_only:
-            out_fn = f"{clean_title}.{option.ext}"
+        out_fn = f"{clean_title}.{opt.ext}"
+
+        if opt.is_audio_only:
             return YouTubeStreamInfo(
                 video_id=video_id,
                 title=raw_title,
                 clean_filename=out_fn,
                 is_progressive=True,
-                video_url=option.video_url,
-                video_headers=option.video_headers,
-                video_ext=option.ext,
+                video_url=opt.video_url,
+                video_headers=opt.video_headers,
+                video_ext=opt.ext,
                 video_resolution="Audio Only",
-                video_size=option.filesize_approx,
+                video_size=opt.filesize_approx,
                 audio_url=None,
                 audio_headers={},
-                audio_ext=option.audio_ext or option.ext,
+                audio_ext=opt.audio_ext or opt.ext,
                 audio_size=0,
                 duration=duration,
                 thumbnail_url=thumbnail,
@@ -445,18 +454,17 @@ class YouTubeFormatBuilderMixin:
                 subtitle_embed_mode=sub_mode,
                 webpage_url=webpage_url,
             )
-        elif option.is_progressive or not option.audio_url:
-            out_fn = f"{clean_title}.{option.ext}"
+        elif opt.is_progressive or not opt.audio_url:
             return YouTubeStreamInfo(
                 video_id=video_id,
                 title=raw_title,
                 clean_filename=out_fn,
                 is_progressive=True,
-                video_url=option.video_url,
-                video_headers=option.video_headers,
-                video_ext=option.ext,
+                video_url=opt.video_url,
+                video_headers=opt.video_headers,
+                video_ext=opt.ext,
                 video_resolution=res_str,
-                video_size=option.filesize_approx,
+                video_size=opt.filesize_approx,
                 audio_url=None,
                 audio_headers={},
                 audio_ext="",
@@ -471,22 +479,21 @@ class YouTubeFormatBuilderMixin:
                 webpage_url=webpage_url,
             )
         else:
-            out_fn = f"{clean_title}.{option.ext}"
-            v_size = max(0, option.filesize_approx - option.audio_size) if option.audio_size else option.filesize_approx
+            v_size = max(0, opt.filesize_approx - opt.audio_size) if opt.audio_size else opt.filesize_approx
             return YouTubeStreamInfo(
                 video_id=video_id,
                 title=raw_title,
                 clean_filename=out_fn,
                 is_progressive=False,
-                video_url=option.video_url,
-                video_headers=option.video_headers,
-                video_ext=option.ext,
+                video_url=opt.video_url,
+                video_headers=opt.video_headers,
+                video_ext=opt.ext,
                 video_resolution=res_str,
                 video_size=v_size,
-                audio_url=option.audio_url,
-                audio_headers=option.audio_headers,
-                audio_ext=option.audio_ext,
-                audio_size=option.audio_size,
+                audio_url=opt.audio_url,
+                audio_headers=opt.audio_headers,
+                audio_ext=opt.audio_ext,
+                audio_size=opt.audio_size,
                 duration=duration,
                 thumbnail_url=thumbnail,
                 is_audio_only=False,

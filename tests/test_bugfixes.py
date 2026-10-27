@@ -304,7 +304,7 @@ class TestVideoPreviewModal(unittest.TestCase):
                 mock_popen.assert_called_once()
                 cmd = mock_popen.call_args[0][0]
                 self.assertEqual(cmd[0], "msedge.exe")
-                self.assertTrue(any(arg.startswith("--app=file:///") for arg in cmd))
+                self.assertTrue(any(arg.startswith("--app=http://127.0.0.1:") or arg.startswith("--app=file:///") for arg in cmd))
                 self.assertIn("--window-size=860,560", cmd)
                 try: os.remove(html_path)
                 except Exception: pass
@@ -822,6 +822,272 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
                 self.assertIn('💬 English Subs', html)
         finally:
             unregister_preview_session(sid)
+
+
+class TestPart1To4CriticalBugfixes(unittest.TestCase):
+    """
+    Verification tests for the 4 critical bugs:
+    1. Single .srt write (no duplicate .srt).
+    2. Temporary .srt deletion after successful hard_burn or soft_embed, preserved on srt_only or failure.
+    3. Windows ASCII-safe working directory for libass on Arabic/non-ASCII output folder paths.
+    4. Real-time POST /api/sync_state synchronization with QualitySelectionModal widgets.
+    5. actionSubmitted flag in preview HTML preventing cancel beacon on pagehide.
+    6. Dubbed audio merging in build_stream_info.
+    """
+
+    def test_download_subtitle_as_srt_writes_single_file_only(self):
+        """Verifies download_subtitle_as_srt writes ONLY one .srt file and never a duplicate .srt."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video_path = os.path.join(tmp_dir, "test_video.mp4")
+            with open(video_path, "wb") as f:
+                f.write(b"video bytes")
+
+            sub_track = {
+                "sub_id": "ar",
+                "language": "ar",
+                "url": "https://example.com/subs.vtt",
+            }
+            vtt_sample = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello World\n"
+            with patch("smart_download.services.subtitle_downloader._fetch_url_direct", return_value=vtt_sample):
+                srt_path = download_subtitle_as_srt(sub_track, video_path)
+
+            self.assertIsNotNone(srt_path)
+            self.assertTrue(os.path.isfile(srt_path))
+            self.assertTrue(srt_path.endswith(".ar.srt"))
+
+            all_srt = [f for f in os.listdir(tmp_dir) if f.endswith(".srt")]
+            self.assertEqual(len(all_srt), 1)
+            self.assertEqual(all_srt[0], "test_video.ar.srt")
+            self.assertFalse(os.path.exists(os.path.join(tmp_dir, "test_video.srt")))
+
+    def test_handle_subtitles_post_download_cleanup_srt_files(self):
+        """Verifies srt cleanup on hard_burn and soft_embed success, and retention on failure or srt_only."""
+        from smart_download.services.subtitle_processor import handle_subtitles_post_download
+
+        # Case 1: hard_burn succeeds -> srt deleted
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v_path = os.path.join(tmp_dir, "sample.mp4")
+            s_path = os.path.join(tmp_dir, "sample.ar.srt")
+            with open(v_path, "wb") as f: f.write(b"mp4")
+            with open(s_path, "w", encoding="utf-8") as f: f.write("1\n00:00:01,000 --> 00:00:02,000\nSub\n")
+
+            st_info = MagicMock()
+            st_info.subtitle_track = {"sub_id": "ar", "language": "ar", "url": "https://example.com/sub.vtt"}
+            st_info.subtitle_embed_mode = "hard_burn"
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
+                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=True):
+                handle_subtitles_post_download(st_info, v_path)
+                self.assertFalse(os.path.exists(s_path))
+
+        # Case 2: soft_embed succeeds -> srt deleted
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v_path = os.path.join(tmp_dir, "sample.mp4")
+            s_path = os.path.join(tmp_dir, "sample.ar.srt")
+            with open(v_path, "wb") as f: f.write(b"mp4")
+            with open(s_path, "w", encoding="utf-8") as f: f.write("1\n00:00:01,000 --> 00:00:02,000\nSub\n")
+
+            st_info = MagicMock()
+            st_info.subtitle_track = {"sub_id": "ar", "language": "ar", "url": "https://example.com/sub.vtt"}
+            st_info.subtitle_embed_mode = "soft_embed"
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
+                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", return_value=True):
+                handle_subtitles_post_download(st_info, v_path)
+                self.assertFalse(os.path.exists(s_path))
+
+        # Case 3: srt_only -> srt preserved
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v_path = os.path.join(tmp_dir, "sample.mp4")
+            s_path = os.path.join(tmp_dir, "sample.ar.srt")
+            with open(v_path, "wb") as f: f.write(b"mp4")
+            with open(s_path, "w", encoding="utf-8") as f: f.write("1\n00:00:01,000 --> 00:00:02,000\nSub\n")
+
+            st_info = MagicMock()
+            st_info.subtitle_track = {"sub_id": "ar", "language": "ar", "url": "https://example.com/sub.vtt"}
+            st_info.subtitle_embed_mode = "srt_only"
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path):
+                handle_subtitles_post_download(st_info, v_path)
+                self.assertTrue(os.path.exists(s_path))
+
+        # Case 4: hard_burn AND soft_embed both fail -> srt preserved for user
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            v_path = os.path.join(tmp_dir, "sample.mp4")
+            s_path = os.path.join(tmp_dir, "sample.ar.srt")
+            with open(v_path, "wb") as f: f.write(b"mp4")
+            with open(s_path, "w", encoding="utf-8") as f: f.write("1\n00:00:01,000 --> 00:00:02,000\nSub\n")
+
+            st_info = MagicMock()
+            st_info.subtitle_track = {"sub_id": "ar", "language": "ar", "url": "https://example.com/sub.vtt"}
+            st_info.subtitle_embed_mode = "hard_burn"
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=s_path), \
+                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=False), \
+                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", return_value=False):
+                handle_subtitles_post_download(st_info, v_path)
+                self.assertTrue(os.path.exists(s_path))
+
+    def test_burn_subtitle_into_video_arabic_dir_uses_ascii_safe_cwd(self):
+        """Verifies burn_subtitle_into_video runs FFmpeg with an ASCII-only cwd when video dir has Arabic chars."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            arabic_folder = os.path.join(tmp_dir, "ترجمة الفيديوهات")
+            os.makedirs(arabic_folder, exist_ok=True)
+            video_file = os.path.join(arabic_folder, "فيديو تجريبي.mp4")
+            srt_file = os.path.join(arabic_folder, "فيديو تجريبي.ar.srt")
+            with open(video_file, "wb") as f: f.write(b"mp4 dummy")
+            with open(srt_file, "w", encoding="utf-8-sig") as f:
+                f.write("1\n00:00:01,000 --> 00:00:02,000\nترجمة عربية\n")
+
+            captured_cwds = []
+            captured_cmds = []
+
+            def mock_burn_run(cmd, **kwargs):
+                captured_cwds.append(kwargs.get("cwd"))
+                captured_cmds.append(list(cmd))
+                out_mp4 = cmd[-1]
+                with open(out_mp4, "wb") as out_f:
+                    out_f.write(b"burned video bytes")
+                res = MagicMock()
+                res.returncode = 0
+                res.stderr = ""
+                return res
+
+            with patch("subprocess.run", side_effect=mock_burn_run):
+                ok = burn_subtitle_into_video(video_file, srt_file, ffmpeg_path="ffmpeg")
+                self.assertTrue(ok)
+                self.assertEqual(len(captured_cwds), 1)
+
+                cwd_used = captured_cwds[0]
+                self.assertIsNotNone(cwd_used)
+                self.assertTrue(all(ord(c) < 128 for c in cwd_used), f"CWD {cwd_used} contains non-ASCII characters!")
+
+                cmd = captured_cmds[0]
+                vf_arg = cmd[cmd.index("-vf") + 1]
+                self.assertTrue(vf_arg.startswith("subtitles=_sd_burn_"))
+                self.assertNotIn(":", vf_arg.split("subtitles=")[1].split(":")[0])
+                self.assertNotIn("\\", vf_arg)
+
+    def test_api_sync_state_updates_modal_in_real_time(self):
+        """Verifies POST /api/sync_state updates QualitySelectionModal widgets on the Tkinter event loop."""
+        from smart_download.services.preview_stream_bridge import (
+            register_preview_session, unregister_preview_session, get_preview_bridge_port
+        )
+        from smart_download.services.youtube_models import VideoFormatOption
+        import urllib.request
+
+        port = get_preview_bridge_port()
+        opt0 = VideoFormatOption(format_id="18", resolution_label="360p", height=360, ext="mp4", filesize_approx=5_000_000)
+        opt1 = VideoFormatOption(format_id="22", resolution_label="720p (HD)", height=720, ext="mp4", filesize_approx=15_000_000)
+        options = [opt0, opt1]
+        auds = [{"track_id": "original", "label": "Original Audio"}, {"track_id": "ar", "label": "العربية (مدبلج)"}]
+        subs = [{"sub_id": "none", "label": "No Subtitles"}, {"sub_id": "ar", "label": "Arabic Subtitles", "language": "ar"}]
+
+        mock_modal = MagicMock()
+        mock_modal.options = options
+        mock_modal.tree = MagicMock()
+        mock_modal.cb_audio = MagicMock()
+        mock_modal.cb_sub = MagicMock()
+        mock_modal.cb_sub._mode_var = MagicMock()
+        mock_modal.cb_sub._sub_mode_cb = MagicMock()
+        mock_modal.cb_sub._mode_codes = ["soft_embed", "hard_burn", "srt_only"]
+        mock_modal.entry_dest = MagicMock()
+        mock_modal.winfo_exists.return_value = True
+
+        after_callbacks = []
+        mock_modal.after.side_effect = lambda ms, cb: after_callbacks.append(cb)
+
+        sid = register_preview_session(
+            url="https://www.youtube.com/watch?v=sync_test",
+            video_title="Sync Test",
+            options=options,
+            audio_tracks=auds,
+            subtitle_tracks=subs,
+            modal_ref=mock_modal,
+        )
+        try:
+            sync_url = f"http://127.0.0.1:{port}/api/sync_state?sid={sid}"
+            payload = json.dumps({
+                "q_idx": 1,
+                "a_idx": 1,
+                "s_idx": 1,
+                "sub_mode": "hard_burn",
+                "dest_path": r"C:\Downloads\TestVideo [720p] [Sub].mp4"
+            }).encode("utf-8")
+
+            req = urllib.request.Request(sync_url, data=payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertEqual(resp.getcode(), 200)
+                data = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(data.get("status"), "ok")
+
+            self.assertEqual(len(after_callbacks), 1)
+            after_callbacks[0]()
+
+            mock_modal.tree.selection_set.assert_called_with("opt_1")
+            self.assertEqual(mock_modal.selected_option, opt1)
+            self.assertEqual(opt1.selected_audio_track, auds[1])
+            self.assertEqual(opt1.selected_subtitle_track, subs[1])
+            self.assertEqual(opt1.subtitle_embed_mode, "hard_burn")
+            mock_modal.cb_audio.current.assert_called_with(1)
+            mock_modal.cb_sub.current.assert_called_with(1)
+            self.assertEqual(mock_modal.cb_sub._selected_mode, "hard_burn")
+            mock_modal.cb_sub._mode_var.set.assert_called_with("hard_burn")
+            mock_modal.cb_sub._sub_mode_cb.current.assert_called_with(1)
+            mock_modal.entry_dest.delete.assert_called_with(0, "end")
+            mock_modal.entry_dest.insert.assert_called_with(0, r"C:\Downloads\TestVideo [720p] [Sub].mp4")
+        finally:
+            unregister_preview_session(sid)
+
+    def test_preview_html_action_submitted_and_bridge_base(self):
+        """Verifies generate_preview_html contains actionSubmitted flag and absolute bridgeBase."""
+        from smart_download.ui.modals.preview_html_builder import generate_preview_html
+
+        html_out = generate_preview_html(
+            url="https://www.youtube.com/watch?v=html_test",
+            video_title="HTML Test",
+            stream_url="http://127.0.0.1:9876/stream_video?sid=xyz&q_idx=0",
+            sid="test_sid",
+            bridge_port=9876,
+            options=[MagicMock(resolution_label="1080p", ext="mp4", filesize_approx=1000)],
+            audio_tracks=[{"track_id": "original", "label": "Original"}],
+            subtitle_tracks=[{"sub_id": "none", "label": "None"}, {"sub_id": "ar", "label": "Arabic", "language": "ar"}]
+        )
+        self.assertIn('const bridgeBase = "http://127.0.0.1:9876";', html_out)
+        self.assertIn("let actionSubmitted = false;", html_out)
+        self.assertIn("actionSubmitted = true;", html_out)
+        self.assertIn("if (sid && !actionSubmitted)", html_out)
+        self.assertIn("${bridgeBase}/api/sync_state?sid=", html_out)
+        self.assertIn("${bridgeBase}/api/action?sid=", html_out)
+        self.assertIn("${bridgeBase}/api/update_filename?sid=", html_out)
+        self.assertIn('modeSelect.value = "hard_burn"', html_out)
+        self.assertIn("window._userTouchedMode = true", html_out)
+
+    def test_youtube_format_builder_dubbed_audio_merging(self):
+        """Verifies build_stream_info copies option and forces is_progressive=False for dubbed audio."""
+        from smart_download.services.youtube_service import YouTubeResolver
+        from smart_download.services.youtube_models import VideoFormatOption
+
+        resolver = YouTubeResolver()
+        opt = VideoFormatOption(
+            format_id="18", resolution_label="360p", height=360, ext="mp4",
+            is_progressive=True, video_url="https://video.example.com/prog.mp4",
+            filesize_approx=10_000_000
+        )
+        opt.selected_audio_track = {
+            "track_id": "ar", "is_original": False, "url": "https://audio.example.com/dub.m4a",
+            "filesize": 2_000_000
+        }
+        info = {"id": "test_dub", "title": "Dub Test"}
+
+        stream_info = resolver.build_stream_info(info, opt)
+        self.assertTrue(opt.is_progressive)
+        self.assertFalse(stream_info.is_progressive)
+        self.assertEqual(stream_info.audio_url, "https://audio.example.com/dub.m4a")
+        self.assertEqual(stream_info.audio_size, 2_000_000)
 
 
 if __name__ == "__main__":

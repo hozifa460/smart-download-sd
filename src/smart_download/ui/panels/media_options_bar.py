@@ -80,34 +80,16 @@ class MediaOptionsBarMixin:
         self.cb_main_audio.pack(side=tk.LEFT, padx=(4, 8))
 
         self.btn_main_preview = tk.Button(
-            row1,
-            text=tr("btn_preview_short", "🎬 Preview"),
-            font=("Segoe UI", 8, "bold"),
-            bg=self.c_panel_light,
-            fg=self.c_accent,
-            relief="flat",
-            activebackground=self.c_accent_dark,
-            activeforeground="white",
-            cursor="hand2",
-            padx=8,
-            pady=2,
-            command=self._open_main_media_preview
+            row1, text=tr("btn_preview_short", "🎬 Preview"), font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark,
+            activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._open_main_media_preview
         )
         self.btn_main_preview.pack(side=tk.RIGHT, padx=(4, 0))
 
         self.btn_reopen_quality = tk.Button(
-            row1,
-            text=tr("btn_media_quality_options", "🎞️ خيارات الجودة والترجمة"),
-            font=("Segoe UI", 8, "bold"),
-            bg=self.c_panel_light,
-            fg=self.c_accent,
-            relief="flat",
-            activebackground=self.c_accent_dark,
-            activeforeground="white",
-            cursor="hand2",
-            padx=8,
-            pady=2,
-            command=self._reopen_media_quality_modal
+            row1, text=tr("btn_media_quality_options", "🎞️ خيارات الجودة والترجمة"), font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark,
+            activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._reopen_media_quality_modal
         )
         self.btn_reopen_quality.pack(side=tk.RIGHT, padx=(0, 4))
 
@@ -286,20 +268,16 @@ class MediaOptionsBarMixin:
 
     def _get_cached_media_context(self, url: str) -> Optional[Dict[str, Any]]:
         """Retrieves cached media options context by full URL or extracted video ID for 0ms reopen."""
-        if not url:
-            return None
+        if not url: return None
         cache = getattr(self, "_media_context_cache", None)
         if cache and isinstance(cache, dict):
-            if url in cache:
-                return cache[url]
+            if url in cache: return cache[url]
             clean_url = url.split("&")[0].strip() if "?" in url else url.strip()
-            if clean_url in cache:
-                return cache[clean_url]
+            if clean_url in cache: return cache[clean_url]
             for k, ctx in cache.items():
                 info = ctx.get("info") or {}
                 vid = info.get("id") or info.get("display_id")
-                if vid and (str(vid) in url or str(vid) == url):
-                    return ctx
+                if vid and (str(vid) in url or str(vid) == url): return ctx
         for ctx_attr in ("_pending_media_context", "_last_media_context"):
             ctx = getattr(self, ctx_attr, None)
             if ctx and isinstance(ctx, dict):
@@ -371,11 +349,7 @@ class MediaOptionsBarMixin:
 
         resolver = ctx.get("resolver")
         if not resolver and hasattr(self, "log"):
-            resolver = YouTubeResolver(
-                on_log=self.log,
-                cookies_from_browser=getattr(self, "cookies_browser", "auto"),
-                cookies_file=getattr(self, "cookies_file", "")
-            )
+            resolver = YouTubeResolver(on_log=self.log, cookies_from_browser=getattr(self, "cookies_browser", "auto"), cookies_file=getattr(self, "cookies_file", ""))
 
         def _on_confirm(selected_opt: VideoFormatOption, final_dest: str):
             self._quality_modal = None
@@ -390,12 +364,8 @@ class MediaOptionsBarMixin:
             yt_prog_modal = None
             if is_hidden:
                 yt_prog_modal = DownloadConfirmationModal(
-                    parent=self.root,
-                    url=ctx.get("url", ""),
-                    default_dest_path=final_dest,
-                    theme=self._theme_dict(),
-                    parent_app=self,
-                    show_progress_immediately=True
+                    parent=self.root, url=ctx.get("url", ""), default_dest_path=final_dest,
+                    theme=self._theme_dict(), parent_app=self, show_progress_immediately=True
                 )
             if stream_info and hasattr(self, "_launch_stream_coordinator"):
                 self._launch_stream_coordinator(stream_info, final_dest, max_conn, kb_lim * 1024.0, yt_modal=yt_prog_modal)
@@ -407,57 +377,39 @@ class MediaOptionsBarMixin:
             if hasattr(self, "restore_window"):
                 self.restore_window()
             try:
-                self.entry_url.delete(0, tk.END)
-                self.entry_url.insert(0, ctx["url"])
-                self.entry_dest.delete(0, tk.END)
-                self.entry_dest.insert(0, final_dest)
-            except Exception:
-                pass
+                self.entry_url.delete(0, tk.END); self.entry_url.insert(0, ctx["url"])
+                self.entry_dest.delete(0, tk.END); self.entry_dest.insert(0, final_dest)
+            except Exception: pass
             ctx["selected_option"] = selected_opt
             ctx["final_dest"] = final_dest
             self.populate_main_media_bar(
                 info, options, ctx.get("audio_tracks", []), ctx.get("subtitle_tracks", []), selected_option=selected_opt
             )
             try:
-                self.btn_start.configure(state="normal")
-                self.btn_pause.configure(state="disabled")
-                self.btn_cancel.configure(state="disabled")
-                self.card_size.configure(text=tr("status_ready", "Ready"))
-            except Exception:
-                pass
+                self.btn_start.configure(state="normal"); self.btn_pause.configure(state="disabled")
+                self.btn_cancel.configure(state="disabled"); self.card_size.configure(text=tr("status_ready", "Ready"))
+            except Exception: pass
 
         def _on_cancel():
             self._quality_modal = None
 
         if hasattr(self, "_quality_modal") and self._quality_modal:
             try:
-                if self._quality_modal.winfo_exists():
-                    self._quality_modal.destroy()
-            except Exception:
-                pass
+                if self._quality_modal.winfo_exists(): self._quality_modal.destroy()
+            except Exception: pass
             self._quality_modal = None
 
         self._quality_modal = QualitySelectionModal(
-            parent=self.root,
-            video_title=raw_title,
-            duration=duration,
-            options=options,
-            default_dest_path=dest,
-            theme=theme_dict,
-            on_confirm=_on_confirm,
-            on_cancel=_on_cancel,
-            on_open_in_main=_on_open_in_main,
-            parent_app=self,
-            audio_tracks=ctx.get("audio_tracks", []),
-            subtitle_tracks=ctx.get("subtitle_tracks", []),
-            video_url=ctx.get("url", ""),
-            raw_info=info
+            parent=self.root, video_title=raw_title, duration=duration, options=options, default_dest_path=dest,
+            theme=theme_dict, on_confirm=_on_confirm, on_cancel=_on_cancel, on_open_in_main=_on_open_in_main,
+            parent_app=self, audio_tracks=ctx.get("audio_tracks", []), subtitle_tracks=ctx.get("subtitle_tracks", []),
+            video_url=ctx.get("url", ""), raw_info=info
         )
 
     def _open_main_media_preview(self):
         """Launches in-app VidMate-style preview directly from the Main Window Media Bar."""
         ctx = getattr(self, "_pending_media_context", None) or {}
-        url = ctx.get("url") or (self.url_input.get().strip() if hasattr(self, "url_input") else "")
+        url = ctx.get("url") or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
         info = ctx.get("info") or getattr(self, "_last_yt_info", {}) or {}
         raw_title = info.get("title") or ctx.get("title") or "Video Preview"
         opts = getattr(self, "_main_media_options", ctx.get("options", []))
@@ -467,14 +419,58 @@ class MediaOptionsBarMixin:
         sel_aud = auds[self.cb_main_audio.current()] if hasattr(self, "cb_main_audio") and auds and 0 <= self.cb_main_audio.current() < len(auds) else None
         sel_sub = subs[self.cb_main_sub.current()] if hasattr(self, "cb_main_sub") and subs and 0 <= self.cb_main_sub.current() < len(subs) else None
         theme_d = getattr(self, "_theme_dict", None) or ({"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_border": self.c_border, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_success": self.c_success, "c_text_bright": self.c_text_bright, "c_text_muted": self.c_text_muted, "c_input_bg": self.c_input_bg} if hasattr(self, "c_bg") else {})
-        dest_p = self.dest_input.get().strip() if hasattr(self, "dest_input") else ""
+        dest_p = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or (self.dest_input.get().strip() if hasattr(self, "dest_input") else "")
+
+        def _sync_ui(opt, dst):
+            if opt and opts and hasattr(self, "cb_main_quality"):
+                for i, o in enumerate(opts):
+                    if o == opt or getattr(o, "format_id", None) == getattr(opt, "format_id", None):
+                        self.cb_main_quality.current(i); break
+            sel_a = getattr(opt, "selected_audio_track", None)
+            if auds and sel_a and hasattr(self, "cb_main_audio"):
+                for i, a in enumerate(auds):
+                    if a == sel_a or a.get("track_id") == sel_a.get("track_id"):
+                        self.cb_main_audio.current(i); break
+            sel_s = getattr(opt, "selected_subtitle_track", None)
+            if subs and sel_s and hasattr(self, "cb_main_sub"):
+                for i, s in enumerate(subs):
+                    if s == sel_s or s.get("sub_id") == sel_s.get("sub_id"):
+                        self.cb_main_sub.current(i)
+                        if hasattr(self, "cb_main_sub_mode"):
+                            self.cb_main_sub_mode.configure(state="readonly" if i > 0 else "disabled")
+                        break
+            sm = getattr(opt, "subtitle_embed_mode", None)
+            if sm and hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes"):
+                if sm in self._main_sub_mode_codes:
+                    self.cb_main_sub_mode.current(self._main_sub_mode_codes.index(sm))
+            if dst and hasattr(self, "entry_dest") and self.entry_dest and tk:
+                self.entry_dest.delete(0, tk.END)
+                self.entry_dest.insert(0, dst)
+
+        def _on_preview_confirm(selected_opt, final_dest):
+            _sync_ui(selected_opt, final_dest)
+            try: max_conn = int(self.conn_var.get())
+            except Exception: max_conn = 8
+            try: bytes_limit = max(0.0, float(self.entry_custom_speed.get().strip())) * 1024.0
+            except Exception: bytes_limit = 0.0
+            resolver = ctx.get("resolver")
+            if not resolver and hasattr(self, "log"):
+                from ...services.youtube_service import YouTubeResolver
+                resolver = YouTubeResolver(on_log=self.log, cookies_from_browser=getattr(self, "cookies_browser", "auto"), cookies_file=getattr(self, "cookies_file", ""))
+            stream_info = resolver.build_stream_info(info, selected_opt) if resolver else None
+            self._last_media_context = {**dict(ctx), "selected_option": selected_opt, "final_dest": final_dest}
+            self._pending_media_context = None
+            if stream_info and hasattr(self, "_launch_stream_coordinator"):
+                self._launch_stream_coordinator(stream_info, final_dest, max_conn, bytes_limit)
+
         try:
             from ..modals.video_preview_modal import open_video_preview
             open_video_preview(
                 parent=self.root if hasattr(self, "root") else None, url=url, video_title=raw_title,
                 stream_info=sel_opt, info_dict=info, selected_sub_track=sel_sub, theme=theme_d,
                 selected_audio_track=sel_aud, options=opts, audio_tracks=auds, subtitle_tracks=subs,
-                default_dest_path=dest_p, on_confirm=lambda opt, dst: self._start_pending_media_download(),
+                default_dest_path=dest_p, on_confirm=_on_preview_confirm,
+                on_open_in_main=lambda opt, dst: _sync_ui(opt, dst),
                 parent_app=self, on_log=self.log if hasattr(self, "log") else print
             )
         except Exception as e:

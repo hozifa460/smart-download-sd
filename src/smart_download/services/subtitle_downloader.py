@@ -403,15 +403,10 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
 
     stem = os.path.splitext(video_filepath)[0]
     srt_path = f"{stem}.{sub_track.get('language') or 'sub'}.srt"
-    default_srt_path = f"{stem}.srt"
     try:
         with open(srt_path, "w", encoding="utf-8-sig") as f:
             f.write(srt_content)
-        try:
-            with open(default_srt_path, "w", encoding="utf-8-sig") as f:
-                f.write(srt_content)
-        except Exception:
-            pass
         return srt_path
     except Exception:
         return None
+

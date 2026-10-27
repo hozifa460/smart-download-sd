@@ -72,7 +72,9 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
             lang = str(at.get("language") or "").strip().lower()
             if not lang and at.get("id"):
                 lang = str(at.get("id")).split(".")[0].strip().lower()
-        if "original" in fn or "default" in fn or f.get("language_preference", -1) >= 0:
+        pref = f.get("language_preference")
+        has_lang_pref = (pref if pref is not None else -1) >= 0
+        if "original" in fn or "default" in fn or has_lang_pref:
             if lang:
                 orig_lang = lang
                 break
@@ -85,6 +87,11 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
             if not first_lang and isinstance(first_f.get("audio_track"), dict):
                 first_lang = str(first_f["audio_track"].get("language") or "").strip().lower()
         orig_lang = top_lang or first_lang
+
+    def _is_manifest_f(f_dict: Dict[str, Any]) -> bool:
+        proto = str(f_dict.get("protocol") or "").lower()
+        u = str(f_dict.get("url") or "").lower()
+        return "m3u8" in proto or "dash" in proto or ".m3u8" in u or ".mpd" in u or "/manifest/" in u
 
     groups: Dict[str, List[Tuple[Dict[str, Any], str]]] = {}
     for f in audio_formats:
@@ -99,9 +106,11 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
                     lang = str(at.get("id")).split(".")[0].strip().lower()
             disp_name = str(at.get("display_name") or at.get("name") or "").strip()
 
+        pref = f.get("language_preference")
+        has_lang_pref = (pref if pref is not None else -1) >= 0
         is_orig = (
             "original" in fn or "default" in fn
-            or f.get("language_preference", -1) >= 0
+            or has_lang_pref
             or (orig_lang and lang == orig_lang) or (not lang and not orig_lang)
         )
         key = "original" if is_orig else (lang or next((c for c in LANG_NAMES if c in fn), "und"))
@@ -112,8 +121,10 @@ def extract_audio_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     result: List[Dict[str, Any]] = []
     for key, f_tuples in groups.items():
+        direct_cand = [t for t in f_tuples if not _is_manifest_f(t[0])]
+        active_tuples = direct_cand if direct_cand else f_tuples
         best_f, best_disp = max(
-            f_tuples,
+            active_tuples,
             key=lambda t: (1 if str(t[0].get("ext") or "").lower() == "m4a" else 0, float(t[0].get("abr") or t[0].get("tbr") or 0.0))
         )
         abr = float(best_f.get("abr") or best_f.get("tbr") or 0.0)
@@ -363,7 +374,7 @@ def build_audio_subtitle_row(
                 def get_setting(k: str, d: Any = None) -> Any: return d  # type: ignore
                 def set_setting(k: str, v: Any) -> bool: return True  # type: ignore
 
-        saved_mode = get_setting("subtitle_embed_mode", "soft_embed")
+        saved_mode = get_setting("subtitle_embed_mode", "hard_burn")
         initial_idx = mode_codes.index(saved_mode) if saved_mode in mode_codes else 0
         current_mode = mode_codes[initial_idx]
 
@@ -388,6 +399,11 @@ def build_audio_subtitle_row(
             idx = cb_sub.current()
             if idx > 0:
                 cb_sub_mode.configure(state="readonly")
+                if not getattr(cb_sub, "_user_touched_mode", False):
+                    cb_sub._selected_mode = "hard_burn"
+                    mode_var.set("hard_burn")
+                    if "hard_burn" in mode_codes:
+                        cb_sub_mode.current(mode_codes.index("hard_burn"))
             else:
                 cb_sub_mode.configure(state="disabled")
                 cb_sub._user_touched_mode = False
