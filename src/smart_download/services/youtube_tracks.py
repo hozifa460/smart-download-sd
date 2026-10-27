@@ -258,6 +258,26 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "base_url": base_url,
             })
 
+    if not any(t.get("language", "").lower().startswith("ar") for t in tracks):
+        base_track = next((t for t in tracks if t.get("sub_id") != "none" and (t.get("base_url") or t.get("url"))), None)
+        if base_track:
+            b_url = base_track.get("base_url") or base_track.get("url") or ""
+            if b_url:
+                sep = "&" if "?" in b_url else "?"
+                ar_url = f"{b_url}{sep}tlang=ar"
+                tracks.append({
+                    "sub_id": "ar_auto",
+                    "language": "ar",
+                    "label": "العربية (ترجمة تلقائية)",
+                    "url": ar_url,
+                    "ext": base_track.get("ext", "vtt"),
+                    "is_auto": True,
+                    "fallback_urls": [ar_url],
+                    "http_headers": dict(base_track.get("http_headers") or {}),
+                    "webpage_url": webpage_url,
+                    "base_url": b_url,
+                })
+
     def _sub_sort_key(t: Dict[str, Any]) -> Tuple[int, int, str]:
         if t["sub_id"] == "none": return (0, 0, "")
         lang = t["language"].lower()

@@ -210,10 +210,20 @@ def _translate_srt_cues_via_gtx(
         q = urllib.parse.quote(text_chunk)
         url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={t_lang}&dt=t&q={q}"
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-            if isinstance(data, list) and data and isinstance(data[0], list):
-                return "".join(part[0] for part in data[0] if part and len(part) > 0 and part[0])
+        data = None
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        except Exception:
+            try:
+                import ssl
+                ctx = ssl._create_unverified_context() if hasattr(ssl, "_create_unverified_context") else None
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                    data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            except Exception:
+                return ""
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            return "".join(part[0] for part in data[0] if part and len(part) > 0 and part[0])
         return ""
 
     for batch in batches:
@@ -366,7 +376,7 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
                     break
 
         if base_cand_url:
-            base_content = None
+            parsed_cues = []
             clean_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"}
             # Try formats vtt, json3, srv3, ttml
             for fmt in ("vtt", "json3", "srv3", "ttml"):
@@ -376,17 +386,17 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
                     sep = "&" if "?" in base_cand_url else "?"
                     test_url = f"{base_cand_url}{sep}fmt={fmt}"
                 fetched = _fetch_url_direct(test_url, clean_headers, timeout=10)
-                if fetched and len(fetched.strip()) > 30:
-                    base_content = fetched
-                    break
+                if fetched and len(fetched.strip()) > 10:
+                    c = _parse_timedtext_to_cues(fetched)
+                    if c:
+                        parsed_cues = c
+                        break
 
-            if base_content:
-                cues = _parse_timedtext_to_cues(base_content)
-                if cues:
-                    target_lang = str(sub_track.get("language") or "ar").split("-")[0].split("_")[0] or "ar"
-                    translated_cues = _translate_srt_cues_via_gtx(cues, target_lang=target_lang)
-                    if translated_cues:
-                        srt_content = _format_cues_to_srt(translated_cues)
+            if parsed_cues:
+                target_lang = str(sub_track.get("language") or "ar").split("-")[0].split("_")[0] or "ar"
+                translated_cues = _translate_srt_cues_via_gtx(parsed_cues, target_lang=target_lang)
+                if translated_cues:
+                    srt_content = _format_cues_to_srt(translated_cues)
 
     if not srt_content or "-->" not in srt_content:
         return None

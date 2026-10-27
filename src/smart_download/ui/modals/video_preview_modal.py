@@ -8,6 +8,7 @@ import re
 import sys
 import html
 import time
+import json
 import base64
 import tempfile
 import shutil
@@ -48,12 +49,19 @@ def _find_chromeless_browser() -> Optional[str]:
     # 3. Brave
     brave_paths = [
         shutil.which("brave"),
+        shutil.which("brave-browser"),
         os.path.expandvars(r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe"),
         os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
     ]
     for p in brave_paths:
         if p and os.path.isfile(p):
             return os.path.abspath(p)
+
+    # 4. Chromium / Google Chrome on Linux/Mac
+    for name in ("google-chrome", "chromium", "chromium-browser"):
+        w = shutil.which(name)
+        if w and os.path.isfile(w):
+            return os.path.abspath(w)
 
     return None
 
@@ -64,7 +72,15 @@ def _find_progressive_mp4_url(
     source_url: str = ""
 ) -> Optional[str]:
     """Finds direct playable progressive MP4 stream (e.g. format 18/22 or direct URL)."""
-    # Check info_dict formats
+    # 1. Check stream_info object (VideoFormatOption / YouTubeStreamInfo)
+    if stream_info is not None:
+        url_val = getattr(stream_info, "video_url", None) or getattr(stream_info, "url", None)
+        is_prog = getattr(stream_info, "is_progressive", False)
+        ext_val = getattr(stream_info, "ext", getattr(stream_info, "video_ext", "mp4"))
+        if url_val and is_prog and str(ext_val).lower() == "mp4":
+            return str(url_val)
+
+    # 2. Check info_dict formats for fast progressive MP4 (formats 18, 22)
     if isinstance(info_dict, dict):
         formats = info_dict.get("formats") or []
         prog_formats = [
@@ -73,21 +89,12 @@ def _find_progressive_mp4_url(
             and str(f.get("ext") or "").lower() == "mp4"
         ]
         if prog_formats:
-            # Sort by height ascending or pick 720p/360p
             prog_formats.sort(key=lambda f: int(f.get("height") or 0), reverse=True)
-            # Prefer <= 720p for fast preview buffering
             fast_candidates = [f for f in prog_formats if int(f.get("height") or 0) <= 720]
             chosen = fast_candidates[0] if fast_candidates else prog_formats[0]
             return str(chosen.get("url") or "")
 
-    # Check stream_info object
-    if stream_info is not None:
-        url_val = getattr(stream_info, "url", None)
-        ext_val = getattr(stream_info, "ext", "mp4")
-        if url_val and str(ext_val).lower() == "mp4" and "googlevideo.com" not in str(url_val):
-            return str(url_val)
-
-    # Check direct source_url
+    # 3. Direct source_url check
     clean_u = (source_url or "").split("?")[0].lower()
     if clean_u.endswith((".mp4", ".m4v", ".webm")):
         return source_url
@@ -115,23 +122,26 @@ def generate_preview_html(
     vtt_data_uri: Optional[str] = None,
     video_id: Optional[str] = None,
     sub_label: Optional[str] = None,
-    quality_label: Optional[str] = None
+    quality_label: Optional[str] = None,
+    sub_lang: str = "ar"
 ) -> str:
     """Generates standalone modern dark-themed HTML5 preview player with live WebVTT subtitles."""
     safe_title = html.escape(video_title or "Video Preview")
     safe_stream = html.escape(stream_url or "")
     safe_sub_label = html.escape(sub_label or "Subtitles")
     safe_quality = html.escape(quality_label or ("MP4 Stream" if stream_url else "Web Player"))
+    safe_sub_lang = html.escape((sub_lang or "ar").split("-")[0].split("_")[0])
 
     if video_id:
-        embed_src = f"https://www.youtube.com/embed/{video_id}?autoplay=1&cc_load_policy=1&cc_lang_pref=ar&hl=ar"
+        embed_src = f"https://www.youtube.com/embed/{video_id}?autoplay=1&cc_load_policy=1&cc_lang_pref={safe_sub_lang}&hl={safe_sub_lang}"
     else:
         embed_src = url
+    embed_src_json = json.dumps(embed_src)
 
     has_stream_js = "true" if stream_url else "false"
     track_html = ""
     if vtt_data_uri:
-        track_html = f'<track label="{safe_sub_label}" kind="subtitles" srclang="ar" src="{vtt_data_uri}" default>'
+        track_html = f'<track label="{safe_sub_label}" kind="subtitles" srclang="{safe_sub_lang}" src="{vtt_data_uri}" default>'
 
     sub_badge_html = ""
     if vtt_data_uri:
@@ -254,15 +264,15 @@ def generate_preview_html(
         </div>
     </div>
     <div class="player-container">
-        <video id="videoEl" controls autoplay playsinline style="display: {'block' if stream_url else 'none'};">
+        <video id="videoEl" src="{safe_stream}" controls autoplay playsinline style="display: {'block' if stream_url else 'none'};">
             {f'<source src="{safe_stream}" type="video/mp4">' if stream_url else ''}
             {track_html}
         </video>
-        <iframe id="iframeEl" src="{'about:blank' if stream_url else embed_src}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="display: {'none' if stream_url else 'block'};"></iframe>
+        <iframe id="iframeEl" src="{'about:blank' if stream_url else embed_src}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen style="display: {'none' if stream_url else 'block'};"></iframe>
     </div>
     <script>
         const hasStream = {has_stream_js};
-        const embedUrl = "{embed_src}";
+        const embedUrl = {embed_src_json};
         const videoEl = document.getElementById("videoEl");
         const iframeEl = document.getElementById("iframeEl");
         const toggleBtn = document.getElementById("toggleBtn");
@@ -291,12 +301,18 @@ def generate_preview_html(
             updateUI();
         }}
 
+        function handleVideoError() {{
+            console.warn("[SD Preview] Direct stream failed to load; falling back to Web Embed player.");
+            isUsingVideo = false;
+            updateUI();
+        }}
+
         if (videoEl) {{
-            videoEl.addEventListener("error", function() {{
-                console.warn("[SD Preview] Direct stream failed to load; falling back to Web Embed player.");
-                isUsingVideo = false;
-                updateUI();
-            }});
+            videoEl.addEventListener("error", handleVideoError);
+            const sourceEl = videoEl.querySelector("source");
+            if (sourceEl) {{
+                sourceEl.addEventListener("error", handleVideoError);
+            }}
         }}
     </script>
 </body>
@@ -312,7 +328,8 @@ def open_video_preview(
     info_dict: Optional[Dict[str, Any]] = None,
     selected_sub_track: Optional[Dict[str, Any]] = None,
     theme: Optional[Dict[str, str]] = None,
-    on_log: Optional[Callable[[str], None]] = None
+    on_log: Optional[Callable[[str], None]] = None,
+    selected_audio_track: Optional[Dict[str, Any]] = None
 ) -> str:
     """
     Builds and opens a real, VidMate-style video preview with live WebVTT subtitles
@@ -333,8 +350,10 @@ def open_video_preview(
     # 3. Process subtitles if selected
     vtt_data_uri = None
     sub_label = None
+    sub_lang = "ar"
     if selected_sub_track and selected_sub_track.get("sub_id") not in (None, "none"):
         sub_label = selected_sub_track.get("label") or selected_sub_track.get("language") or "Subtitles"
+        sub_lang = (selected_sub_track.get("language") or "ar").split("-")[0].split("_")[0] or "ar"
         try:
             temp_sub_stem = os.path.join(tempfile.gettempdir(), f"_sd_prev_{os.getpid()}_{int(time.time()*1000)}")
             srt_path = download_subtitle_as_srt(selected_sub_track, f"{temp_sub_stem}.mp4")
@@ -343,6 +362,10 @@ def open_video_preview(
                     srt_text = sf.read()
                 vtt_data_uri = _convert_srt_to_vtt_data_uri(srt_text)
                 try: os.remove(srt_path)
+                except Exception: pass
+                try:
+                    def_srt = f"{temp_sub_stem}.srt"
+                    if os.path.exists(def_srt): os.remove(def_srt)
                 except Exception: pass
         except Exception as exc:
             if on_log:
@@ -363,7 +386,8 @@ def open_video_preview(
         vtt_data_uri=vtt_data_uri,
         video_id=video_id,
         sub_label=sub_label,
-        quality_label=quality_label
+        quality_label=quality_label,
+        sub_lang=sub_lang
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")
@@ -381,10 +405,13 @@ def open_video_preview(
 
     if pywebview_available:
         try:
-            cmd = [
-                sys.executable, "-c",
-                f"import webview; webview.create_window({repr(title)}, {repr(temp_html)}, width=860, height=560); webview.start()"
-            ]
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable, "--preview-html", temp_html]
+            else:
+                cmd = [
+                    sys.executable, "-c",
+                    f"import webview; webview.create_window({repr(title)}, {repr(temp_html)}, width=860, height=560); webview.start()"
+                ]
             cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
             subprocess.Popen(cmd, creationflags=cflags)
             if on_log:
@@ -394,7 +421,7 @@ def open_video_preview(
             pass
 
     # Launch Chromeless native app window (Edge, Chrome, Brave)
-    browser_exe = _find_chromeless_browser() if IS_WINDOWS else None
+    browser_exe = _find_chromeless_browser()
     if browser_exe:
         file_uri = f"file:///{temp_html.replace(os.sep, '/')}"
         app_arg = f"--app={file_uri}"

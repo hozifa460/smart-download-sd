@@ -449,7 +449,6 @@ class QualitySelectionModal(tk.Toplevel):
         reserved = hm.get_active_or_queued_paths() if hm else None
         return generate_unique_destination_path(final_dest, reserved_paths=reserved)
 
-
     def _on_download(self):
         if not self.selected_option:
             return
@@ -467,7 +466,11 @@ class QualitySelectionModal(tk.Toplevel):
         if not self.selected_option:
             return
         self._attach_selected_tracks()
-        sel_sub = getattr(self.selected_option, "subtitle_track", None)
+        sel_sub = getattr(self.selected_option, "selected_subtitle_track", getattr(self.selected_option, "subtitle_track", None))
+        if not sel_sub and hasattr(self, "cb_sub") and self.cb_sub and self.subtitle_tracks:
+            idx = self.cb_sub.current()
+            if 0 <= idx < len(self.subtitle_tracks):
+                sel_sub = self.subtitle_tracks[idx]
         try:
             from .video_preview_modal import open_video_preview
             open_video_preview(
@@ -542,4 +545,3 @@ class QualitySelectionModal(tk.Toplevel):
                 try: self.on_cancel()
                 except Exception: pass
         animate_window_close(self, on_done=_cleanup)
-

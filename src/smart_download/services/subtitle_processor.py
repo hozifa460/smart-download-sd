@@ -142,7 +142,7 @@ def burn_subtitle_into_video(
     try:
         with open(abs_srt, "r", encoding="utf-8-sig", errors="replace") as sf:
             srt_content = sf.read()
-        with open(burn_srt_path, "w", encoding="utf-8-sig") as bf:
+        with open(burn_srt_path, "w", encoding="utf-8") as bf:
             bf.write(srt_content)
     except Exception as exc:
         if on_log:
@@ -151,11 +151,11 @@ def burn_subtitle_into_video(
 
     escaped_path = burn_srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
-    # Candidate 1: subtitles=filename={burn_srt_name}:charenc=UTF-8 with audio transcode AAC
+    # Candidate 1: subtitles={burn_srt_name}:charenc=UTF-8 with audio transcode AAC
     # Candidate 2: subtitles={burn_srt_name} with audio transcode AAC (no libiconv dependency)
     # Candidate 3: subtitles='{escaped_path}' with audio transcode AAC
     candidate_vfs = [
-        f"subtitles=filename={burn_srt_name}:charenc=UTF-8",
+        f"subtitles={burn_srt_name}:charenc=UTF-8",
         f"subtitles={burn_srt_name}",
         f"subtitles='{escaped_path}'",
     ]
@@ -274,7 +274,7 @@ def handle_subtitles_post_download(
             if on_log and not (cancel_event and cancel_event.is_set()):
                 on_log("[SUBTITLES] Warning: Failed to download or convert subtitle track.")
             if mode == "hard_burn":
-                strip_burn_tag_from_filename(output_path)
+                output_path = strip_burn_tag_from_filename(output_path)
             return
 
         if on_log:
@@ -290,7 +290,7 @@ def handle_subtitles_post_download(
             if on_log:
                 on_log("[SUBTITLES] FFmpeg not found; skipping video subtitle embedding/burning.")
             if mode == "hard_burn":
-                strip_burn_tag_from_filename(output_path)
+                output_path = strip_burn_tag_from_filename(output_path)
             return
 
         if not output_path.lower().endswith(".mp4"):
@@ -304,7 +304,7 @@ def handle_subtitles_post_download(
             if not ok and not (cancel_event and cancel_event.is_set()):
                 if on_log:
                     on_log("[SUBTITLES] Hard burn failed; falling back to soft subtitle embedding.")
-                strip_burn_tag_from_filename(output_path)
+                output_path = strip_burn_tag_from_filename(output_path)
                 embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)
         else:
             embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)

@@ -37,6 +37,19 @@ if "--test-startup" in sys.argv:
         os._exit(1)
     os._exit(0)
 
+# Subprocess handler for standalone --preview-html window
+if "--preview-html" in sys.argv:
+    try:
+        idx = sys.argv.index("--preview-html")
+        if idx + 1 < len(sys.argv):
+            html_target = sys.argv[idx + 1]
+            import webview
+            webview.create_window("Smart Download — Video Preview", html_target, width=860, height=560)
+            webview.start()
+    except Exception:
+        pass
+    os._exit(0)
+
 _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)

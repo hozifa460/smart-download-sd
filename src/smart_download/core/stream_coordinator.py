@@ -533,7 +533,7 @@ class StreamDownloadCoordinator:
     def _process_subtitles(self, target_path: str):
         sub = getattr(self.stream_info, "subtitle_track", None)
         mode = getattr(self.stream_info, "subtitle_embed_mode", "soft_embed")
-        if sub and sub.get("sub_id") not in (None, "none") and sub.get("url"):
+        if sub and sub.get("sub_id") not in (None, "none") and (sub.get("url") or sub.get("base_url")):
             try:
                 if mode == "hard_burn" and self.on_progress and os.path.isfile(target_path):
                     cur_sz = os.path.getsize(target_path)

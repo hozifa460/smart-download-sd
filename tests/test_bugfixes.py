@@ -185,6 +185,43 @@ class TestSubtitleProcessorAndGTXFallback(unittest.TestCase):
                 untagged_path = os.path.join(tmp_dir, "My Video [1080p].mp4")
                 self.assertTrue(os.path.exists(untagged_path))
 
+    def test_handle_subtitles_post_download_burn_failure_embeds_into_untagged_file(self):
+        """
+        Verifies that if hard_burn fails on 'Video [Sub-Burned].mp4', strip_burn_tag_from_filename
+        renames the file and embed_subtitle_into_mp4 receives the updated (untagged) path.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tagged_path = os.path.join(tmp_dir, "My Video [1080p] [Sub-Burned].mp4")
+            srt_path = os.path.join(tmp_dir, "My Video [1080p].ar.srt")
+            with open(tagged_path, "wb") as f:
+                f.write(b"video data")
+            with open(srt_path, "wb") as f:
+                f.write(b"1\n00:00:01,000 --> 00:00:02,000\nSub\n")
+
+            stream_info = MagicMock()
+            stream_info.subtitle_track = {
+                "sub_id": "ar", "url": "https://example.com/sub.vtt", "language": "ar"
+            }
+            stream_info.subtitle_embed_mode = "hard_burn"
+
+            embed_calls = []
+
+            def mock_embed(v_path, s_path, lang, ffmpeg, **kwargs):
+                embed_calls.append(v_path)
+                return True
+
+            with patch("smart_download.services.subtitle_processor.download_subtitle_as_srt", return_value=srt_path), \
+                 patch("smart_download.services.subtitle_processor.find_ffmpeg_bin", return_value="ffmpeg"), \
+                 patch("smart_download.services.subtitle_processor.burn_subtitle_into_video", return_value=False), \
+                 patch("smart_download.services.subtitle_processor.embed_subtitle_into_mp4", side_effect=mock_embed):
+                handle_subtitles_post_download(stream_info, tagged_path)
+
+                self.assertEqual(len(embed_calls), 1)
+                # Verify embed received the untagged path, NOT the non-existent tagged path
+                expected_untagged = os.path.join(tmp_dir, "My Video [1080p].mp4")
+                self.assertEqual(embed_calls[0], expected_untagged)
+                self.assertTrue(os.path.isfile(expected_untagged))
+
     def test_strip_burn_tag_from_filename(self):
         """Verifies strip_burn_tag_from_filename renames [Sub-Burned] and [Sub] on disk."""
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -222,6 +259,16 @@ class TestVideoPreviewModal(unittest.TestCase):
         res = _find_progressive_mp4_url(None, info_dict)
         self.assertEqual(res, "http://prog720")
 
+    def test_find_progressive_mp4_from_stream_info(self):
+        """Verifies detection of progressive MP4 stream directly on stream_info with is_progressive=True."""
+        stream_info = MagicMock()
+        stream_info.video_url = "https://rr1---sn.googlevideo.com/videoplayback?id=123"
+        stream_info.is_progressive = True
+        stream_info.ext = "mp4"
+
+        res = _find_progressive_mp4_url(stream_info, {})
+        self.assertEqual(res, "https://rr1---sn.googlevideo.com/videoplayback?id=123")
+
     def test_generate_preview_html_with_subtitles(self):
         """Verifies HTML5 output includes direct stream and WebVTT subtitle track."""
         vtt_uri = "data:text/vtt;charset=utf-8;base64,V0VCVlRUCg=="
@@ -232,10 +279,11 @@ class TestVideoPreviewModal(unittest.TestCase):
             vtt_data_uri=vtt_uri,
             video_id="dQw4w9WgXcQ",
             sub_label="Arabic Subtitles",
-            quality_label="720p (HD)"
+            quality_label="720p (HD)",
+            sub_lang="ar"
         )
         self.assertIn("<title>Test Video Preview — Smart Download Preview</title>", html_code)
-        self.assertIn('source src="https://stream.example.com/video.mp4" type="video/mp4"', html_code)
+        self.assertIn('video id="videoEl" src="https://stream.example.com/video.mp4"', html_code)
         self.assertIn(f'track label="Arabic Subtitles" kind="subtitles" srclang="ar" src="{vtt_uri}" default', html_code)
         self.assertIn("https://www.youtube.com/embed/dQw4w9WgXcQ", html_code)
         self.assertIn("Switch to Web Player", html_code)
@@ -260,6 +308,77 @@ class TestVideoPreviewModal(unittest.TestCase):
                 self.assertIn("--window-size=860,560", cmd)
                 try: os.remove(html_path)
                 except Exception: pass
+
+    def test_quality_modal_preview_passes_selected_subtitle_track(self):
+        """Verifies QualitySelectionModal._on_preview_video passes selected_subtitle_track to open_video_preview."""
+        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+        from smart_download.services.youtube_models import VideoFormatOption
+        import tkinter as tk
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+        except Exception:
+            self.skipTest("Tkinter GUI display not available")
+
+        try:
+            opt = VideoFormatOption(
+                format_id="22", resolution_label="720p", height=720,
+                ext="mp4", filesize_approx=1000, is_progressive=True,
+                video_url="https://example.com/video.mp4"
+            )
+            sub_track = {
+                "sub_id": "ar", "language": "ar", "label": "العربية", "url": "https://example.com/ar.vtt"
+            }
+            theme = {
+                "c_bg": "#000", "c_panel": "#111", "c_panel_light": "#222",
+                "c_border": "#333", "c_accent": "#444", "c_accent_dark": "#555",
+                "c_text_bright": "#fff", "c_text_muted": "#aaa", "c_input_bg": "#000", "c_success": "#0f0"
+            }
+            modal = QualitySelectionModal(
+                parent=root,
+                video_title="Modal Test",
+                duration=60,
+                options=[opt],
+                default_dest_path="test.mp4",
+                theme=theme,
+                on_confirm=lambda o, d: None,
+                subtitle_tracks=[{"sub_id": "none", "label": "None"}, sub_track],
+                video_url="https://example.com/watch"
+            )
+
+            # Select subtitle track
+            if modal.cb_sub:
+                modal.cb_sub.current(1)
+
+            with patch("smart_download.ui.modals.video_preview_modal.open_video_preview") as mock_preview:
+                modal._on_preview_video()
+                mock_preview.assert_called_once()
+                call_kwargs = mock_preview.call_args[1]
+                self.assertEqual(call_kwargs.get("selected_sub_track"), sub_track)
+
+            modal.destroy()
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+    def test_extract_subtitle_tracks_synthesizes_ar_auto(self):
+        """Verifies extract_subtitle_tracks creates ar_auto fallback with base_url when Arabic is missing."""
+        from smart_download.services.youtube_tracks import extract_subtitle_tracks
+
+        info = {
+            "webpage_url": "https://www.youtube.com/watch?v=123",
+            "automatic_captions": {
+                "en": [{"url": "https://www.youtube.com/api/timedtext?v=123&lang=en", "ext": "vtt"}]
+            }
+        }
+        tracks = extract_subtitle_tracks(info)
+        ar_track = next((t for t in tracks if t.get("sub_id") == "ar_auto"), None)
+        self.assertIsNotNone(ar_track)
+        self.assertEqual(ar_track["language"], "ar")
+        self.assertTrue(ar_track["is_auto"])
+        self.assertEqual(ar_track["base_url"], "https://www.youtube.com/api/timedtext?v=123&lang=en&fmt=vtt")
+        self.assertIn("tlang=ar", ar_track["url"])
 
 
 class TestHardenedFFmpeg(unittest.TestCase):
