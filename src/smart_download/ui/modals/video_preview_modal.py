@@ -128,7 +128,8 @@ def open_video_preview(
     on_cancel: Optional[Callable[[], None]] = None,
     parent_app: Optional[Any] = None,
     modal_ref: Optional[Any] = None,
-    use_bridge: bool = True
+    use_bridge: bool = True,
+    subtitle_embed_mode: str = "soft_embed"
 ) -> str:
     """
     Builds and opens a real, VidMate-style video preview with synchronized live audio dubbing,
@@ -187,12 +188,22 @@ def open_video_preview(
                 on_cancel=on_cancel,
                 parent_app=parent_app,
                 modal_ref=modal_ref,
+                selected_audio_track=selected_audio_track,
+                selected_sub_track=selected_sub_track,
+                subtitle_embed_mode=subtitle_embed_mode,
             )
             target_launch_url = f"http://127.0.0.1:{port}/player?sid={sid}"
             if not stream_url:
                 stream_url = f"http://127.0.0.1:{port}/stream_video?sid={sid}&q_idx=0"
             if dub_audio_url and not dub_audio_url.startswith("http://127.0.0.1"):
-                dub_audio_url = f"http://127.0.0.1:{port}/stream_audio?sid={sid}&a_idx=1"
+                sel_a_idx = 0
+                all_auds = audio_tracks or ([selected_audio_track] if selected_audio_track else [])
+                if selected_audio_track and all_auds:
+                    for idx, trk in enumerate(all_auds):
+                        if trk == selected_audio_track or (trk.get("track_id") and trk.get("track_id") == selected_audio_track.get("track_id")):
+                            sel_a_idx = idx
+                            break
+                dub_audio_url = f"http://127.0.0.1:{port}/stream_audio?sid={sid}&a_idx={sel_a_idx if sel_a_idx > 0 else 1}"
         except Exception as exc:
             if on_log:
                 on_log(f"[PREVIEW] Note: Local bridge setup skipped: {exc}")
@@ -231,6 +242,8 @@ def open_video_preview(
         default_dest_path=default_dest_path,
         sid=sid,
         bridge_port=port,
+        selected_sub_track=selected_sub_track,
+        subtitle_embed_mode=subtitle_embed_mode,
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")

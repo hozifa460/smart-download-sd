@@ -47,6 +47,9 @@ class PreviewSession:
     parent_app: Optional[Any] = None
     modal_ref: Optional[Any] = None
     cached_subtitles: Dict[int, str] = field(default_factory=dict)
+    selected_audio_track: Optional[Dict[str, Any]] = None
+    selected_sub_track: Optional[Dict[str, Any]] = None
+    subtitle_embed_mode: str = "soft_embed"
 
 
 def start_preview_bridge(host: str = "127.0.0.1") -> int:
@@ -84,7 +87,10 @@ def register_preview_session(
     on_cancel: Optional[Callable[[], None]] = None,
     parent_app: Optional[Any] = None,
     modal_ref: Optional[Any] = None,
-    sid: Optional[str] = None
+    sid: Optional[str] = None,
+    selected_audio_track: Optional[Dict[str, Any]] = None,
+    selected_sub_track: Optional[Dict[str, Any]] = None,
+    subtitle_embed_mode: str = "soft_embed"
 ) -> str:
     """Registers an active media preview session and returns its unique random session ID token."""
     start_preview_bridge()
@@ -103,6 +109,9 @@ def register_preview_session(
         on_cancel=on_cancel,
         parent_app=parent_app,
         modal_ref=modal_ref,
+        selected_audio_track=selected_audio_track,
+        selected_sub_track=selected_sub_track,
+        subtitle_embed_mode=subtitle_embed_mode or "soft_embed"
     )
     with _SESSIONS_LOCK:
         _SESSIONS[session_id] = session
@@ -193,7 +202,7 @@ def _stream_upstream_media(
             if not chunk:
                 break
             handler.wfile.write(chunk)
-    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+    except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, OSError):
         pass
     finally:
         try:
@@ -357,6 +366,9 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             default_dest_path=session.default_dest_path,
             sid=session.sid,
             bridge_port=_BRIDGE_PORT,
+            selected_audio_track=session.selected_audio_track,
+            selected_sub_track=session.selected_sub_track,
+            subtitle_embed_mode=session.subtitle_embed_mode,
         )
         data = html_code.encode("utf-8")
         self.send_response(200)
@@ -489,6 +501,12 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                     session.on_confirm(selected_opt, final_dest)
             elif action == "cancel" and session.on_cancel:
                 session.on_cancel()
+            def _cleanup():
+                unregister_preview_session(session.sid)
+            if parent and hasattr(parent, "after"):
+                parent.after(2000, _cleanup)
+            else:
+                threading.Timer(2.0, _cleanup).start()
 
         parent = session.parent_app or (session.modal_ref.master if session.modal_ref else None)
         if parent and hasattr(parent, "after"):

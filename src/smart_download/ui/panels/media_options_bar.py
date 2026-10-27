@@ -460,21 +460,22 @@ class MediaOptionsBarMixin:
         url = ctx.get("url") or (self.url_input.get().strip() if hasattr(self, "url_input") else "")
         info = ctx.get("info") or getattr(self, "_last_yt_info", {}) or {}
         raw_title = info.get("title") or ctx.get("title") or "Video Preview"
-        selected_opt = None
-        if hasattr(self, "cb_main_quality") and getattr(self, "_main_media_options", None):
-            idx = self.cb_main_quality.current()
-            if 0 <= idx < len(self._main_media_options): selected_opt = self._main_media_options[idx]
-        selected_sub = None
-        if hasattr(self, "cb_main_sub") and getattr(self, "_main_subtitle_tracks", None):
-            sub_idx = self.cb_main_sub.current()
-            if 0 <= sub_idx < len(self._main_subtitle_tracks): selected_sub = self._main_subtitle_tracks[sub_idx]
-        theme_dict = getattr(self, "_theme_dict", None) or ({"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_border": self.c_border, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_success": self.c_success, "c_text_bright": self.c_text_bright, "c_text_muted": self.c_text_muted, "c_input_bg": self.c_input_bg} if hasattr(self, "c_bg") else {})
+        opts = getattr(self, "_main_media_options", ctx.get("options", []))
+        auds = getattr(self, "_main_audio_tracks", ctx.get("audio_tracks", []))
+        subs = getattr(self, "_main_subtitle_tracks", ctx.get("subtitle_tracks", []))
+        sel_opt = opts[self.cb_main_quality.current()] if hasattr(self, "cb_main_quality") and opts and 0 <= self.cb_main_quality.current() < len(opts) else None
+        sel_aud = auds[self.cb_main_audio.current()] if hasattr(self, "cb_main_audio") and auds and 0 <= self.cb_main_audio.current() < len(auds) else None
+        sel_sub = subs[self.cb_main_sub.current()] if hasattr(self, "cb_main_sub") and subs and 0 <= self.cb_main_sub.current() < len(subs) else None
+        theme_d = getattr(self, "_theme_dict", None) or ({"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_border": self.c_border, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_success": self.c_success, "c_text_bright": self.c_text_bright, "c_text_muted": self.c_text_muted, "c_input_bg": self.c_input_bg} if hasattr(self, "c_bg") else {})
+        dest_p = self.dest_input.get().strip() if hasattr(self, "dest_input") else ""
         try:
             from ..modals.video_preview_modal import open_video_preview
             open_video_preview(
                 parent=self.root if hasattr(self, "root") else None, url=url, video_title=raw_title,
-                stream_info=selected_opt, info_dict=info, selected_sub_track=selected_sub,
-                theme=theme_dict, on_log=self.log if hasattr(self, "log") else print
+                stream_info=sel_opt, info_dict=info, selected_sub_track=sel_sub, theme=theme_d,
+                selected_audio_track=sel_aud, options=opts, audio_tracks=auds, subtitle_tracks=subs,
+                default_dest_path=dest_p, on_confirm=lambda opt, dst: self._start_pending_media_download(),
+                parent_app=self, on_log=self.log if hasattr(self, "log") else print
             )
         except Exception as e:
             if hasattr(self, "log"): self.log(f"[PREVIEW ERROR] {e}")

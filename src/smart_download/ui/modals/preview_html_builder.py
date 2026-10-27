@@ -70,6 +70,7 @@ const videoEl = document.getElementById("videoEl"), dubAudioEl = document.getEle
 const iframeEl = document.getElementById("iframeEl"), toggleBtn = document.getElementById("toggleBtn");
 const audioBadge = document.getElementById("badgeAudio"), subBadge = document.getElementById("badgeSub"), resBadge = document.getElementById("badgeRes");
 const audioSelect = document.getElementById("audioSelect"), subSelect = document.getElementById("subSelect"), modeSelect = document.getElementById("modeSelect"), destInput = document.getElementById("destInput");
+const muteBtn = document.getElementById("muteBtn"), volSlider = document.getElementById("volSlider");
 let isUsingVideo = hasStream, selected_q_idx = 0, hasDubAudio = Boolean(initialDubAudioUrl);
 
 function updateUI() {
@@ -86,13 +87,21 @@ function updateUI() {
 }
 function togglePlayer() { if (!hasStream && isUsingVideo) return; isUsingVideo = !isUsingVideo; updateUI(); }
 function handleVideoError() { console.warn("[SD Preview] Direct stream fallback to Web Embed"); isUsingVideo = false; updateUI(); }
-if (videoEl) { videoEl.addEventListener("error", handleVideoError); const s = videoEl.querySelector("source"); if (s) s.addEventListener("error", handleVideoError); }
+if (videoEl) { videoEl.addEventListener("error", handleVideoError); }
 
 function setDubAudioTrack(url, label) {
     if (!dubAudioEl) return;
     if (url) {
-        hasDubAudio = true; dubAudioEl.src = url; dubAudioEl.currentTime = videoEl.currentTime; videoEl.muted = true;
-        if (!videoEl.paused) dubAudioEl.play().catch(e => {});
+        hasDubAudio = true; dubAudioEl.src = url;
+        const syncTime = () => {
+            if (videoEl && !isNaN(videoEl.currentTime)) {
+                try { dubAudioEl.currentTime = videoEl.currentTime; } catch (e) {}
+            }
+            if (videoEl && !videoEl.paused) dubAudioEl.play().catch(e => {});
+        };
+        if (dubAudioEl.readyState >= 1) syncTime();
+        else dubAudioEl.addEventListener("loadedmetadata", syncTime, { once: true });
+        videoEl.muted = true;
         if (audioBadge) { audioBadge.textContent = "🔊 " + (label || "Dubbed Audio"); audioBadge.className = "badge badge-audio"; }
     } else {
         hasDubAudio = false; dubAudioEl.pause(); dubAudioEl.removeAttribute("src"); videoEl.muted = false;
@@ -102,7 +111,10 @@ function setDubAudioTrack(url, label) {
 if (initialDubAudioUrl) setDubAudioTrack(initialDubAudioUrl, __EFFECTIVE_AUDIO_LABEL__);
 
 if (videoEl && dubAudioEl) {
-    videoEl.addEventListener("volumechange", () => { if (hasDubAudio) { dubAudioEl.volume = videoEl.volume; if (!videoEl.muted) videoEl.muted = true; } });
+    videoEl.addEventListener("volumechange", () => {
+        if (hasDubAudio) { dubAudioEl.volume = videoEl.volume; if (!videoEl.muted) videoEl.muted = true; }
+        if (volSlider) volSlider.value = videoEl.volume;
+    });
     videoEl.addEventListener("play", () => { if (hasDubAudio) { dubAudioEl.currentTime = videoEl.currentTime; dubAudioEl.play().catch(e => {}); } });
     videoEl.addEventListener("pause", () => { if (hasDubAudio) dubAudioEl.pause(); });
     videoEl.addEventListener("seeking", () => { if (hasDubAudio) dubAudioEl.currentTime = videoEl.currentTime; });
@@ -114,13 +126,42 @@ if (videoEl && dubAudioEl) {
     dubAudioEl.addEventListener("error", (e) => { hasDubAudio = false; videoEl.muted = false; if (audioBadge) { audioBadge.textContent = "🔊 Original Audio"; audioBadge.className = "badge badge-dim"; } });
 }
 
+if (muteBtn && volSlider) {
+    muteBtn.addEventListener("click", () => {
+        const isM = hasDubAudio ? dubAudioEl.muted : videoEl.muted;
+        const nextM = !isM;
+        if (hasDubAudio) { dubAudioEl.muted = nextM; }
+        else { videoEl.muted = nextM; }
+        muteBtn.textContent = nextM ? "🔇" : "🔊";
+    });
+    volSlider.addEventListener("input", (e) => {
+        const v = parseFloat(e.target.value);
+        if (hasDubAudio) { dubAudioEl.volume = v; dubAudioEl.muted = (v === 0); }
+        videoEl.volume = v;
+        if (!hasDubAudio) { videoEl.muted = (v === 0); }
+        muteBtn.textContent = (v === 0) ? "🔇" : "🔊";
+    });
+}
+
 function selectQualityRow(idx) {
     selected_q_idx = idx; document.querySelectorAll(".opt-row").forEach(r => r.classList.remove("selected"));
     const row = document.querySelector(`.opt-row[data-idx="${idx}"]`);
     if (row) row.classList.add("selected");
     const resCell = row ? row.querySelector(".col-res strong") : null;
     if (resCell && resBadge) resBadge.textContent = "🎞️ " + resCell.textContent;
-    if (sid) { videoEl.src = `/stream_video?sid=${encodeURIComponent(sid)}&q_idx=${idx}`; videoEl.play().catch(e => {}); requestUpdatedFilename(); }
+    if (sid) {
+        const savedTime = videoEl ? videoEl.currentTime : 0;
+        videoEl.src = `/stream_video?sid=${encodeURIComponent(sid)}&q_idx=${idx}`;
+        if (savedTime > 0) {
+            videoEl.addEventListener("loadedmetadata", () => {
+                try { videoEl.currentTime = savedTime; } catch (e) {}
+                videoEl.play().catch(e => {});
+            }, { once: true });
+        } else {
+            videoEl.play().catch(e => {});
+        }
+        requestUpdatedFilename();
+    }
 }
 function onAudioChange() {
     if (!audioSelect) return;
@@ -159,6 +200,7 @@ function requestUpdatedFilename() {
 }
 function doAction(actionType) {
     document.querySelectorAll(".action-bar button").forEach(b => { b.disabled = true; b.style.opacity = "0.6"; });
+    try { if (videoEl) videoEl.pause(); if (dubAudioEl) dubAudioEl.pause(); } catch (e) {}
     if (!sid) { window.close(); return; }
     fetch(`/api/action?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -171,6 +213,9 @@ function doAction(actionType) {
         })
     }).then(r => r.json()).then(() => { setTimeout(() => { window.close(); }, 120); }).catch(() => { window.close(); });
 }
+window.addEventListener("pagehide", () => {
+    if (sid) { try { navigator.sendBeacon(`/api/action?sid=${encodeURIComponent(sid)}`, JSON.stringify({ action: "cancel" })); } catch (e) {} }
+});
 """.strip()
 
 
@@ -192,37 +237,66 @@ def generate_preview_html(
     default_dest_path: Optional[str] = None,
     sid: Optional[str] = None,
     bridge_port: Optional[int] = None,
-    platform_name: Optional[str] = None
+    platform_name: Optional[str] = None,
+    selected_sub_track: Optional[Dict[str, Any]] = None,
+    subtitle_embed_mode: str = "soft_embed"
 ) -> str:
     """Generates modern dark-themed HTML5 preview player with synchronized dubbing and controls."""
     safe_title = html.escape(video_title or "Video Preview")
     safe_stream = html.escape(stream_url or "")
-    safe_sub_label = html.escape(sub_label or "Subtitles")
     safe_quality = html.escape(quality_label or ("MP4 Stream" if stream_url else "Web Player"))
-    safe_sub_lang = html.escape((sub_lang or "ar").split("-")[0].split("_")[0])
 
     platform = platform_name or extract_media_platform(url)
     safe_platform = html.escape(platform)
 
+    # Determine selected audio track index and effective dubbing URL
+    sel_a_idx = 0
+    if selected_audio_track and audio_tracks:
+        for idx, trk in enumerate(audio_tracks):
+            if trk == selected_audio_track or (trk.get("track_id") and trk.get("track_id") == selected_audio_track.get("track_id")):
+                sel_a_idx = idx
+                break
+
     eff_dub = dub_audio_url
     eff_audio_lbl = audio_label
-    if selected_audio_track and not eff_dub:
-        if selected_audio_track.get("track_id") != "original":
-            eff_dub = selected_audio_track.get("url")
-            eff_audio_lbl = selected_audio_track.get("label") or selected_audio_track.get("language")
+    if not eff_dub and selected_audio_track and selected_audio_track.get("track_id") != "original":
+        eff_dub = selected_audio_track.get("url")
+        eff_audio_lbl = selected_audio_track.get("label") or selected_audio_track.get("language")
     if not eff_audio_lbl:
         eff_audio_lbl = "Original Audio"
     safe_audio_label = html.escape(eff_audio_lbl)
+
+    # Determine selected subtitle index
+    sel_s_idx = 0
+    if selected_sub_track and subtitle_tracks:
+        for idx, trk in enumerate(subtitle_tracks):
+            if trk == selected_sub_track or (trk.get("sub_id") and trk.get("sub_id") == selected_sub_track.get("sub_id")):
+                sel_s_idx = idx
+                break
+    if subtitle_embed_mode == "hard_burn" and sel_s_idx <= 0 and subtitle_tracks and len(subtitle_tracks) > 1:
+        ar_idx = next((i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
+        sel_s_idx = ar_idx if ar_idx is not None else 1
+
+    safe_sub_label = html.escape(sub_label or "Subtitles")
+    safe_sub_lang = html.escape((sub_lang or "ar").split("-")[0].split("_")[0])
 
     embed_src = f"https://www.youtube.com/embed/{video_id}?autoplay=1&cc_load_policy=1&cc_lang_pref={safe_sub_lang}&hl={safe_sub_lang}" if video_id else url
 
     track_html = ""
     if vtt_data_uri:
         track_html = f'<track label="{safe_sub_label}" kind="subtitles" srclang="{safe_sub_lang}" src="{vtt_data_uri}" default id="vttTrack">'
-    elif sid and subtitle_tracks and len(subtitle_tracks) > 1:
-        track_html = f'<track label="{safe_sub_label}" kind="subtitles" srclang="{safe_sub_lang}" src="/subtitle.vtt?sid={sid}&s_idx=1" default id="vttTrack">'
+        sub_badge = f'<span id="badgeSub" class="badge badge-sub">💬 {safe_sub_label}</span>'
+    elif sid and subtitle_tracks and 0 < sel_s_idx < len(subtitle_tracks):
+        st = subtitle_tracks[sel_s_idx]
+        lbl = html.escape(st.get("label") or st.get("language") or "Subtitles")
+        sc = html.escape((st.get("language") or "ar").split("-")[0].split("_")[0])
+        track_html = f'<track label="{lbl}" kind="subtitles" srclang="{sc}" src="/subtitle.vtt?sid={sid}&s_idx={sel_s_idx}" default id="vttTrack">'
+        sub_badge = f'<span id="badgeSub" class="badge badge-sub">💬 {lbl}</span>'
+    elif subtitle_tracks and len(subtitle_tracks) > 1 and sel_s_idx > 0:
+        sub_badge = f'<span id="badgeSub" class="badge badge-sub">💬 {safe_sub_label}</span>'
+    else:
+        sub_badge = '<span id="badgeSub" class="badge badge-dim">💬 No Subtitles</span>'
 
-    sub_badge = f'<span id="badgeSub" class="badge badge-sub">💬 {safe_sub_label}</span>' if (vtt_data_uri or (subtitle_tracks and len(subtitle_tracks) > 1)) else '<span id="badgeSub" class="badge badge-dim">💬 No Subtitles</span>'
     audio_badge = f'<span id="badgeAudio" class="badge badge-audio">🔊 {safe_audio_label}</span>' if eff_dub else f'<span id="badgeAudio" class="badge badge-dim">🔊 {safe_audio_label}</span>'
 
     plat_low = platform.lower()
@@ -245,10 +319,15 @@ def generate_preview_html(
             r_n = html.escape(getattr(opt, "note", ""))
             s_cls = "opt-row selected" if idx == 0 else "opt-row"
             rows.append(f'<tr class="{s_cls}" data-idx="{idx}" onclick="selectQualityRow({idx})"><td class="col-res"><strong>{r_l}</strong></td><td class="col-center">{r_e}</td><td class="col-right">{r_s}</td><td class="col-center">{r_f}</td><td class="col-note">{r_n}</td></tr>')
-        a_opts = [f'<option value="{i}">{html.escape(t.get("label") or t.get("language") or f"Audio #{i}")}</option>' for i, t in enumerate(audio_tracks or [])] or ['<option value="0">Original Audio (Default)</option>']
-        s_opts = [f'<option value="{i}">{html.escape(t.get("label") or t.get("language") or f"Subtitle #{i}")}</option>' for i, t in enumerate(subtitle_tracks or [])] or ['<option value="0">No Subtitles</option>']
+        a_opts = [f'<option value="{i}"{" selected" if i == sel_a_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Audio #{i}")}</option>' for i, t in enumerate(audio_tracks or [])] or ['<option value="0">Original Audio (Default)</option>']
+        s_opts = [f'<option value="{i}"{" selected" if i == sel_s_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Subtitle #{i}")}</option>' for i, t in enumerate(subtitle_tracks or [])] or ['<option value="0">No Subtitles</option>']
+        m_opts = [
+            f'<option value="soft_embed"{" selected" if subtitle_embed_mode == "soft_embed" else ""}>Soft Embed (دمج ناعم داخل الفيديو)</option>',
+            f'<option value="hard_burn"{" selected" if subtitle_embed_mode == "hard_burn" else ""}>Burn into Video (حرق دائم داخل الصورة)</option>',
+            f'<option value="srt_only"{" selected" if subtitle_embed_mode == "srt_only" else ""}>Save External .srt (ملف ترجمة خارجي)</option>',
+        ]
         safe_dst = html.escape(default_dest_path or "")
-        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio Dubbing / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / طريقة الحفظ</label><select id="modeSelect" onchange="onModeChange()"><option value="soft_embed">Soft Embed (دمج ناعم داخل الفيديو)</option><option value="hard_burn">Burn into Video (حرق دائم داخل الصورة)</option><option value="srt_only">Save External .srt (ملف ترجمة خارجي)</option></select></div></div><div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
+        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio Dubbing / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / طريقة الحفظ</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div></div><div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
 
     js_code = (
         _JS_TEMPLATE
@@ -284,12 +363,15 @@ def generate_preview_html(
             <span class="title" title="{safe_title}">🎬 {safe_title}</span>
         </div>
         <div class="actions">
+            <div style="display:flex;align-items:center;gap:6px;">
+                <button id="muteBtn" class="btn" style="padding:4px 8px;" title="Mute / Unmute">🔊</button>
+                <input type="range" id="volSlider" min="0" max="1" step="0.05" value="1" style="width:65px;accent-color:#38bdf8;cursor:pointer;" title="Volume">
+            </div>
             <button id="toggleBtn" class="btn" onclick="togglePlayer()">🌐 Switch to Web Player</button>
         </div>
     </div>
     <div class="player-container">
         <video id="videoEl" src="{safe_stream}" controls autoplay playsinline style="display: {'block' if stream_url else 'none'};">
-            {f'<source src="{safe_stream}" type="video/mp4">' if stream_url else ''}
             {track_html}
         </video>
         <audio id="dubAudioEl" preload="auto" style="display: none;"></audio>

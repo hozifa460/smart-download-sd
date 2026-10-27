@@ -732,6 +732,97 @@ class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
             try: root.destroy()
             except Exception: pass
 
+    def test_preview_stream_audio_dubbing_proxy(self):
+        """Verifies /stream_audio proxies dubbed audio chunks with upstream headers and Range."""
+        from smart_download.services.preview_stream_bridge import register_preview_session, unregister_preview_session
+        import urllib.request
+
+        audio_track = {
+            "track_id": "ar-dub",
+            "language": "ar",
+            "label": "العربية (مدبلج)",
+            "url": "https://cdn.example.com/dub_audio.m4a",
+            "http_headers": {"User-Agent": "AudioClient/2.0", "Referer": "https://example.com/audio"}
+        }
+        sid = register_preview_session(
+            url="https://www.youtube.com/watch?v=dub_test",
+            video_title="Dub Test",
+            audio_tracks=[{"track_id": "original", "label": "Original"}, audio_track]
+        )
+        try:
+            audio_url = f"{self.base_url}/stream_audio?sid={sid}&a_idx=1"
+            _real_urlopen = urllib.request.urlopen
+            captured = []
+
+            def mock_urlopen(req, **kwargs):
+                url_s = req.full_url if hasattr(req, "full_url") else str(req)
+                if "127.0.0.1" in url_s:
+                    return _real_urlopen(req, **kwargs)
+                captured.append(req)
+                resp = MagicMock()
+                resp.getcode.return_value = 206
+                resp.headers = {
+                    "Content-Type": "audio/mp4",
+                    "Content-Range": "bytes 0-511/200000",
+                    "Content-Length": "512",
+                    "Accept-Ranges": "bytes"
+                }
+                resp.read.side_effect = [b"B" * 512, b""]
+                return resp
+
+            with patch("urllib.request.urlopen", side_effect=mock_urlopen):
+                req = urllib.request.Request(audio_url, headers={"Range": "bytes=0-511"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    self.assertEqual(resp.getcode(), 206)
+                    self.assertEqual(resp.headers.get("Content-Type"), "audio/mp4")
+                    self.assertEqual(len(resp.read()), 512)
+
+            self.assertEqual(len(captured), 1)
+            up_req = captured[0]
+            self.assertEqual(up_req.full_url, "https://cdn.example.com/dub_audio.m4a")
+            self.assertEqual(up_req.get_header("Range"), "bytes=0-511")
+            self.assertEqual(up_req.get_header("Referer"), "https://example.com/audio")
+            self.assertEqual(up_req.get_header("User-agent"), "AudioClient/2.0")
+        finally:
+            unregister_preview_session(sid)
+
+    def test_player_preselection_and_volume_controls(self):
+        """Verifies GET /player renders pre-selected audio/sub/mode options and header volume controls."""
+        from smart_download.services.preview_stream_bridge import register_preview_session, unregister_preview_session
+        from smart_download.services.youtube_models import VideoFormatOption
+        import urllib.request
+
+        opt = VideoFormatOption(
+            format_id="22", resolution_label="720p (HD)", height=720,
+            ext="mp4", filesize_approx=10_000_000, fps=30
+        )
+        dub_ar = {"track_id": "ar", "label": "العربية (مدبلج)", "url": "https://stream.example.com/ar.m4a"}
+        sub_en = {"sub_id": "en", "label": "English Subs", "language": "en"}
+        sid = register_preview_session(
+            url="https://www.youtube.com/watch?v=preselect_test",
+            video_title="Preselect Test",
+            options=[opt],
+            audio_tracks=[{"track_id": "original", "label": "Original"}, dub_ar],
+            subtitle_tracks=[{"sub_id": "none", "label": "None"}, sub_en],
+            selected_audio_track=dub_ar,
+            selected_sub_track=sub_en,
+            subtitle_embed_mode="hard_burn",
+        )
+        try:
+            player_url = f"{self.base_url}/player?sid={sid}"
+            with urllib.request.urlopen(player_url, timeout=5) as resp:
+                self.assertEqual(resp.getcode(), 200)
+                html = resp.read().decode("utf-8")
+                self.assertIn('<option value="1" selected>العربية (مدبلج)</option>', html)
+                self.assertIn('<option value="1" selected>English Subs</option>', html)
+                self.assertIn('<option value="hard_burn" selected>', html)
+                self.assertIn('id="muteBtn"', html)
+                self.assertIn('id="volSlider"', html)
+                self.assertIn('🔊 العربية (مدبلج)', html)
+                self.assertIn('💬 English Subs', html)
+        finally:
+            unregister_preview_session(sid)
+
 
 if __name__ == "__main__":
     unittest.main()
