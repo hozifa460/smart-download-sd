@@ -70,7 +70,8 @@ class DownloadHistoryManager:
         file_path: str,
         size_bytes: int = 0,
         status: str = "Completed",
-        elapsed_sec: float = 0.0
+        elapsed_sec: float = 0.0,
+        entry_id: Optional[str] = None
     ) -> Dict[str, Any]:
         with self._lock:
             norm_path = os.path.abspath(file_path) if file_path else ""
@@ -100,8 +101,34 @@ class DownloadHistoryManager:
                 elapsed_val = 0.0
 
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            now_epoch = time.time()
+            status_lower = str(status).strip().lower()
+
+            if entry_id:
+                for entry in self._entries:
+                    if str(entry.get("id")) == str(entry_id):
+                        if filename:
+                            entry["filename"] = filename
+                        if norm_path:
+                            entry["file_path"] = norm_path
+                        if raw_url:
+                            entry["url"] = raw_url
+                        if calc_size > 0:
+                            entry["size_bytes"] = calc_size
+                        entry["category"] = category
+                        entry["icon"] = icon
+                        entry["status"] = status
+                        entry["timestamp"] = timestamp
+                        if elapsed_val > 0:
+                            entry["elapsed_sec"] = elapsed_val
+                        entry["_epoch"] = now_epoch
+                        self._save_entries()
+                        return dict(entry)
 
             incomplete_statuses = {"paused", "in progress", "failed", "queued", "متوقف مؤقتاً", "قيد التحميل", "فشل", "في الانتظار"}
+            active_or_queued_statuses = {"in progress", "queued", "قيد التحميل", "في الانتظار"}
+            is_new_active = status_lower in active_or_queued_statuses
+
             match_idx = -1
             matched_id = None
             old_entry = None
@@ -114,9 +141,45 @@ class DownloadHistoryManager:
                 e_status_lower = e_status.lower()
                 e_path_norm = os.path.normcase(os.path.abspath(e_path)) if e_path else ""
 
-                if norm_path_case and e_path_norm and e_path_norm == norm_path_case:
-                    # Never pop or replace an existing completed download entry.
-                    # Only update if the existing entry is incomplete (Paused, In Progress, Failed, Queued).
+                if norm_path_case and e_path_norm:
+                    if norm_path_case == e_path_norm:
+                        if e_status_lower in ("completed", "مكتمل") and status_lower in ("completed", "مكتمل"):
+                            entry_epoch = entry.get("_epoch")
+                            if entry_epoch is None:
+                                try:
+                                    entry_epoch = time.mktime(time.strptime(entry.get("timestamp", ""), "%Y-%m-%d %H:%M:%S"))
+                                except Exception:
+                                    entry_epoch = 0.0
+                            is_dup_hook = (
+                                abs(now_epoch - float(entry_epoch)) <= 5.0
+                                and (
+                                    abs(elapsed_val - float(entry.get("elapsed_sec", 0.0))) <= 0.1
+                                    or elapsed_val == 0.0
+                                    or float(entry.get("elapsed_sec", 0.0)) == 0.0
+                                )
+                            )
+                            if is_dup_hook:
+                                match_idx = idx
+                                matched_id = entry.get("id")
+                                old_entry = entry
+                                break
+                            else:
+                                continue
+
+                        if e_status_lower in ("completed", "مكتمل") or e_status_lower not in incomplete_statuses:
+                            continue
+
+                        match_idx = idx
+                        matched_id = entry.get("id")
+                        old_entry = entry
+                        break
+                    else:
+                        continue
+
+                if is_new_active and e_status_lower in active_or_queued_statuses:
+                    continue
+
+                if raw_url and e_url == raw_url and filename and e_fn == filename:
                     if e_status_lower in ("completed", "مكتمل") or e_status_lower not in incomplete_statuses:
                         continue
                     match_idx = idx
@@ -124,32 +187,22 @@ class DownloadHistoryManager:
                     old_entry = entry
                     break
 
-                if raw_url and e_url == raw_url and filename and e_fn == filename:
-                    if e_status_lower in ("completed", "مكتمل") or e_status_lower not in incomplete_statuses:
-                        continue
-                    if not norm_path_case or not e_path_norm or e_path_norm == norm_path_case:
-                        match_idx = idx
-                        matched_id = entry.get("id")
-                        old_entry = entry
-                        break
-
-
             if match_idx >= 0 and old_entry:
                 self._entries.pop(match_idx)
-                entry_id = matched_id or old_entry.get("id") or f"dl_{int(time.time() * 1000)}_{len(self._entries)}"
+                final_id = matched_id or old_entry.get("id") or (entry_id or f"dl_{int(now_epoch * 1000)}_{len(self._entries)}")
                 final_size = calc_size if calc_size > 0 else old_entry.get("size_bytes", 0)
                 final_elapsed = elapsed_val if elapsed_val > 0 else float(old_entry.get("elapsed_sec", 0.0))
                 final_path = norm_path or old_entry.get("file_path", "")
                 final_url = raw_url or old_entry.get("url", "")
             else:
-                entry_id = f"dl_{int(time.time() * 1000)}_{len(self._entries)}"
+                final_id = entry_id or f"dl_{int(now_epoch * 1000)}_{len(self._entries)}"
                 final_size = calc_size
                 final_elapsed = elapsed_val
                 final_path = norm_path
                 final_url = raw_url
 
             record = {
-                "id": entry_id,
+                "id": final_id,
                 "filename": filename,
                 "file_path": final_path,
                 "url": final_url,
@@ -159,6 +212,7 @@ class DownloadHistoryManager:
                 "status": status,
                 "timestamp": timestamp,
                 "elapsed_sec": final_elapsed,
+                "_epoch": now_epoch,
             }
             self._entries.insert(0, record)
             if len(self._entries) > self.max_entries:
@@ -166,6 +220,15 @@ class DownloadHistoryManager:
 
             self._save_entries()
             return dict(record)
+
+    def get_active_or_queued_paths(self) -> List[str]:
+        with self._lock:
+            return [
+                e.get("file_path", "")
+                for e in self._entries
+                if str(e.get("status", "")).strip().lower() in ("in progress", "queued", "قيد التحميل", "في الانتظار")
+                and e.get("file_path")
+            ]
 
     def get_entries(self, category_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         with self._lock:

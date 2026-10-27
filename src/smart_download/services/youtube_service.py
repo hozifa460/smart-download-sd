@@ -303,6 +303,16 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 except Exception:
                     pass
 
+        if cookiejar:
+            try:
+                yt_cookies = "; ".join(f"{c.name}={c.value}" for c in cookiejar if "youtube" in (getattr(c, "domain", "") or ""))
+                if yt_cookies:
+                    info["_sd_cookie_header"] = yt_cookies
+            except Exception:
+                pass
+        if not info.get("_sd_cookie_header") and fallback_cookie_str:
+            info["_sd_cookie_header"] = fallback_cookie_str
+
         for f in formats_to_patch:
             headers = f.setdefault("http_headers", {})
             if "Cookie" in headers or "cookie" in headers:

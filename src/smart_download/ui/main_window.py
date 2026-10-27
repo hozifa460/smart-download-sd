@@ -503,3 +503,4 @@ SmartDownloadEngine = TurboDownloadEngine
 TurboDownloaderGUI = ModernFramelessGUI
 DownloaderApp = ModernFramelessGUI
 SmartDownloadGUI = ModernFramelessGUI
+SmartDownloadApp = ModernFramelessGUI

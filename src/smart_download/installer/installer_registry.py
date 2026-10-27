@@ -15,7 +15,7 @@ except ImportError:
 
 APP_NAME = "Smart Download (SD)"
 APP_ID = "SmartDownload"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 APP_PUBLISHER = "Smart Download Team"
 APP_URL = "https://github.com/hozifa460/smart-download-sd"
 

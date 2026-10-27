@@ -461,7 +461,8 @@ class MediaOptionsBarMixin:
         if selected_opt:
             is_sub = (getattr(selected_opt, "subtitle_embed_mode", "") == "hard_burn")
             final_dest = apply_media_filename_tags(final_dest, quality_label=selected_opt.resolution_label, is_sub_burned=is_sub, ext=selected_opt.ext)
-        final_dest = generate_unique_destination_path(final_dest)
+        reserved = self.history_manager.get_active_or_queued_paths() if (hasattr(self, "history_manager") and self.history_manager) else None
+        final_dest = generate_unique_destination_path(final_dest, reserved_paths=reserved)
 
         try: max_conn = int(self.conn_var.get())
         except Exception: max_conn = 8

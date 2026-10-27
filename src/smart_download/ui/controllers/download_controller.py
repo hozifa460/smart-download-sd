@@ -54,7 +54,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     pass
 
     def _on_start_download(self, skip_resolver: bool = False):
-        if getattr(self, "_is_resolving_start", False) or (self.engine and self.engine.is_running):
+        if getattr(self, "_is_resolving_start", False):
             return
 
         if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
@@ -92,7 +92,10 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                 return
 
         if is_media_url(url, check_ytdlp_extractors=True) or skip_resolver:
-            self._start_download_with_engine(url, dest, max_conn, bytes_limit, modal=None)
+            if self.engine and getattr(self.engine, "is_running", False):
+                self.enqueue_download(url, dest, max_conn, bytes_limit)
+            else:
+                self._start_download_with_engine(url, dest, max_conn, bytes_limit, modal=None)
             return
 
         self._is_resolving_start = True
@@ -133,7 +136,10 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             except Exception:
                 pass
 
-            self._start_download_with_engine(real_url, final_dest, max_conn, bytes_limit, modal=None, pre_probed_info=info)
+            if self.engine and getattr(self.engine, "is_running", False):
+                self.enqueue_download(real_url, final_dest, max_conn, bytes_limit)
+            else:
+                self._start_download_with_engine(real_url, final_dest, max_conn, bytes_limit, modal=None, pre_probed_info=info)
 
         self._resolve_real_url_async(url, on_resolved=_on_resolved)
 

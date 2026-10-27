@@ -187,16 +187,18 @@ def _pick_best_sub_url(sub_formats: List[Dict[str, Any]]) -> Optional[Tuple[str,
 
 def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extracts manual and auto-translated subtitle tracks: None first, en, ar, manual, auto."""
+    webpage_url = str(info.get("webpage_url") or info.get("original_url") or "").strip()
     tracks: List[Dict[str, Any]] = [{
         "sub_id": "none", "language": "none", "label": "None / بدون ترجمة",
         "url": "", "ext": "", "is_auto": False, "fallback_urls": [], "http_headers": {},
+        "webpage_url": webpage_url,
     }]
     manual_subs = info.get("subtitles") or {}
     auto_subs = info.get("automatic_captions") or {}
     popular_lower = [x.lower() for x in POPULAR_AUTO_LANGS]
     base_headers = dict(info.get("http_headers") or {})
     if "Cookie" not in base_headers and "cookie" not in base_headers:
-        cookie_val = info.get("cookies")
+        cookie_val = info.get("_sd_cookie_header") or info.get("cookies")
         if isinstance(cookie_val, dict):
             base_headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookie_val.items())
         elif isinstance(cookie_val, str) and cookie_val.strip():
@@ -233,6 +235,7 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "language": lang, "label": label, "url": url, "ext": ext, "is_auto": is_auto,
                 "fallback_urls": fallback_urls,
                 "http_headers": sub_headers,
+                "webpage_url": webpage_url,
             })
 
     def _sub_sort_key(t: Dict[str, Any]) -> Tuple[int, int, str]:

@@ -26,22 +26,16 @@ except Exception:
 IS_WINDOWS = sys.platform.startswith("win")
 
 ISO_639_2: Dict[str, str] = {
-    "en": "eng", "ar": "ara", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", "pt": "por",
-    "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi", "zh-hans": "chi", "zh-hant": "chi",
-    "hi": "hin", "tr": "tur", "id": "ind", "nl": "nld", "pl": "pol", "vi": "vie", "th": "tha",
-    "sv": "swe", "no": "nor", "da": "dan", "fi": "fin",
+    "en": "eng", "ar": "ara", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", "pt": "por", "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi", "zh-hans": "chi", "zh-hant": "chi", "hi": "hin", "tr": "tur", "id": "ind", "nl": "nld", "pl": "pol", "vi": "vie", "th": "tha", "sv": "swe", "no": "nor", "da": "dan", "fi": "fin",
 }
 
 
 def _format_srt_timestamp(ts: str) -> str:
     """Converts MM:SS.mmm, MM:SS,mmm, HH:MM:SS.mmm, or HH:MM:SS,mmm into standard SRT HH:MM:SS,mmm."""
     parts = ts.strip().split(":")
-    if len(parts) == 2:
-        h, m, s = "00", parts[0].zfill(2), parts[1]
-    elif len(parts) == 3:
-        h, m, s = parts[0].zfill(2), parts[1].zfill(2), parts[2]
-    else:
-        return ts
+    if len(parts) == 2: h, m, s = "00", parts[0].zfill(2), parts[1]
+    elif len(parts) == 3: h, m, s = parts[0].zfill(2), parts[1].zfill(2), parts[2]
+    else: return ts
     s = s.replace(",", ".")
     if "." in s:
         sec, ms = s.split(".", 1)
@@ -51,15 +45,10 @@ def _format_srt_timestamp(ts: str) -> str:
 
 def _format_seconds_to_srt(seconds: float) -> str:
     """Formats float seconds into SRT timestamp HH:MM:SS,mmm."""
-    if seconds < 0:
-        seconds = 0.0
-    hrs = int(seconds // 3600)
-    mins = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
+    if seconds < 0: seconds = 0.0
+    hrs, mins, secs = int(seconds // 3600), int((seconds % 3600) // 60), int(seconds % 60)
     ms = int(round((seconds - int(seconds)) * 1000))
-    if ms >= 1000:
-        secs += 1
-        ms = 0
+    if ms >= 1000: secs += 1; ms = 0
     return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
 
 
@@ -67,26 +56,18 @@ def _parse_timestamp_or_seconds(val: str) -> float:
     """Parses seconds string (e.g. '1.5s', '12.4', '1500ms') or HH:MM:SS.mmm into float seconds."""
     s = str(val or "").strip().replace(",", ".")
     if s.lower().endswith("ms"):
-        try:
-            return float(s[:-2].strip()) / 1000.0
-        except Exception:
-            return 0.0
+        try: return float(s[:-2].strip()) / 1000.0
+        except Exception: return 0.0
     s = s.rstrip("sS")
     if ":" in s:
         parts = s.split(":")
         try:
-            if len(parts) == 2:
-                return int(parts[0]) * 60 + float(parts[1])
-            if len(parts) == 3:
-                return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-            if len(parts) == 4:
-                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2]) + float(parts[3]) / 30.0
-        except Exception:
-            return 0.0
-    try:
-        return float(s)
-    except Exception:
-        return 0.0
+            if len(parts) == 2: return int(parts[0]) * 60 + float(parts[1])
+            if len(parts) == 3: return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+            if len(parts) == 4: return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2]) + float(parts[3]) / 30.0
+        except Exception: return 0.0
+    try: return float(s)
+    except Exception: return 0.0
 
 
 def _parse_xml_subtitles_to_srt(text: str) -> str:
@@ -277,6 +258,38 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
             srt_content = raw_text
             break
 
+    if (not srt_content or "-->" not in srt_content) and sub_track.get("webpage_url"):
+        try:
+            import tempfile
+            import yt_dlp
+            lang = sub_track.get("language") or "en"
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                ydl_opts = {
+                    "writesubtitles": True, "writeautomaticsub": True,
+                    "subtitleslangs": [lang], "subtitlesformat": "srt/vtt/ttml/srv3/json3/best",
+                    "skip_download": True, "quiet": True, "no_warnings": True,
+                    "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([sub_track["webpage_url"]])
+                for fn in os.listdir(tmp_dir):
+                    fp = os.path.join(tmp_dir, fn)
+                    if os.path.isfile(fp) and any(fp.endswith(e) for e in (".srt", ".vtt", ".ttml", ".srv3", ".xml", ".json3")):
+                        try:
+                            with open(fp, "r", encoding="utf-8-sig", errors="replace") as sf:
+                                sub_data = sf.read()
+                            conv = convert_vtt_to_srt(sub_data)
+                            if conv and "-->" in conv:
+                                srt_content = conv
+                                break
+                            elif "-->" in sub_data:
+                                srt_content = sub_data
+                                break
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
     if not srt_content or "-->" not in srt_content:
         return None
 
@@ -294,7 +307,6 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
         return srt_path
     except Exception:
         return None
-
 
 
 def embed_subtitle_into_mp4(
@@ -315,9 +327,7 @@ def embed_subtitle_into_mp4(
         ffmpeg_path, "-y", "-i", video_path, "-i", srt_path,
         "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
         "-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
-        "-metadata:s:s:0", f"language={iso3}",
-        "-disposition:s:0", "default",
-        "-f", "mp4", temp_mp4
+        "-metadata:s:s:0", f"language={iso3}", "-disposition:s:0", "default", "-f", "mp4", temp_mp4
     ]
     p: Optional[subprocess.Popen] = None
     try:
@@ -387,23 +397,16 @@ def burn_subtitle_into_video(
     try:
         with open(abs_srt, "r", encoding="utf-8-sig", errors="replace") as sf:
             srt_content = sf.read()
-        with open(burn_srt_path, "w", encoding="utf-8") as bf:
+        with open(burn_srt_path, "w", encoding="utf-8-sig") as bf:
             bf.write(srt_content)
     except Exception as exc:
         if on_log:
-            on_log(f"[SUBTITLES] Warning: Failed to prepare BOM-free SRT: {exc}")
+            on_log(f"[SUBTITLES] Warning: Failed to prepare UTF-8 BOM SRT: {exc}")
         return False
 
     cmd = [
-        ffmpeg_path, "-y",
-        "-i", abs_video,
-        "-vf", f"subtitles={burn_srt_name}",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "22",
-        "-c:a", "copy",
-        "-f", "mp4",
-        temp_burn_mp4
+        ffmpeg_path, "-y", "-i", abs_video, "-vf", f"subtitles={burn_srt_name}",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-c:a", "copy", "-f", "mp4", temp_burn_mp4
     ]
 
     p: Optional[subprocess.Popen] = None

@@ -312,17 +312,27 @@ class YouTubeDownloadControllerMixin:
         final_dest: str,
         max_conn: int = 8,
         bytes_limit: float = 0.0,
-        yt_modal: Optional[Any] = None
+        yt_modal: Optional[Any] = None,
+        from_queue: bool = False
     ):
         """Initializes and runs StreamDownloadCoordinator with GUI progress and status hooks."""
-        final_dest = generate_unique_destination_path(final_dest)
+        if from_queue:
+            in_prog = [
+                e.get("file_path", "")
+                for e in getattr(self.history_manager, "_entries", [])
+                if str(e.get("status", "")).strip().lower() in ("in progress", "قيد التحميل") and e.get("file_path")
+            ] if hasattr(self, "history_manager") and self.history_manager else None
+            final_dest = generate_unique_destination_path(final_dest, reserved_paths=in_prog)
+        else:
+            reserved = self.history_manager.get_active_or_queued_paths() if (hasattr(self, "history_manager") and self.history_manager) else None
+            final_dest = generate_unique_destination_path(final_dest, reserved_paths=reserved)
 
         if self.engine and getattr(self.engine, "is_running", False):
             if not hasattr(self, "_download_queue"):
                 self._download_queue = []
 
             def _queued_task():
-                self._launch_stream_coordinator(stream_info, final_dest, max_conn, bytes_limit, yt_modal=yt_modal)
+                self._launch_stream_coordinator(stream_info, final_dest, max_conn, bytes_limit, yt_modal=yt_modal, from_queue=True)
 
             self._download_queue.append(_queued_task)
             self.log(f"[QUEUE] Media stream queued: {os.path.basename(final_dest)} ({len(self._download_queue)} queued)")

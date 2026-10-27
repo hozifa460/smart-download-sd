@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Any
 
 HOST_NAME = "com.smartdownload.host"
 HOST_DESCRIPTION = "Smart Download (SD) Native Messaging Host"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 
 LEGACY_HOST_NAME = "com.turbodownloader.host"
 LEGACY_CHROME_REG_KEY = rf"Software\Google\Chrome\NativeMessagingHosts\{LEGACY_HOST_NAME}"

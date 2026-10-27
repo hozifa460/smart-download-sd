@@ -4,7 +4,7 @@ File categorization, destination path resolving, and OS shell launch utilities f
 import os
 import sys
 import subprocess
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional, Iterable, Set
 
 from ..config import IS_WINDOWS
 from .magic_detector import MagicBytesDetector
@@ -127,20 +127,44 @@ def open_containing_folder(file_path: str):
         pass
 
 
-def generate_unique_destination_path(dest_path: str) -> str:
+def generate_unique_destination_path(
+    dest_path: str,
+    allow_resume_existing_parts: bool = False,
+    reserved_paths: Optional[Iterable[str]] = None
+) -> str:
     """
-    If dest_path already exists on disk and is not an incomplete download (does not have .sd_parts or .tdm_parts),
+    If dest_path already exists on disk, has active parts, or is in reserved_paths,
     generates a non-colliding filename e.g. 'Title (1).mp4', 'Title (2).mp4'.
     """
     if not dest_path:
         return dest_path
 
-    parts_dir = dest_path + ".sd_parts"
-    tdm_parts = dest_path + ".tdm_parts"
-    if os.path.isdir(parts_dir) or os.path.isdir(tdm_parts):
-        return dest_path
+    reserved_norm = {os.path.normcase(os.path.abspath(p)) for p in (reserved_paths or []) if p}
 
-    if not os.path.exists(dest_path):
+    def _is_path_occupied(p: str) -> bool:
+        if not p:
+            return False
+        try:
+            if os.path.normcase(os.path.abspath(p)) in reserved_norm:
+                return True
+        except Exception:
+            pass
+        if os.path.exists(p):
+            return True
+        if not allow_resume_existing_parts:
+            for suffix in (
+                ".sd_parts",
+                ".tdm_parts",
+                ".video.tmp",
+                ".audio.tmp",
+                ".video.tmp.sd_parts",
+                ".audio.tmp.sd_parts",
+            ):
+                if os.path.exists(p + suffix):
+                    return True
+        return False
+
+    if not _is_path_occupied(dest_path):
         return dest_path
 
     dirname, filename = os.path.split(dest_path)
@@ -157,9 +181,7 @@ def generate_unique_destination_path(dest_path: str) -> str:
 
     while True:
         candidate = os.path.join(dirname, f"{root_base} ({counter}){ext}")
-        c_parts = candidate + ".sd_parts"
-        c_tdm = candidate + ".tdm_parts"
-        if not os.path.exists(candidate) and not os.path.isdir(c_parts) and not os.path.isdir(c_tdm):
+        if not _is_path_occupied(candidate):
             return candidate
         counter += 1
 
@@ -183,6 +205,7 @@ def apply_media_filename_tags(
 
     clean_base = re.sub(r'\s*\[(?:\d{3,4}p|2160p|1440p|1080p|720p|480p|360p|240p|144p|4k|8k|audio|mp3|m4a)\]', '', base, flags=re.IGNORECASE)
     clean_base = re.sub(r'\s*\[sub\]', '', clean_base, flags=re.IGNORECASE)
+    clean_base = re.sub(r'\s*\(\d+\)$', '', clean_base)
     clean_base = clean_base.strip()
 
     q_tag = ""

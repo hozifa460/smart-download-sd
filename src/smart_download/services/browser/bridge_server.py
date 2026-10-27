@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 DEFAULT_BRIDGE_HOST = "127.0.0.1"
 DEFAULT_BRIDGE_PORT = 9242
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):

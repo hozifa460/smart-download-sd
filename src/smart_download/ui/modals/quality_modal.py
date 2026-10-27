@@ -474,7 +474,9 @@ class QualitySelectionModal(tk.Toplevel):
                 is_sub_burned=is_sub_burned,
                 ext=self.selected_option.ext
             )
-        return generate_unique_destination_path(final_dest)
+        hm = getattr(self.parent_app, "history_manager", None) or getattr(self.master, "history_manager", None)
+        reserved = hm.get_active_or_queued_paths() if hm else None
+        return generate_unique_destination_path(final_dest, reserved_paths=reserved)
 
 
     def _on_download(self):
