@@ -94,7 +94,11 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                 self._start_pending_media_download()
                 return
 
-        if is_media_url(url, check_ytdlp_extractors=True) or skip_resolver:
+        if is_media_url(url, check_ytdlp_extractors=True):
+            self._start_youtube_download(url, dest, max_conn, bytes_limit, modal=None)
+            return
+
+        if skip_resolver:
             if self.engine and getattr(self.engine, "is_running", False):
                 self.enqueue_download(url, dest, max_conn, bytes_limit)
             else:
@@ -158,6 +162,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         """Starts download engine, optionally bridging metrics and controls to a standalone modal."""
         if self.engine and self.engine.is_running:
             return
+        self._active_download_url = url
 
         if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
             try: self._yt_cancel_event.set()
@@ -203,32 +208,24 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
 
         # Wrapped callbacks for modal + main UI
         def _comb_progress(downloaded: int, total: int, speed: float, eta: str, active_chunks: int):
-            if modal:
-                try:
-                    if modal.winfo_exists():
-                        modal.update_progress(downloaded, total, speed, eta, active_chunks)
-                except Exception:
-                    pass
+            if modal and hasattr(modal, "update_progress"):
+                try: modal.update_progress(downloaded, total, speed, eta, active_chunks)
+                except Exception: pass
             self._engine_progress_cb(downloaded, total, speed, eta, active_chunks)
 
         def _comb_complete(path: str, total_bytes: int, elapsed: float):
             has_modal = False
-            if modal:
+            if modal and hasattr(modal, "on_download_complete"):
                 try:
-                    if modal.winfo_exists():
-                        modal.on_download_complete(path, total_bytes, elapsed)
-                        has_modal = True
-                except Exception:
-                    pass
+                    modal.on_download_complete(path, total_bytes, elapsed)
+                    has_modal = True
+                except Exception: pass
             self._engine_complete_cb(path, total_bytes, elapsed, suppress_dialog=has_modal)
 
         def _comb_error(err: str):
-            if modal:
-                try:
-                    if modal.winfo_exists():
-                        modal.on_download_error(err)
-                except Exception:
-                    pass
+            if modal and hasattr(modal, "on_download_error"):
+                try: modal.on_download_error(err)
+                except Exception: pass
             self._engine_error_cb(err)
 
         if not pre_probed_info:
@@ -257,8 +254,13 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             except Exception: pass
 
     def _resolve_history_url(self) -> str:
-        u = (self.engine.url if self.engine and getattr(self.engine, "url", None) else (self.entry_url.get() if hasattr(self, "entry_url") else "")).strip()
+        act = (getattr(self, "_active_download_url", "") or "").strip()
+        if act and "googlevideo.com" not in act.lower():
+            return act
+        u = (self.engine.url if self.engine and getattr(self.engine, "url", None) else (act or (self.entry_url.get() if hasattr(self, "entry_url") else ""))).strip()
         if "googlevideo.com" in u.lower():
+            if act and "googlevideo.com" not in act.lower():
+                return act
             eu = (self.entry_url.get() if hasattr(self, "entry_url") else "").strip()
             if eu and "googlevideo.com" not in eu.lower():
                 return eu
@@ -314,6 +316,9 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             if hasattr(self.engine, "_active_subproc") and self.engine._active_subproc:
                 try: self.engine._active_subproc.kill()
                 except Exception: pass
+            try: self.engine.is_running = False; self.engine._is_running = False
+            except Exception: pass
+            self.engine = None
         c_light = getattr(self, "c_panel_light", "#334155")
         c_muted = getattr(self, "c_text_muted", "#94a3b8")
         if hasattr(self, "btn_start"): self.btn_start.configure(state="normal")
@@ -325,7 +330,8 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         if hasattr(self, "card_eta"): self.card_eta.configure(text="--:--:--")
         if hasattr(self, "card_threads"): self.card_threads.configure(text="0 / 0 Threads")
         if hasattr(self, "_draw_main_progress"): self._draw_main_progress(0.0)
-        self.log("[CANCEL] Operation cancelled by user.")
+        if hasattr(self, "log"): self.log("[CANCEL] Operation cancelled by user.")
+        if hasattr(self, "_pop_and_start_next_queued_download"): self._pop_and_start_next_queued_download()
 
     def _engine_progress_cb(self, downloaded: int, total: int, speed: float, eta: str, active_chunks: int):
         self._last_prog_args = (downloaded, total, speed, eta, active_chunks)
@@ -342,22 +348,13 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             pct = (d / t * 100.0) if t > 0 else 0.0
             self._draw_main_progress(pct)
 
-            if sp >= 1024 * 1024:
-                speed_str = f"{sp / (1024*1024):.2f} MB/s"
-            elif sp >= 1024:
-                speed_str = f"{sp / 1024:.1f} KB/s"
-            else:
-                speed_str = f"{int(sp)} B/s"
+            speed_str = f"{sp / (1024*1024):.2f} MB/s" if sp >= 1024*1024 else (f"{sp / 1024:.1f} KB/s" if sp >= 1024 else f"{int(sp)} B/s")
             self.card_speed.configure(text=speed_str)
 
             def _fmt_size(b):
-                if b >= 1024 * 1024 * 1024:
-                    return f"{b / (1024**3):.2f} GB"
-                if b >= 1024 * 1024:
-                    return f"{b / (1024**2):.1f} MB"
-                if b >= 1024:
-                    return f"{b / 1024:.1f} KB"
-                return f"{b} B"
+                if b >= 1024**3: return f"{b / (1024**3):.2f} GB"
+                if b >= 1024**2: return f"{b / (1024**2):.1f} MB"
+                return f"{b / 1024:.1f} KB" if b >= 1024 else f"{b} B"
 
             size_str = f"{_fmt_size(d)} / {_fmt_size(t)} ({pct:.1f}%)" if t > 0 else f"{_fmt_size(d)} (Streaming...)"
             if hasattr(self, "card_size"): self.card_size.configure(text=size_str)
@@ -367,33 +364,25 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             if hasattr(self, "card_threads"): self.card_threads.configure(text=f"{ac} / {total_chunks} Threads")
 
         try:
-            if self.root.winfo_exists():
-                self.root.after(0, _update)
-            else:
-                self._prog_update_pending = False
+            if self.root.winfo_exists(): self.root.after(0, _update)
+            else: self._prog_update_pending = False
         except Exception:
             self._prog_update_pending = False
 
     def _engine_chunk_update_cb(self):
         if getattr(self, "_chunk_ui_update_pending", False) or getattr(self, "_chunk_update_pending", False):
             return
-        self._chunk_ui_update_pending = True
-        self._chunk_update_pending = True
+        self._chunk_ui_update_pending = self._chunk_update_pending = True
 
         def _do_chunk():
-            self._chunk_ui_update_pending = False
-            self._chunk_update_pending = False
+            self._chunk_ui_update_pending = self._chunk_update_pending = False
             self._refresh_chunk_displays()
 
         try:
-            if self.root.winfo_exists():
-                self.root.after(0, _do_chunk)
-            else:
-                self._chunk_ui_update_pending = False
-                self._chunk_update_pending = False
+            if self.root.winfo_exists(): self.root.after(0, _do_chunk)
+            else: self._chunk_ui_update_pending = self._chunk_update_pending = False
         except Exception:
-            self._chunk_ui_update_pending = False
-            self._chunk_update_pending = False
+            self._chunk_ui_update_pending = self._chunk_update_pending = False
 
     def _gui_refresh_tick(self):
         """Periodic tick ensuring smooth chunk visualization animation and processing queued thread tasks."""
@@ -418,6 +407,17 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         except Exception:
             pass
 
+    def _pop_and_start_next_queued_download(self):
+        if hasattr(self, "_download_queue") and self._download_queue:
+            next_task = self._download_queue.pop(0)
+            if callable(next_task):
+                if hasattr(self, "log"): self.log(f"[QUEUE] Launching next queued stream ({len(self._download_queue)} remaining)")
+                next_task()
+            elif isinstance(next_task, (list, tuple)) and len(next_task) >= 4:
+                q_url, q_dest, q_conn, q_limit = next_task[:4]
+                if hasattr(self, "log"): self.log(f"[QUEUE] Launching next queued download: {os.path.basename(q_dest)} ({len(self._download_queue)} remaining)")
+                self._start_download_with_engine(q_url, q_dest, q_conn, q_limit)
+
     def _engine_complete_cb(self, path: str, total_bytes: int, elapsed: float, suppress_dialog: bool = False):
         def _done():
             self._draw_main_progress(100.0)
@@ -427,7 +427,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             self.btn_cancel.configure(state="disabled")
             if hasattr(self, "btn_refresh_link"):
                 self.btn_refresh_link.configure(state="disabled", bg=self.c_panel_light, fg=self.c_text_muted)
-            self.log(f"[COMPLETE] Download complete: {os.path.basename(path)} ({total_bytes:,} bytes in {elapsed:.1f}s)")
+            if hasattr(self, "log"): self.log(f"[COMPLETE] Download complete: {os.path.basename(path)} ({total_bytes:,} bytes in {elapsed:.1f}s)")
             try:
                 dl_url = self._resolve_history_url()
                 if hasattr(self, "history_manager") and self.history_manager:
@@ -435,15 +435,11 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     self._refresh_history_table()
             except Exception:
                 pass
-            if hasattr(self, "_download_queue") and self._download_queue:
-                next_task = self._download_queue.pop(0)
-                if callable(next_task):
-                    self.log(f"[QUEUE] Launching next queued stream ({len(self._download_queue)} remaining)")
-                    next_task()
-                elif isinstance(next_task, (list, tuple)) and len(next_task) >= 4:
-                    q_url, q_dest, q_conn, q_limit = next_task[:4]
-                    self.log(f"[QUEUE] Launching next queued download: {os.path.basename(q_dest)} ({len(self._download_queue)} remaining)")
-                    self._start_download_with_engine(q_url, q_dest, q_conn, q_limit)
+            if self.engine:
+                try: self.engine.is_running = False; self.engine._is_running = False
+                except Exception: pass
+                self.engine = None
+            if hasattr(self, "_pop_and_start_next_queued_download"): self._pop_and_start_next_queued_download()
 
             if suppress_dialog:
                 return
@@ -452,15 +448,11 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                    f"{tr('dialog_complete_msg_size', 'Size:')} {total_bytes:,} bytes\n"
                    f"{tr('dialog_complete_msg_time', 'Total Time:')} {elapsed:.1f} seconds")
             complete_title = tr("toast_completed_title", "Download Completed Successfully! 🚀")
-            if hasattr(self, "show_safe_info"):
-                self.show_safe_info(complete_title, msg)
-            elif getattr(messagebox.showinfo, "_mock_name", None) or hasattr(messagebox.showinfo, "mock"):
-                messagebox.showinfo(complete_title, msg)
+            if hasattr(self, "show_safe_info"): self.show_safe_info(complete_title, msg)
+            elif getattr(messagebox.showinfo, "_mock_name", None) or hasattr(messagebox.showinfo, "mock"): messagebox.showinfo(complete_title, msg)
             elif hasattr(self, "root") and self.root and self.root.winfo_exists():
-                try:
-                    SafeModalDialog(self.root, title=complete_title, message=msg, dialog_type="info", theme=getattr(self, "_theme_dict", lambda: None)())
-                except Exception:
-                    pass
+                try: SafeModalDialog(self.root, title=complete_title, message=msg, dialog_type="info", theme=getattr(self, "_theme_dict", lambda: None)())
+                except Exception: pass
         try:
             if self.root.winfo_exists():
                 self.root.after(0, _done)
@@ -472,13 +464,10 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             if hasattr(self, "_quality_modal") and self._quality_modal:
                 try:
                     if self._quality_modal.winfo_exists():
-                        try:
-                            self._quality_modal.grab_release()
-                        except Exception:
-                            pass
+                        try: self._quality_modal.grab_release()
+                        except Exception: pass
                         self._quality_modal.destroy()
-                except Exception:
-                    pass
+                except Exception: pass
                 self._quality_modal = None
             if hasattr(self, "btn_start"):
                 try: self.btn_start.configure(state="normal")
@@ -511,6 +500,12 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     self._refresh_history_table()
             except Exception:
                 pass
+
+            if self.engine:
+                try: self.engine.is_running = False; self.engine._is_running = False
+                except Exception: pass
+                self.engine = None
+            if hasattr(self, "_pop_and_start_next_queued_download"): self._pop_and_start_next_queued_download()
 
             if is_expired:
                 msg = (

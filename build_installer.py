@@ -60,7 +60,10 @@ def build_app(rebuild: bool = False):
 
     print("[*] Building SmartDownload.exe via PyInstaller...")
     spec_path = os.path.join(BASE_DIR, "SmartDownload.spec")
-    res = subprocess.run([sys.executable, "-m", "PyInstaller", spec_path, "--noconfirm"], cwd=BASE_DIR)
+    cmd = [sys.executable, "-m", "PyInstaller", spec_path, "--noconfirm"]
+    if rebuild:
+        cmd.append("--clean")
+    res = subprocess.run(cmd, cwd=BASE_DIR)
     if res.returncode != 0:
         raise RuntimeError(f"PyInstaller failed to build SmartDownload.exe with returncode {res.returncode}")
 
@@ -127,11 +130,14 @@ def prepare_payload():
     print(f"[+] Installer payload prepared at: {PAYLOAD_DIR}")
 
 
-def build_installer():
+def build_installer(rebuild: bool = False):
     """Compiles dist/SmartDownload-Setup.exe using PyInstaller."""
     print("[*] Building SmartDownload-Setup.exe via PyInstaller...")
     spec_path = os.path.join(BASE_DIR, "SmartDownload-Setup.spec")
-    res = subprocess.run([sys.executable, "-m", "PyInstaller", spec_path, "--noconfirm"], cwd=BASE_DIR)
+    cmd = [sys.executable, "-m", "PyInstaller", spec_path, "--noconfirm"]
+    if rebuild:
+        cmd.append("--clean")
+    res = subprocess.run(cmd, cwd=BASE_DIR)
     if res.returncode != 0:
         raise RuntimeError(f"PyInstaller failed to build SmartDownload-Setup.exe with returncode {res.returncode}")
 
@@ -161,11 +167,45 @@ def main():
     print("[*] SMART DOWNLOAD (SD) - BUILD PIPELINE")
     print("=" * 70)
 
+    if args.rebuild_all:
+        try:
+            from smart_download.installer import terminate_running_app
+            terminate_running_app()
+        except Exception as e:
+            print(f"[*] Warning terminating running app: {e}")
+
     if not args.installer_only:
         build_app(rebuild=args.rebuild_all)
 
     prepare_payload()
-    setup_exe = build_installer()
+    setup_exe = build_installer(rebuild=args.rebuild_all)
+
+    if args.rebuild_all:
+        print("[*] Packaging and applying core patch...")
+        try:
+            from smart_download.services.core_patch_updater import build_core_patch_zip, CoreHotPatchUpdater
+            from smart_download.installer import get_default_install_dir, install_application
+
+            patch_zip = os.path.join(DIST_DIR, "SmartDownload-CorePatch.zip")
+            build_core_patch_zip(patch_zip)
+            CoreHotPatchUpdater().apply_core_patch(patch_zip)
+            print(f"[+] Applied core patch from {patch_zip}")
+
+            default_dir = get_default_install_dir()
+            if os.path.exists(default_dir):
+                print(f"[*] Installing application to default directory: {default_dir}")
+                try: terminate_running_app()
+                except Exception: pass
+                install_application(
+                    target_dir=default_dir,
+                    register_browser=True,
+                    create_desktop=True,
+                    create_start_menu=True,
+                    register_startup=True
+                )
+                print(f"[+] Installed application to {default_dir}")
+        except Exception as e:
+            print(f"[-] Error applying core patch or installing to default directory: {e}")
 
     print("\n" + "=" * 70)
     print("[+] BUILD COMPLETE")

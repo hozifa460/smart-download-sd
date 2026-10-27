@@ -3,6 +3,7 @@ MediaOptionsBarMixin: Main-window media format, dubbing audio, and subtitle opti
 Provides dynamic Quality, Audio track, Subtitle track, and Subtitle mode selectors directly in the GUI.
 """
 import os
+import copy
 import threading
 from typing import Optional, Dict, Any, List
 
@@ -31,6 +32,7 @@ from smart_download.services.youtube_tracks import (
     extract_subtitle_tracks,
 )
 from ..modals.quality_modal import QualitySelectionModal
+from ..modals.confirm_modal import DownloadConfirmationModal
 
 
 class MediaOptionsBarMixin:
@@ -330,14 +332,33 @@ class MediaOptionsBarMixin:
         if hasattr(self, "_start_youtube_download"):
             self._start_youtube_download(url, dest)
 
-    def _show_cached_quality_modal(self, ctx: Dict[str, Any]):
+    def _show_cached_quality_modal(self, ctx: Dict[str, Any], preferred_dest: Optional[str] = None):
         """Displays QualitySelectionModal instantaneously from cached metadata context."""
         info = ctx["info"]
-        options = ctx["options"]
+        options = [copy.copy(o) for o in ctx.get("options", [])]
         raw_title = info.get("title") or "Video"
         duration = int(info.get("duration") or 0)
         theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
-        dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ctx.get("final_dest", "")
+        clean_title = sanitize_filename(raw_title)
+        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        first_opt = options[0] if options else None
+        first_ext = first_opt.ext if first_opt else "mp4"
+        first_lbl = first_opt.resolution_label if first_opt else ""
+
+        target_dest = None
+        if preferred_dest and clean_title.lower() in os.path.basename(preferred_dest).lower():
+            target_dest = preferred_dest
+        elif ctx.get("final_dest"):
+            target_dest = ctx.get("final_dest")
+        elif preferred_dest:
+            target_dest = preferred_dest
+        else:
+            target_dest = os.path.join(downloads_dir, f"{clean_title}.{first_ext}")
+
+        initial_dest = apply_media_filename_tags(target_dest, quality_label=first_lbl, is_sub_burned=False, ext=first_ext)
+        reserved = self.history_manager.get_active_or_queued_paths() if getattr(self, "history_manager", None) else None
+        dest = generate_unique_destination_path(initial_dest, reserved_paths=reserved)
+
         resolver = ctx.get("resolver")
         if not resolver and hasattr(self, "log"):
             resolver = YouTubeResolver(
@@ -351,16 +372,23 @@ class MediaOptionsBarMixin:
             if hasattr(self, "clear_last_clipboard_url"):
                 self.clear_last_clipboard_url()
             stream_info = resolver.build_stream_info(info, selected_opt) if resolver else None
-            try:
-                max_conn = int(self.conn_var.get())
-            except Exception:
-                max_conn = 8
-            try:
-                kb_lim = float(self.entry_custom_speed.get().strip())
-            except Exception:
-                kb_lim = 0.0
+            try: max_conn = int(self.conn_var.get())
+            except Exception: max_conn = 8
+            try: kb_lim = float(self.entry_custom_speed.get().strip())
+            except Exception: kb_lim = 0.0
+            is_hidden = self.is_window_hidden_or_minimized() if hasattr(self, "is_window_hidden_or_minimized") else False
+            yt_prog_modal = None
+            if is_hidden:
+                yt_prog_modal = DownloadConfirmationModal(
+                    parent=self.root,
+                    url=ctx.get("url", ""),
+                    default_dest_path=final_dest,
+                    theme=self._theme_dict(),
+                    parent_app=self,
+                    show_progress_immediately=True
+                )
             if stream_info and hasattr(self, "_launch_stream_coordinator"):
-                self._launch_stream_coordinator(stream_info, final_dest, max_conn, kb_lim * 1024.0)
+                self._launch_stream_coordinator(stream_info, final_dest, max_conn, kb_lim * 1024.0, yt_modal=yt_prog_modal)
 
         def _on_open_in_main(selected_opt: VideoFormatOption, final_dest: str):
             self._quality_modal = None

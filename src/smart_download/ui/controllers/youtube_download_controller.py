@@ -42,30 +42,33 @@ class YouTubeDownloadControllerMixin:
         # Instant 0ms cached reopen if metadata context is already available
         cached_ctx = self._get_cached_media_context(url) if hasattr(self, "_get_cached_media_context") else None
         if cached_ctx and cached_ctx.get("options") and hasattr(self, "_show_cached_quality_modal"):
-            self._show_cached_quality_modal(cached_ctx)
+            self._show_cached_quality_modal(cached_ctx, preferred_dest=dest)
             return
 
-        if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event:
+        is_busy = bool(self.engine and getattr(self.engine, "is_running", False))
+
+        if hasattr(self, "_yt_cancel_event") and self._yt_cancel_event and not is_busy:
             try:
                 self._yt_cancel_event.set()
             except Exception:
                 pass
         self._yt_cancel_event = threading.Event()
-        try:
-            self.btn_start.configure(state="disabled")
-            self.btn_pause.configure(state="disabled")
-            self.btn_cancel.configure(state="normal")
-            if hasattr(self, "btn_refresh_link"):
-                self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
-            self.txt_log.delete("1.0", tk.END)
+        if not is_busy:
+            try:
+                self.btn_start.configure(state="disabled")
+                self.btn_pause.configure(state="disabled")
+                self.btn_cancel.configure(state="normal")
+                if hasattr(self, "btn_refresh_link"):
+                    self.btn_refresh_link.configure(state="normal", bg=self.c_panel_light, fg=self.c_accent)
+                self.txt_log.delete("1.0", tk.END)
 
-            for item in self.tree_chunks.get_children():
-                self.tree_chunks.delete(item)
-            self._draw_main_progress(0.0)
-            self._draw_chunk_segments([])
-            self.card_size.configure(text="Fetching available formats...")
-        except Exception:
-            pass
+                for item in self.tree_chunks.get_children():
+                    self.tree_chunks.delete(item)
+                self._draw_main_progress(0.0)
+                self._draw_chunk_segments([])
+                self.card_size.configure(text="Fetching available formats...")
+            except Exception:
+                pass
 
         plat = extract_media_platform(url)
         tag = plat.upper().replace(" / X", "")
@@ -395,6 +398,7 @@ class YouTubeDownloadControllerMixin:
             on_complete=_comb_complete,
             on_error=_comb_error
         )
+        self._active_download_url = getattr(stream_info, "webpage_url", "") or getattr(stream_info, "video_url", "") or ""
         self.engine = coordinator
         if yt_modal and hasattr(yt_modal, "attach_engine"):
             yt_modal.attach_engine(coordinator)

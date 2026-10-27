@@ -191,7 +191,9 @@ class TestBurnSubtitleEncodingAndPaths(unittest.TestCase):
             # Verify subtitles filter references temporary file without BOM
             vf_idx = cmd.index("-vf")
             vf_val = cmd[vf_idx + 1]
-            self.assertTrue(vf_val.startswith("subtitles=_sd_burn_") and vf_val.endswith(".srt"))
+            self.assertIn("_sd_burn_", vf_val)
+            self.assertIn(".srt", vf_val)
+            self.assertIn("charenc=UTF-8", vf_val)
 
             # Verify temporary burn srt was cleaned up
             temp_files = [f for f in os.listdir(tmp_dir) if f.startswith("_sd_burn_")]

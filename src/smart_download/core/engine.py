@@ -524,9 +524,11 @@ class TurboDownloadEngine(EngineWorkersMixin, EnginePersistenceMixin):
             avg_speed = (bytes_for_speed / elapsed) if elapsed > 0 else 0
             speed_str = f"{avg_speed / (1024*1024):.2f} MB/s" if avg_speed >= 1024*1024 else f"{avg_speed / 1024:.1f} KB/s"
             self.log(f"[SUCCESS] Download finished successfully in {elapsed:.1f}s (Average Speed: {speed_str})!")
+            self.is_running = False
             if self.on_complete:
                 self.on_complete(self.destination_path, self.total_size, elapsed)
         except Exception as e:
+            self.is_running = False
             self.log(f"[ERROR] {e}")
             if self.on_error:
                 self.on_error(str(e))

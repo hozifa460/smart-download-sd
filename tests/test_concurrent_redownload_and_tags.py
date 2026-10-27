@@ -204,6 +204,298 @@ class TestConcurrentRedownloadAndTags(unittest.TestCase):
         self.assertEqual(q_conn, 4)
         self.assertEqual(q_lim, 1024.0)
 
+    def test_queue_progression_after_stream_coordinator_completion(self):
+        """
+        Verifies queue progression when engine/coordinator finishes Download #1
+        while Download #2 is queued (Download #2 transitions to 'In Progress' and is not re-queued).
+        """
+        from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+        from unittest.mock import MagicMock
+
+        class MockApp(DownloadControllerMixin):
+            def __init__(self, hist_mgr):
+                self.history_manager = hist_mgr
+                self.engine = MagicMock()
+                self.engine.is_running = True
+                self.engine._is_running = True
+                self._download_queue = []
+                self._active_download_url = "https://example.com/file1.zip"
+                self.log = MagicMock()
+                self._refresh_history_table = MagicMock()
+                self.dispatch_to_main_thread = lambda f: f()
+                self.btn_start = MagicMock()
+                self.btn_pause = MagicMock()
+                self.btn_cancel = MagicMock()
+                self.status_label = MagicMock()
+                self._draw_main_progress = MagicMock()
+                self._refresh_chunk_displays = MagicMock()
+                self.c_panel_light = "#334155"
+                self.c_text_muted = "#94a3b8"
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self.root.after.side_effect = lambda ms, cb: cb()
+                self.started_downloads = []
+
+            def _start_download_with_engine(self, url, dest, max_conn=8, bytes_limit=0.0):
+                self.started_downloads.append((url, dest, max_conn, bytes_limit))
+                self.engine = MagicMock()
+                self.engine.is_running = True
+                self.engine._is_running = True
+                self.history_manager.add_or_update_entry(
+                    url=url, file_path=dest, size_bytes=0, status="In Progress"
+                )
+
+        app = MockApp(self.mgr)
+        dest1 = os.path.join(self.tmp_dir, "file1.zip")
+        self.mgr.add_or_update_entry(url="https://example.com/file1.zip", file_path=dest1, size_bytes=1000, status="In Progress")
+
+        # Enqueue Download #2
+        dest2 = os.path.join(self.tmp_dir, "file2.zip")
+        app.enqueue_download("https://example.com/file2.zip", dest2, max_conn=4, bytes_limit=2048.0)
+        self.assertEqual(len(app._download_queue), 1)
+
+        # Now Download #1 completes, calling app._engine_complete_cb
+        app._engine_complete_cb(dest1, 1000, 2.5, suppress_dialog=True)
+
+        # 1. Download #2 was popped from queue and started
+        self.assertEqual(len(app._download_queue), 0)
+        self.assertEqual(len(app.started_downloads), 1)
+        self.assertEqual(app.started_downloads[0][0], "https://example.com/file2.zip")
+        self.assertEqual(app.started_downloads[0][1], dest2)
+
+        # 2. In history manager, Download #2 is now 'In Progress'
+        dest2_entry = [e for e in self.mgr.get_entries() if e["file_path"] == dest2][0]
+        self.assertEqual(dest2_entry["status"], "In Progress")
+
+    def test_queue_progression_with_stream_coordinator_queued_media_task(self):
+        """
+        Verifies queue progression when StreamDownloadCoordinator finishes Download #1
+        while Download #2 is queued as a media stream task via _launch_stream_coordinator.
+        Download #2 must transition from 'Queued' to 'In Progress' and NOT be re-queued.
+        """
+        from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+        from smart_download.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+        from unittest.mock import MagicMock, patch
+
+        class MockMediaApp(DownloadControllerMixin, YouTubeDownloadControllerMixin):
+            def __init__(self, hist_mgr):
+                self.history_manager = hist_mgr
+                self.engine = MagicMock()
+                self.engine.is_running = True
+                self.engine._is_running = True
+                self._download_queue = []
+                self._active_download_url = "https://youtube.com/watch?v=vid1"
+                self.log = MagicMock()
+                self._refresh_history_table = MagicMock()
+                self.dispatch_to_main_thread = lambda f: f()
+                self.btn_start = MagicMock()
+                self.btn_pause = MagicMock()
+                self.btn_cancel = MagicMock()
+                self.entry_dest = MagicMock()
+                self.entry_url = MagicMock()
+                self.status_label = MagicMock()
+                self._draw_main_progress = MagicMock()
+                self._refresh_chunk_displays = MagicMock()
+                self.c_panel_light = "#334155"
+                self.c_text_muted = "#94a3b8"
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self.root.after.side_effect = lambda ms, cb: cb()
+
+        app = MockMediaApp(self.mgr)
+        dest1 = os.path.join(self.tmp_dir, "Video 1 [1080p].mp4")
+        self.mgr.add_or_update_entry(url="https://youtube.com/watch?v=vid1", file_path=dest1, size_bytes=1000, status="In Progress")
+
+        # Now queue Download #2 via _launch_stream_coordinator while Download #1 is running
+        mock_info2 = MagicMock()
+        mock_info2.webpage_url = "https://youtube.com/watch?v=vid2"
+        mock_info2.video_size = 5000
+        mock_info2.audio_size = 1000
+        dest2 = os.path.join(self.tmp_dir, "Video 2 [1080p].mp4")
+
+        with patch("smart_download.ui.controllers.youtube_download_controller.StreamDownloadCoordinator") as mock_coord_cls:
+            mock_coord_instance = MagicMock()
+            mock_coord_instance.is_running = True
+            mock_coord_cls.return_value = mock_coord_instance
+
+            app._launch_stream_coordinator(mock_info2, dest2, max_conn=8, bytes_limit=0.0)
+
+            # Verifying Download #2 was queued, NOT started yet
+            self.assertEqual(len(app._download_queue), 1)
+            dest2_entry = [e for e in self.mgr.get_entries() if e["file_path"] == dest2][0]
+            self.assertEqual(dest2_entry["status"], "Queued")
+            self.assertFalse(mock_coord_instance.start.called)
+
+            # Now Download #1 completes, triggering _engine_complete_cb
+            app._engine_complete_cb(dest1, 1000, 3.0, suppress_dialog=True)
+
+            # Verifying Download #2 was popped from queue and started
+            self.assertEqual(len(app._download_queue), 0)
+            self.assertTrue(mock_coord_instance.start.called)
+            self.assertIs(app.engine, mock_coord_instance)
+
+            # Verifying in history manager, Download #2 is now 'In Progress'
+            dest2_entry_after = [e for e in self.mgr.get_entries() if e["file_path"] == dest2][0]
+            self.assertEqual(dest2_entry_after["status"], "In Progress")
+
+    def test_on_start_download_with_media_url_invokes_youtube_download_even_if_engine_busy(self):
+        """
+        Verifies that calling _on_start_download with a media URL while an engine is running
+        routes to _start_youtube_download and does NOT bypass it to enqueue direct download.
+        """
+        from smart_download.ui.controllers.download_controller import DownloadControllerMixin
+        from unittest.mock import MagicMock
+
+        class MockApp(DownloadControllerMixin):
+            def __init__(self, hist_mgr):
+                self.history_manager = hist_mgr
+                self.engine = MagicMock()
+                self.engine.is_running = True
+                self.engine._is_running = True
+                self._download_queue = []
+                self.log = MagicMock()
+                self._refresh_history_table = MagicMock()
+                self.entry_url = MagicMock()
+                self.entry_url.get.return_value = "https://www.youtube.com/watch?v=media123"
+                self.entry_dest = MagicMock()
+                self.entry_dest.get.return_value = "C:\\Downloads\\video.mp4"
+                self.cb_connections = MagicMock()
+                self.cb_connections.get.return_value = "8"
+                self.conn_var = MagicMock()
+                self.conn_var.get.return_value = "8"
+                self.speed_slider = MagicMock()
+                self.speed_slider.get.return_value = 0
+                self.entry_custom_speed = MagicMock()
+                self.entry_custom_speed.get.return_value = ""
+                self.called_yt = []
+                self.called_enqueue = []
+
+            def _start_youtube_download(self, url, dest, *args, **kwargs):
+                self.called_yt.append((url, dest))
+
+            def enqueue_download(self, url, dest, max_conn=8, bytes_limit=0.0):
+                self.called_enqueue.append((url, dest))
+
+        app = MockApp(self.mgr)
+        app._on_start_download()
+
+        self.assertEqual(len(app.called_yt), 1)
+        self.assertEqual(app.called_yt[0][0], "https://www.youtube.com/watch?v=media123")
+        self.assertEqual(len(app.called_enqueue), 0)
+
+    def test_show_cached_quality_modal_isolates_format_options_and_unique_destination(self):
+        """
+        Verifies _show_cached_quality_modal clones VideoFormatOption instances and generates
+        unique (1) destination when the same media option is opened concurrently.
+        """
+        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
+        from smart_download.services.youtube_models import VideoFormatOption
+        from unittest.mock import MagicMock, patch
+
+        class MockWindow(MediaOptionsBarMixin):
+            def __init__(self, hist_mgr, tmp_dir):
+                self.history_manager = hist_mgr
+                self.tmp_dir = tmp_dir
+                self.log = MagicMock()
+                self.root = MagicMock()
+                self.winfo_viewable = MagicMock(return_value=True)
+                self.wm_state = MagicMock(return_value="normal")
+                self.created_modals = []
+
+        win = MockWindow(self.mgr, self.tmp_dir)
+
+        opt = VideoFormatOption(
+            format_id="137",
+            resolution_label="1080p",
+            height=1080,
+            ext="mp4",
+            filesize_approx=10000000,
+            video_url="https://googlevideo.com/vid",
+            audio_url="https://googlevideo.com/aud"
+        )
+        dest1 = os.path.join(self.tmp_dir, "My Video [1080p].mp4")
+        ctx = {
+            "url": "https://www.youtube.com/watch?v=cached123",
+            "title": "My Video",
+            "info": {"title": "My Video", "duration": 120},
+            "options": [opt],
+            "default_dest": dest1
+        }
+
+        modal_instances = []
+        def mock_modal(**kwargs):
+            m = MagicMock()
+            m.kwargs = kwargs
+            modal_instances.append(m)
+            return m
+
+        with patch("smart_download.ui.panels.media_options_bar.QualitySelectionModal", side_effect=mock_modal):
+            win._show_cached_quality_modal(ctx)
+            self.assertEqual(len(modal_instances), 1)
+            first_opts = modal_instances[0].kwargs["options"]
+            self.assertIsNot(first_opts[0], opt)
+            self.assertEqual(first_opts[0].resolution_label, "1080p")
+            first_dest = modal_instances[0].kwargs["default_dest_path"]
+            self.assertTrue(first_dest.endswith("My Video [1080p].mp4"))
+
+            self.mgr.add_or_update_entry(
+                url=ctx["url"],
+                file_path=first_dest,
+                size_bytes=10000000,
+                status="In Progress"
+            )
+
+            win._show_cached_quality_modal(ctx)
+            self.assertEqual(len(modal_instances), 2)
+            second_opts = modal_instances[1].kwargs["options"]
+            self.assertIsNot(second_opts[0], opt)
+            self.assertIsNot(second_opts[0], first_opts[0])
+            second_dest = modal_instances[1].kwargs["default_dest_path"]
+            self.assertTrue(second_dest.endswith("My Video [1080p] (1).mp4"))
+
+    def test_download_subtitle_as_srt_cookie_fallback_on_429(self):
+        """
+        Verifies download_subtitle_as_srt falls back to extracting browser cookies
+        when direct fetch returns HTTP 429.
+        """
+        from smart_download.services.subtitle_processor import download_subtitle_as_srt
+        from unittest.mock import MagicMock, patch
+
+        sub_track = {
+            "sub_id": "ar",
+            "language": "ar",
+            "url": "https://www.youtube.com/api/timedtext?v=test&lang=ar",
+            "ext": "vtt"
+        }
+        video_file = os.path.join(self.tmp_dir, "test_video.mp4")
+        with open(video_file, "wb") as f:
+            f.write(b"mp4")
+
+        mock_resp_429 = MagicMock()
+        mock_resp_429.status_code = 429
+
+        mock_resp_200 = MagicMock()
+        mock_resp_200.status_code = 200
+        mock_resp_200.content = b"WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nCookie Subtitle\n"
+
+        def mock_requests_get(url, **kwargs):
+            if kwargs.get("cookies") is not None:
+                return mock_resp_200
+            return mock_resp_429
+
+        mock_cookiejar = MagicMock()
+
+        with patch("requests.get", side_effect=mock_requests_get), \
+             patch("smart_download.services.subtitle_processor.detect_installed_cookie_browsers", return_value=["chrome"]), \
+             patch("yt_dlp.cookies.extract_cookies_from_browser", return_value=mock_cookiejar):
+            srt_path = download_subtitle_as_srt(sub_track, video_file)
+            self.assertIsNotNone(srt_path)
+            self.assertTrue(os.path.isfile(srt_path))
+            with open(srt_path, "r", encoding="utf-8-sig") as sf:
+                content = sf.read()
+            self.assertIn("Cookie Subtitle", content)
+            self.assertIn("00:00:01,000 --> 00:00:03,000", content)
+
 
 if __name__ == "__main__":
     unittest.main()

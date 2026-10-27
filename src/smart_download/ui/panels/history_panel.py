@@ -219,6 +219,8 @@ class HistoryPanelMixin:
         can_resume = (status in ("paused", "failed", "متوقف مؤقتاً", "فشل")) and not with_quality
         reserved = self.history_manager.get_active_or_queued_paths() if (hasattr(self, "history_manager") and self.history_manager) else None
 
+        is_busy = bool(self.engine and getattr(self.engine, "is_running", False))
+
         if with_quality or is_media_url(url):
             clean_dest = file_path
             if file_path:
@@ -228,23 +230,24 @@ class HistoryPanelMixin:
                 d_clean_base = re.sub(r'\s*\(\d+\)$', '', d_base).strip()
                 clean_dest = os.path.join(d_dir, f"{d_clean_base}{d_ext}")
 
-            if hasattr(self, "entry_url"):
-                self.entry_url.delete(0, tk.END)
-                self.entry_url.insert(0, url)
-            if clean_dest and hasattr(self, "entry_dest"):
-                self.entry_dest.delete(0, tk.END)
-                self.entry_dest.insert(0, clean_dest)
-            elif hasattr(self, "_on_url_change"):
-                self._on_url_change()
-            if hasattr(self, "notebook"):
-                try:
-                    self.notebook.select(0)
-                except Exception:
-                    pass
+            if not is_busy:
+                if hasattr(self, "entry_url"):
+                    self.entry_url.delete(0, tk.END)
+                    self.entry_url.insert(0, url)
+                if clean_dest and hasattr(self, "entry_dest"):
+                    self.entry_dest.delete(0, tk.END)
+                    self.entry_dest.insert(0, clean_dest)
+                elif hasattr(self, "_on_url_change"):
+                    self._on_url_change()
+                if hasattr(self, "notebook"):
+                    try:
+                        self.notebook.select(0)
+                    except Exception:
+                        pass
 
             ctx = self._get_cached_media_context(url) if hasattr(self, "_get_cached_media_context") else None
             if ctx and ctx.get("options") and hasattr(self, "_show_cached_quality_modal"):
-                self._show_cached_quality_modal(ctx)
+                self._show_cached_quality_modal(ctx, preferred_dest=clean_dest)
                 return
             if hasattr(self, "_start_youtube_download"):
                 self._start_youtube_download(url, clean_dest or file_path or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""))

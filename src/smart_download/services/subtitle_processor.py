@@ -18,10 +18,10 @@ except ImportError:
     requests = None
 
 try:
-    from .youtube_models import find_ffmpeg_bin
+    from .youtube_models import find_ffmpeg_bin, detect_installed_cookie_browsers
 except Exception:
-    def find_ffmpeg_bin() -> Optional[str]:  # type: ignore
-        return shutil.which("ffmpeg")
+    def find_ffmpeg_bin() -> Optional[str]: return shutil.which("ffmpeg")  # type: ignore
+    def detect_installed_cookie_browsers() -> List[str]: return ["edge", "chrome", "firefox"]  # type: ignore
 
 IS_WINDOWS = sys.platform.startswith("win")
 
@@ -74,82 +74,47 @@ def _parse_xml_subtitles_to_srt(text: str) -> str:
     """Parses YouTube timedtext XML (<transcript>, <tt>, <text>, <p>) into valid SRT."""
     cues: List[str] = []
     cue_idx = 1
-    tag_pat = re.compile(
-        r'<(?:[a-zA-Z0-9_-]+:)?(?:text|p)\b([^>]*?)>(.*?)</(?:[a-zA-Z0-9_-]+:)?(?:text|p)>',
-        re.DOTALL | re.IGNORECASE
-    )
+    tag_pat = re.compile(r'<(?:[a-zA-Z0-9_-]+:)?(?:text|p)\b([^>]*?)>(.*?)</(?:[a-zA-Z0-9_-]+:)?(?:text|p)>', re.DOTALL | re.IGNORECASE)
     attr_pat = re.compile(r'([a-zA-Z0-9_:-]+)\s*=\s*(?:[\'"]([^\'"]*)[\'"]|([^\s>]+))')
-
     for m in tag_pat.finditer(text):
-        attrs_str = m.group(1)
-        raw_body = m.group(2)
-        attrs = {k: v1 if v1 != "" else v2 for k, v1, v2 in attr_pat.findall(attrs_str)}
-        t_val = attrs.get("t")
-        start_val = attrs.get("start") or attrs.get("begin")
-        if not start_val and not t_val:
-            continue
+        attrs = {k: v1 if v1 != "" else v2 for k, v1, v2 in attr_pat.findall(m.group(1))}
+        t_val, start_val = attrs.get("t"), attrs.get("start") or attrs.get("begin")
+        if not start_val and not t_val: continue
         try:
-            if t_val:
-                start = float(t_val) / 1000.0
-            else:
-                start = _parse_timestamp_or_seconds(start_val)
-
-            d_val = attrs.get("d")
-            dur_val = attrs.get("dur")
-            end_val = attrs.get("end")
-            if d_val:
-                dur = float(d_val) / 1000.0
-                end = start + max(0.5, dur)
-            elif dur_val:
-                dur = _parse_timestamp_or_seconds(dur_val)
-                end = start + max(0.5, dur)
-            elif end_val:
-                end = _parse_timestamp_or_seconds(end_val)
-            else:
-                end = start + 2.0
-
-            body = re.sub(r'<br\s*/?>', '\n', raw_body, flags=re.IGNORECASE)
-            body = re.sub(r'</?s\b[^>]*>', '', body, flags=re.IGNORECASE)
-            body = html.unescape(re.sub(r'<[^>]+>', '', body)).strip()
+            start = float(t_val) / 1000.0 if t_val else _parse_timestamp_or_seconds(start_val)
+            d_val, dur_val, end_val = attrs.get("d"), attrs.get("dur"), attrs.get("end")
+            if d_val: end = start + max(0.5, float(d_val) / 1000.0)
+            elif dur_val: end = start + max(0.5, _parse_timestamp_or_seconds(dur_val))
+            elif end_val: end = _parse_timestamp_or_seconds(end_val)
+            else: end = start + 2.0
+            body = html.unescape(re.sub(r'<[^>]+>', '', re.sub(r'</?s\b[^>]*>', '', re.sub(r'<br\s*/?>', '\n', m.group(2), flags=re.IGNORECASE), flags=re.IGNORECASE))).strip()
             if body:
-                timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
-                cues.append(f"{cue_idx}\n{timing}\n{body}")
+                cues.append(f"{cue_idx}\n{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}\n{body}")
                 cue_idx += 1
-        except Exception:
-            continue
+        except Exception: continue
     return "\n\n".join(cues) + ("\n" if cues else "")
 
 
 def _parse_json_subtitles_to_srt(text: str) -> str:
     """Parses YouTube json3 timedtext into valid SRT."""
     import json
-    try:
-        data = json.loads(text.lstrip("\ufeff"))
-    except Exception:
-        return ""
+    try: data = json.loads(text.lstrip("\ufeff"))
+    except Exception: return ""
     events = data.get("events")
-    if not isinstance(events, list):
-        return ""
+    if not isinstance(events, list): return ""
     cues: List[str] = []
     cue_idx = 1
     for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        start_ms = ev.get("tStartMs")
-        dur_ms = ev.get("dDurationMs", 2000)
-        if start_ms is None:
-            continue
+        if not isinstance(ev, dict): continue
+        start_ms, dur_ms = ev.get("tStartMs"), ev.get("dDurationMs", 2000)
+        if start_ms is None: continue
         start = float(start_ms) / 1000.0
         end = start + max(0.5, float(dur_ms or 2000) / 1000.0)
         segs = ev.get("segs", [])
-        if isinstance(segs, list) and segs:
-            body = "".join(str(s.get("utf8", "")) for s in segs if isinstance(s, dict)).strip()
-        else:
-            body = str(ev.get("text", "")).strip()
+        body = "".join(str(s.get("utf8", "")) for s in segs if isinstance(s, dict)).strip() if isinstance(segs, list) and segs else str(ev.get("text", "")).strip()
         body = html.unescape(re.sub(r'<[^>]+>', '', body)).strip()
         if body:
-            timing = f"{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}"
-            cues.append(f"{cue_idx}\n{timing}\n{body}")
+            cues.append(f"{cue_idx}\n{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}\n{body}")
             cue_idx += 1
     return "\n\n".join(cues) + ("\n" if cues else "")
 
@@ -228,43 +193,55 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
     if isinstance(sub_track.get("http_headers"), dict):
         headers.update(sub_track["http_headers"])
 
-    srt_content = ""
-    for u in cand_urls:
-        raw_text = None
+    def _fetch(url: str, cookies: Any = None) -> Optional[str]:
         if requests is not None:
             try:
-                resp = requests.get(u, headers=headers, timeout=15)
-                if resp.status_code == 200:
-                    raw_text = resp.content.decode("utf-8", errors="replace")
-            except Exception:
-                raw_text = None
-
-        if raw_text is None:
-            try:
-                req = urllib.request.Request(u, headers=headers)
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    raw_text = resp.read().decode("utf-8", errors="replace")
-            except Exception:
-                raw_text = None
-
-        if not raw_text or not raw_text.strip():
-            continue
-
-        conv = convert_vtt_to_srt(raw_text)
-        if conv and "-->" in conv:
-            srt_content = conv
-            break
-        elif "-->" in raw_text:
-            srt_content = raw_text
-            break
-
-    if (not srt_content or "-->" not in srt_content) and sub_track.get("webpage_url"):
+                kw: Dict[str, Any] = {"headers": headers, "timeout": 15}
+                if cookies is not None: kw["cookies"] = cookies
+                r = requests.get(url, **kw)
+                if r.status_code == 200: return r.content.decode("utf-8", errors="replace")
+            except Exception: pass
         try:
-            import tempfile
-            import yt_dlp
+            req = urllib.request.Request(url, headers=headers)
+            if cookies is not None:
+                opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
+                with opener.open(req, timeout=15) as resp: return resp.read().decode("utf-8", errors="replace")
+            with urllib.request.urlopen(req, timeout=15) as resp: return resp.read().decode("utf-8", errors="replace")
+        except Exception: return None
+
+    def _convert(txt: Optional[str]) -> str:
+        if not txt or not txt.strip(): return ""
+        c = convert_vtt_to_srt(txt)
+        return c if c and "-->" in c else (txt if "-->" in txt else "")
+
+    srt_content = ""
+    for u in cand_urls:
+        srt_content = _convert(_fetch(u))
+        if srt_content: break
+
+    if not srt_content:
+        try:
+            import yt_dlp.cookies
+            for b in detect_installed_cookie_browsers():
+                try: cj = yt_dlp.cookies.extract_cookies_from_browser(b)
+                except Exception: cj = None
+                if not cj: continue
+                try:
+                    cstr = "; ".join(f"{c.name}={c.value}" for c in cj)
+                    if cstr: headers["Cookie"] = cstr
+                except Exception: pass
+                for u in cand_urls:
+                    srt_content = _convert(_fetch(u, cookies=cj))
+                    if srt_content: break
+                if srt_content: break
+        except Exception: pass
+
+    if not srt_content and sub_track.get("webpage_url"):
+        try:
+            import tempfile, yt_dlp
             lang = sub_track.get("language") or "en"
             with tempfile.TemporaryDirectory() as tmp_dir:
-                ydl_opts = {
+                ydl_opts: Dict[str, Any] = {
                     "writesubtitles": True, "writeautomaticsub": True,
                     "subtitleslangs": [lang], "subtitlesformat": "srt/vtt/ttml/srv3/json3/best",
                     "skip_download": True, "quiet": True, "no_warnings": True,
@@ -272,25 +249,33 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
                 }
                 if isinstance(sub_track.get("http_headers"), dict) and sub_track["http_headers"]:
                     ydl_opts["http_headers"] = sub_track["http_headers"]
+
+                def _scan_tmp() -> str:
+                    for fn in os.listdir(tmp_dir):
+                        fp = os.path.join(tmp_dir, fn)
+                        if os.path.isfile(fp) and any(fp.endswith(e) for e in (".srt", ".vtt", ".ttml", ".srv3", ".xml", ".json3")):
+                            try:
+                                with open(fp, "r", encoding="utf-8-sig", errors="replace") as sf:
+                                    sc = _convert(sf.read())
+                                    if sc: return sc
+                            except Exception: pass
+                    return ""
+
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([sub_track["webpage_url"]])
-                for fn in os.listdir(tmp_dir):
-                    fp = os.path.join(tmp_dir, fn)
-                    if os.path.isfile(fp) and any(fp.endswith(e) for e in (".srt", ".vtt", ".ttml", ".srv3", ".xml", ".json3")):
+                    try: ydl.download([sub_track["webpage_url"]])
+                    except Exception: pass
+                srt_content = _scan_tmp()
+
+                if not srt_content:
+                    for b in detect_installed_cookie_browsers():
                         try:
-                            with open(fp, "r", encoding="utf-8-sig", errors="replace") as sf:
-                                sub_data = sf.read()
-                            conv = convert_vtt_to_srt(sub_data)
-                            if conv and "-->" in conv:
-                                srt_content = conv
-                                break
-                            elif "-->" in sub_data:
-                                srt_content = sub_data
-                                break
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+                            ydl_opts["cookiesfrombrowser"] = (b,)
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                ydl.download([sub_track["webpage_url"]])
+                            srt_content = _scan_tmp()
+                            if srt_content: break
+                        except Exception: pass
+        except Exception: pass
 
     if not srt_content or "-->" not in srt_content:
         return None
@@ -406,9 +391,13 @@ def burn_subtitle_into_video(
             on_log(f"[SUBTITLES] Warning: Failed to prepare UTF-8 BOM SRT: {exc}")
         return False
 
+    vf_primary = f"subtitles=filename={burn_srt_name}:charenc=UTF-8"
+    vf_fallback = f"subtitles={burn_srt_name}"
     cmd = [
-        ffmpeg_path, "-y", "-i", abs_video, "-vf", f"subtitles={burn_srt_name}",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-c:a", "copy", "-f", "mp4", temp_burn_mp4
+        ffmpeg_path, "-y", "-i", abs_video, "-vf", vf_primary,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-c:a", "copy", "-f", "mp4", temp_burn_mp4
     ]
 
     p: Optional[subprocess.Popen] = None
@@ -453,6 +442,14 @@ def burn_subtitle_into_video(
 
     try:
         rc, err = _run_burn_cmd(cmd)
+        if rc != 0 and not (cancel_event and cancel_event.is_set()):
+            cmd_alt = list(cmd)
+            try:
+                vf_idx = cmd_alt.index("-vf")
+                cmd_alt[vf_idx + 1] = vf_fallback
+            except ValueError: pass
+            rc, err = _run_burn_cmd(cmd_alt)
+            if rc == 0: cmd = cmd_alt
         if rc != 0 and not (cancel_event and cancel_event.is_set()):
             if on_log:
                 on_log("[SUBTITLES] Burn with -c:a copy failed; retrying with audio transcode (-c:a aac)...")

@@ -641,7 +641,8 @@ Hello world from <i>smart</i> download!
                 vf_idx = captured_cmd.index("-vf")
                 self.assertIn("subtitles=", captured_cmd[vf_idx + 1])
                 self.assertIn("_sd_burn_", captured_cmd[vf_idx + 1])
-                self.assertTrue(captured_cmd[vf_idx + 1].endswith(".srt"))
+                self.assertIn(".srt", captured_cmd[vf_idx + 1])
+                self.assertIn("charenc=UTF-8", captured_cmd[vf_idx + 1])
                 self.assertIn("-c:v", captured_cmd)
                 self.assertIn("libx264", captured_cmd)
                 self.assertIn("-preset", captured_cmd)
@@ -708,8 +709,8 @@ Hello world from <i>smart</i> download!
                 ok = burn_subtitle_into_video(video_path, srt_path, "ffmpeg")
                 self.assertTrue(ok)
                 vf_arg = captured_cmd[captured_cmd.index("-vf") + 1]
-                self.assertTrue(vf_arg.startswith("subtitles=_sd_burn_") and vf_arg.endswith(".srt"))
-                self.assertNotIn("charenc=", vf_arg)
+                self.assertTrue(vf_arg.startswith("subtitles=") and "_sd_burn_" in vf_arg)
+                self.assertIn("charenc=UTF-8", vf_arg)
                 # Temporary srt copy must be cleaned up in finally block
                 temp_files = [f for f in os.listdir(tmpdir) if f.startswith("_sd_burn_")]
                 self.assertEqual(len(temp_files), 0)

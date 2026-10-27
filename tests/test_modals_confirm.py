@@ -587,7 +587,7 @@ class TestTDMConfirmationAndStandaloneProgress(unittest.TestCase):
             modal._on_open_in_main()
             self.assertEqual(len(opened_in_main), 1)
             self.assertEqual(opened_in_main[0][0], opt1)
-            self.assertEqual(opened_in_main[0][1], "C:\\Downloads\\Test Video Title.mp4")
+            self.assertEqual(opened_in_main[0][1], "C:\\Downloads\\Test Video Title [1080p].mp4")
         finally:
             try:
                 if modal.winfo_exists():

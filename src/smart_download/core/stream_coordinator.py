@@ -270,24 +270,26 @@ class StreamDownloadCoordinator:
                                     pass
                             final_sz = os.path.getsize(self.destination_path)
                             self.log(f"[SUCCESS] Audio converted to MP3 successfully ({final_sz:,} bytes)!")
+                            with self._lock:
+                                self._is_running = False
                             if self.on_complete:
                                 self.on_complete(self.destination_path, final_sz, elapsed)
                         except Exception as ex:
                             if os.path.exists(actual_dest):
-                                try:
-                                    os.remove(actual_dest)
-                                except Exception:
-                                    pass
+                                try: os.remove(actual_dest)
+                                except Exception: pass
                             if os.path.exists(self.destination_path):
-                                try:
-                                    os.remove(self.destination_path)
-                                except Exception:
-                                    pass
+                                try: os.remove(self.destination_path)
+                                except Exception: pass
+                            with self._lock:
+                                self._is_running = False
                             if self.on_error:
                                 self.on_error(f"MP3 transcoding error: {ex}")
                     else:
                         self._process_subtitles(path)
                         final_sz = os.path.getsize(path) if os.path.isfile(path) else size
+                        with self._lock:
+                            self._is_running = False
                         if self.on_complete:
                             self.on_complete(path, final_sz, elapsed)
 
@@ -303,6 +305,10 @@ class StreamDownloadCoordinator:
                     if self.on_progress:
                         self.on_progress(downloaded, total, speed, eta, active)
 
+                def _on_single_error(err):
+                    with self._lock: self._is_running = False
+                    if self.on_error: self.on_error(err)
+
                 engine = TurboDownloadEngine(
                     url=self.stream_info.video_url,
                     destination_path=actual_dest,
@@ -315,7 +321,7 @@ class StreamDownloadCoordinator:
                     on_chunk_update=self.on_chunk_update,
                     on_log=self.on_log,
                     on_complete=_on_single_complete,
-                    on_error=self.on_error
+                    on_error=_on_single_error
                 )
                 with self._lock:
                     self.current_engine = engine
@@ -497,17 +503,17 @@ class StreamDownloadCoordinator:
             elapsed = max(0.01, time.time() - self.start_time)
             final_size = os.path.getsize(self.destination_path) if os.path.isfile(self.destination_path) else combined_total
             self.log(f"[SUCCESS] {plat} media assembled & merged successfully ({final_size:,} bytes in {elapsed:.1f}s)!")
-
+            with self._lock:
+                self._is_running = False
             if self.on_complete:
                 self.on_complete(self.destination_path, final_size, elapsed)
 
         except Exception as e:
             has_error = True
-            plat = getattr(self.stream_info, "platform", "Media")
-            tag = plat.upper().replace(" / X", "")
+            tag = getattr(self.stream_info, "platform", "Media").upper().replace(" / X", "")
             self.log(f"[{tag} ERROR] {e}")
-            if self.on_error:
-                self.on_error(str(e))
+            with self._lock: self._is_running = False
+            if self.on_error: self.on_error(str(e))
         finally:
             with self._lock:
                 self._is_running = False

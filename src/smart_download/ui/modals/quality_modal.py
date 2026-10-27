@@ -488,7 +488,14 @@ class QualitySelectionModal(tk.Toplevel):
         if not self.selected_option:
             return
         self._attach_selected_tracks()
-        final_dest = self.entry_dest.get().strip() or self.dest_path
+        is_sub_burned = getattr(self.selected_option, "subtitle_embed_mode", "") == "hard_burn"
+        res_lbl = str(getattr(self.selected_option, "resolution_label", "") or "")
+        import re
+        has_tag = bool(re.search(r'(\d{3,4}p|4K|8K|Audio|MP3|M4A)', res_lbl, re.IGNORECASE))
+        if has_tag or ("[" in (self.dest_path or "")) or ("[" in (self.entry_dest.get() or "")) or is_sub_burned:
+            final_dest = self._resolve_final_dest()
+        else:
+            final_dest = self.entry_dest.get().strip() or self.dest_path
         self._confirmed = True
         try: self.grab_release()
         except Exception: pass
