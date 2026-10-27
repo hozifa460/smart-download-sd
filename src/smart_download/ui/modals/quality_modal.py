@@ -1,30 +1,32 @@
 """
 QualitySelectionModal: Interactive video/audio resolution and stream format picker.
+Includes compact embedded preview banner and support for unified VidMate-style preview.
 """
 import os
 import sys
 import tkinter as tk
 from tkinter import ttk, filedialog
 from typing import Optional, Callable, Dict, Any, List
-try:
-    from PIL import Image, ImageTk
-except ImportError:
-    Image = None
-    ImageTk = None
 
 from ...config import get_resource_path
 from ...locales.i18n import tr
 from ...utils.file_ops import (
     CATEGORY_SUBFOLDERS,
     resolve_categorized_path,
-    generate_unique_destination_path,
     apply_media_filename_tags,
 )
-from ...services.youtube_service import VideoFormatOption, format_filesize, sanitize_filename
+from ...services.youtube_service import VideoFormatOption, format_filesize
 from ...utils.tk_helpers import _detach_photo_tk, animate_window_open, animate_window_close
+from .quality_modal_helpers import (
+    attach_selected_tracks_to_option,
+    resolve_final_dest,
+    build_preview_header_banner,
+)
+
 
 class QualitySelectionModal(tk.Toplevel):
     """Modern dark-themed modal dialog for choosing video quality, audio dubbing, and subtitle options."""
+
     def __init__(
         self,
         parent: tk.Tk,
@@ -64,47 +66,60 @@ class QualitySelectionModal(tk.Toplevel):
         self.title(tr("modal_quality_title", "Select Video Quality — Smart Download"))
         self.configure(bg=self.theme["c_bg"])
 
-        try: dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
-        except Exception: dpi = 96.0
+        try:
+            dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
+        except Exception:
+            dpi = 96.0
         dpi_scale = max(1.0, dpi / 96.0)
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         dlg_w, dlg_h = min(int(740 * dpi_scale), max(640, int(sw * 0.92))), min(int(620 * dpi_scale), max(520, int(sh * 0.88)))
 
         is_p_vis = False
-        try: is_p_vis = bool(parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal")
-        except Exception: pass
+        try:
+            is_p_vis = bool(parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal")
+        except Exception:
+            pass
         if is_p_vis:
             try:
                 self.transient(parent)
                 px, py = parent.winfo_x(), parent.winfo_y()
                 pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
                 x, y = max(0, px + (pw - dlg_w) // 2), max(0, py + (ph - dlg_h) // 2)
-            except Exception: x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
+            except Exception:
+                x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
         else:
-            try: self.transient(""); self.deiconify()
-            except Exception: pass
+            try:
+                self.transient("")
+                self.deiconify()
+            except Exception:
+                pass
             x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
         self.minsize(min(640, dlg_w), min(520, dlg_h))
 
         ico_path, png_path = get_resource_path("app_icon.ico"), get_resource_path("app_icon.png")
         if os.path.isfile(ico_path):
-            try: self.iconbitmap(ico_path)
-            except Exception: pass
+            try:
+                self.iconbitmap(ico_path)
+            except Exception:
+                pass
         if os.path.isfile(png_path):
             try:
                 from PIL import ImageTk
                 self._modal_icon_photo = ImageTk.PhotoImage(file=png_path)
                 self.iconphoto(True, self._modal_icon_photo)
-            except Exception: pass
+            except Exception:
+                pass
 
         self._topmost_job = None
         self._idle_job = None
         try:
-            self.lift(); self.attributes("-topmost", True)
+            self.lift()
+            self.attributes("-topmost", True)
             self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
             self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
-        except Exception: pass
+        except Exception:
+            pass
 
         self._build_ui()
         animate_window_open(self, duration_ms=130)
@@ -128,15 +143,16 @@ class QualitySelectionModal(tk.Toplevel):
         lbl_head = tk.Label(body, text=tr("modal_quality_header", "🎥 SELECT VIDEO RESOLUTION & QUALITY"), font=("Segoe UI", 11, "bold"), bg=c_bg, fg=c_accent)
         lbl_head.pack(anchor="w", pady=(0, 6))
 
-        card_info = tk.Frame(body, bg=c_panel, padx=12, pady=10, relief="flat", highlightbackground=c_border, highlightthickness=1)
-        card_info.pack(fill=tk.X, pady=(0, 10))
-
-        title_display = self.video_title if len(self.video_title) <= 90 else self.video_title[:87] + "..."
-        tk.Label(card_info, text=title_display, font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright, anchor="w", justify="left").pack(fill=tk.X)
-
-        dur_mins, dur_secs = self.duration // 60, self.duration % 60
-        dur_str = f"{dur_mins:02d}:{dur_secs:02d}" if self.duration > 0 else "Live / Unknown"
-        tk.Label(card_info, text=f"Duration: {dur_str}  •  Formats Detected: {len(self.options)}", font=("Segoe UI", 8), bg=c_panel, fg=c_text_muted, anchor="w").pack(fill=tk.X, pady=(2, 0))
+        # Compact embedded Preview Header Banner
+        self.card_info, self.btn_banner_preview = build_preview_header_banner(
+            parent_frame=body,
+            theme=self.theme,
+            video_title=self.video_title,
+            duration=self.duration,
+            options_count=len(self.options),
+            video_url=self.video_url,
+            on_preview_cmd=self._on_preview_video
+        )
 
         table_frame = tk.Frame(body, bg=c_panel, highlightbackground=c_border, highlightthickness=1)
         table_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
@@ -154,13 +170,11 @@ class QualitySelectionModal(tk.Toplevel):
             self.tree.heading(col, text=txt, anchor=anc)
             self.tree.column(col, width=w, anchor=anc)
 
-        # Scrollbar
         scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Populate rows
         self._row_to_opt: Dict[str, VideoFormatOption] = {}
         for idx, opt in enumerate(self.options):
             iid = f"opt_{idx}"
@@ -185,7 +199,6 @@ class QualitySelectionModal(tk.Toplevel):
                 body, self.theme, self.audio_tracks, self.subtitle_tracks
             )
 
-        # Destination path card
         card_dest = tk.Frame(body, bg=c_panel, padx=12, pady=8, highlightbackground=c_border, highlightthickness=1)
         card_dest.pack(fill=tk.X, pady=(0, 12))
 
@@ -361,7 +374,6 @@ class QualitySelectionModal(tk.Toplevel):
             return
         self.selected_option = opt
 
-        # Dynamically adjust filename extension and tags in the destination entry
         cur_path = self.entry_dest.get().strip()
         target_path = cur_path or self.dest_path
         if target_path:
@@ -379,12 +391,7 @@ class QualitySelectionModal(tk.Toplevel):
             parent_base = os.path.basename(os.path.normpath(parent_dir)) if parent_dir else ""
             subfolders_lower = {v.lower() for v in CATEGORY_SUBFOLDERS.values()}
             if parent_base in CATEGORY_SUBFOLDERS.values() or parent_base.lower() in subfolders_lower:
-                updated_dest = resolve_categorized_path(
-                    parent_dir,
-                    os.path.basename(updated_dest),
-                    auto_categorize=True,
-                    create_dir=False
-                )
+                updated_dest = resolve_categorized_path(parent_dir, os.path.basename(updated_dest), auto_categorize=True, create_dir=False)
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, updated_dest)
             if self.dest_path:
@@ -394,60 +401,16 @@ class QualitySelectionModal(tk.Toplevel):
         cur = self.entry_dest.get().strip()
         init_dir = os.path.dirname(cur) if cur else os.path.expanduser("~")
         init_file = os.path.basename(cur) if cur else "download.mp4"
-        chosen = filedialog.asksaveasfilename(
-            parent=self,
-            title="Save Video As",
-            initialdir=init_dir,
-            initialfile=init_file
-        )
+        chosen = filedialog.asksaveasfilename(parent=self, title="Save Video As", initialdir=init_dir, initialfile=init_file)
         if chosen:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, chosen)
 
     def _attach_selected_tracks(self):
-        if not self.selected_option:
-            return
-        if self.audio_tracks and self.cb_audio:
-            idx = self.cb_audio.current()
-            if 0 <= idx < len(self.audio_tracks):
-                self.selected_option.selected_audio_track = self.audio_tracks[idx]
-        sub_mode = "soft_embed"
-        if hasattr(self, "cb_sub") and self.cb_sub:
-            mode_fn = getattr(self.cb_sub, "get_selected_mode", None)
-            sub_mode = mode_fn() if callable(mode_fn) else getattr(self.cb_sub, "_selected_mode", "soft_embed")
-        self.selected_option.subtitle_embed_mode = sub_mode or "soft_embed"
-        if self.subtitle_tracks and self.cb_sub:
-            idx = self.cb_sub.current()
-            if idx <= 0 and len(self.subtitle_tracks) > 1 and (sub_mode == "hard_burn" or getattr(self.cb_sub, "_user_touched_mode", False)):
-                ar_idx = next((i for i, s in enumerate(self.subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
-                idx = ar_idx if ar_idx is not None else 1
-                try: self.cb_sub.current(idx)
-                except Exception: pass
-            if 0 <= idx < len(self.subtitle_tracks):
-                self.selected_option.selected_subtitle_track = self.subtitle_tracks[idx]
+        attach_selected_tracks_to_option(self.selected_option, self.audio_tracks, self.cb_audio, self.subtitle_tracks, self.cb_sub)
 
     def _resolve_final_dest(self) -> str:
-        final_dest = self.entry_dest.get().strip()
-        if not final_dest:
-            if self.dest_path:
-                base, _ = os.path.splitext(self.dest_path)
-                final_dest = f"{base}.{self.selected_option.ext}"
-            else:
-                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-                clean_title = sanitize_filename(self.video_title)
-                final_dest = os.path.join(downloads_dir, f"{clean_title}.{self.selected_option.ext}")
-
-        if self.selected_option:
-            is_sub_burned = getattr(self.selected_option, "subtitle_embed_mode", "") == "hard_burn"
-            final_dest = apply_media_filename_tags(
-                final_dest,
-                quality_label=self.selected_option.resolution_label,
-                is_sub_burned=is_sub_burned,
-                ext=self.selected_option.ext
-            )
-        hm = getattr(self.parent_app, "history_manager", None) or getattr(self.master, "history_manager", None)
-        reserved = hm.get_active_or_queued_paths() if hm else None
-        return generate_unique_destination_path(final_dest, reserved_paths=reserved)
+        return resolve_final_dest(self.entry_dest, self.dest_path, self.video_title, self.selected_option, self.parent_app, self.master)
 
     def _on_download(self):
         if not self.selected_option:
@@ -462,7 +425,7 @@ class QualitySelectionModal(tk.Toplevel):
         self.on_confirm(self.selected_option, final_dest)
 
     def _on_preview_video(self):
-        """Launches in-app VidMate-style preview with live subtitle track."""
+        """Launches in-app VidMate-style preview with live dubbing, subtitles, and control bridge."""
         if not self.selected_option:
             return
         self._attach_selected_tracks()
@@ -471,6 +434,13 @@ class QualitySelectionModal(tk.Toplevel):
             idx = self.cb_sub.current()
             if 0 <= idx < len(self.subtitle_tracks):
                 sel_sub = self.subtitle_tracks[idx]
+
+        sel_audio = getattr(self.selected_option, "selected_audio_track", None)
+        if not sel_audio and hasattr(self, "cb_audio") and self.cb_audio and self.audio_tracks:
+            idx = self.cb_audio.current()
+            if 0 <= idx < len(self.audio_tracks):
+                sel_audio = self.audio_tracks[idx]
+
         try:
             from .video_preview_modal import open_video_preview
             open_video_preview(
@@ -480,10 +450,25 @@ class QualitySelectionModal(tk.Toplevel):
                 stream_info=self.selected_option,
                 info_dict=self.raw_info,
                 selected_sub_track=sel_sub,
-                theme=self.theme
+                theme=self.theme,
+                selected_audio_track=sel_audio,
+                options=self.options,
+                audio_tracks=self.audio_tracks,
+                subtitle_tracks=self.subtitle_tracks,
+                default_dest_path=self.entry_dest.get().strip() or self.dest_path,
+                on_confirm=self.on_confirm,
+                on_open_in_main=self.on_open_in_main,
+                on_cancel=self.on_cancel,
+                parent_app=self.parent_app,
+                modal_ref=self,
+                use_bridge=True,
             )
         except Exception:
             pass
+
+    def launch_unified_preview(self):
+        """Public helper to launch the unified preview and settings interface directly."""
+        self._on_preview_video()
 
     def _on_open_in_main(self):
         if not self.selected_option:

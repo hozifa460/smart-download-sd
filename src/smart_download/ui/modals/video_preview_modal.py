@@ -1,14 +1,13 @@
 """
-VidMate-Style In-App Video Preview Modal (Stage 10 / Stage 8.2).
+VidMate-Style In-App Video Preview Modal (video_preview_modal.py).
 Provides hardware-accelerated chromeless native preview with live WebVTT subtitles,
-progressive MP4 direct stream playback, and seamless web/embed fallback.
+synchronized live audio dubbing, progressive MP4 direct stream playback,
+and seamless web/embed fallback.
 """
 import os
 import re
 import sys
-import html
 import time
-import json
 import base64
 import tempfile
 import shutil
@@ -17,7 +16,7 @@ import webbrowser
 from typing import Dict, List, Optional, Any, Callable
 
 from ...locales.i18n import tr
-from ...services.subtitle_processor import download_subtitle_as_srt
+from .preview_html_builder import generate_preview_html
 
 IS_WINDOWS = sys.platform.startswith("win")
 
@@ -72,7 +71,6 @@ def _find_progressive_mp4_url(
     source_url: str = ""
 ) -> Optional[str]:
     """Finds direct playable progressive MP4 stream (e.g. format 18/22 or direct URL)."""
-    # 1. Check stream_info object (VideoFormatOption / YouTubeStreamInfo)
     if stream_info is not None:
         url_val = getattr(stream_info, "video_url", None) or getattr(stream_info, "url", None)
         is_prog = getattr(stream_info, "is_progressive", False)
@@ -80,7 +78,6 @@ def _find_progressive_mp4_url(
         if url_val and is_prog and str(ext_val).lower() == "mp4":
             return str(url_val)
 
-    # 2. Check info_dict formats for fast progressive MP4 (formats 18, 22)
     if isinstance(info_dict, dict):
         formats = info_dict.get("formats") or []
         prog_formats = [
@@ -94,7 +91,6 @@ def _find_progressive_mp4_url(
             chosen = fast_candidates[0] if fast_candidates else prog_formats[0]
             return str(chosen.get("url") or "")
 
-    # 3. Direct source_url check
     clean_u = (source_url or "").split("?")[0].lower()
     if clean_u.endswith((".mp4", ".m4v", ".webm")):
         return source_url
@@ -106,218 +102,11 @@ def _convert_srt_to_vtt_data_uri(srt_content: str) -> Optional[str]:
     """Converts raw SRT text into a base64 data:text/vtt URI for HTML5 <track>."""
     if not srt_content or "-->" not in srt_content:
         return None
-    # Change comma in timestamps to period
     vtt_body = re.sub(r'(\d{2}:\d{2}:\d{2}),(\d{3})', r'\1.\2', srt_content.strip())
-    # Ensure WEBVTT header
     if not vtt_body.startswith("WEBVTT"):
         vtt_body = "WEBVTT\n\n" + vtt_body
     b64 = base64.b64encode(vtt_body.encode("utf-8")).decode("ascii")
     return f"data:text/vtt;charset=utf-8;base64,{b64}"
-
-
-def generate_preview_html(
-    url: str,
-    video_title: str,
-    stream_url: Optional[str] = None,
-    vtt_data_uri: Optional[str] = None,
-    video_id: Optional[str] = None,
-    sub_label: Optional[str] = None,
-    quality_label: Optional[str] = None,
-    sub_lang: str = "ar"
-) -> str:
-    """Generates standalone modern dark-themed HTML5 preview player with live WebVTT subtitles."""
-    safe_title = html.escape(video_title or "Video Preview")
-    safe_stream = html.escape(stream_url or "")
-    safe_sub_label = html.escape(sub_label or "Subtitles")
-    safe_quality = html.escape(quality_label or ("MP4 Stream" if stream_url else "Web Player"))
-    safe_sub_lang = html.escape((sub_lang or "ar").split("-")[0].split("_")[0])
-
-    if video_id:
-        embed_src = f"https://www.youtube.com/embed/{video_id}?autoplay=1&cc_load_policy=1&cc_lang_pref={safe_sub_lang}&hl={safe_sub_lang}"
-    else:
-        embed_src = url
-    embed_src_json = json.dumps(embed_src)
-
-    has_stream_js = "true" if stream_url else "false"
-    track_html = ""
-    if vtt_data_uri:
-        track_html = f'<track label="{safe_sub_label}" kind="subtitles" srclang="{safe_sub_lang}" src="{vtt_data_uri}" default>'
-
-    sub_badge_html = ""
-    if vtt_data_uri:
-        sub_badge_html = f'<span class="badge badge-sub">💬 {safe_sub_label}</span>'
-    else:
-        sub_badge_html = '<span class="badge badge-dim">💬 No Subtitles</span>'
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{safe_title} — Smart Download Preview</title>
-    <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{
-            background: #090d16;
-            color: #f1f5f9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            user-select: none;
-        }}
-        .header {{
-            background: #131a29;
-            height: 52px;
-            padding: 0 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid #1e293b;
-            flex-shrink: 0;
-            gap: 12px;
-        }}
-        .title-group {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            overflow: hidden;
-            flex: 1;
-        }}
-        .title {{
-            font-size: 14px;
-            font-weight: 600;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            color: #f8fafc;
-        }}
-        .badge {{
-            font-size: 11px;
-            font-weight: 600;
-            padding: 3px 8px;
-            border-radius: 9999px;
-            white-space: nowrap;
-        }}
-        .badge-res {{ background: #0284c7; color: #ffffff; }}
-        .badge-sub {{ background: #059669; color: #ffffff; }}
-        .badge-dim {{ background: #334155; color: #94a3b8; }}
-        .actions {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }}
-        .btn {{
-            background: #1e293b;
-            color: #38bdf8;
-            border: 1px solid #334155;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            white-space: nowrap;
-        }}
-        .btn:hover {{
-            background: #0284c7;
-            color: #ffffff;
-            border-color: #0284c7;
-        }}
-        .player-container {{
-            flex: 1;
-            position: relative;
-            background: #000000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-        }}
-        video, iframe {{
-            width: 100%;
-            height: 100%;
-            border: none;
-            outline: none;
-            background: #000000;
-        }}
-        ::cue {{
-            background-color: rgba(0, 0, 0, 0.75);
-            color: #ffffff;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            font-size: 18px;
-            font-weight: 600;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.9);
-            line-height: 1.4;
-        }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="title-group">
-            <span class="badge badge-res">🎞️ {safe_quality}</span>
-            {sub_badge_html}
-            <span class="title" title="{safe_title}">🎬 {safe_title}</span>
-        </div>
-        <div class="actions">
-            <button id="toggleBtn" class="btn" onclick="togglePlayer()">🌐 Switch to Web Player</button>
-        </div>
-    </div>
-    <div class="player-container">
-        <video id="videoEl" src="{safe_stream}" controls autoplay playsinline style="display: {'block' if stream_url else 'none'};">
-            {f'<source src="{safe_stream}" type="video/mp4">' if stream_url else ''}
-            {track_html}
-        </video>
-        <iframe id="iframeEl" src="{'about:blank' if stream_url else embed_src}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen style="display: {'none' if stream_url else 'block'};"></iframe>
-    </div>
-    <script>
-        const hasStream = {has_stream_js};
-        const embedUrl = {embed_src_json};
-        const videoEl = document.getElementById("videoEl");
-        const iframeEl = document.getElementById("iframeEl");
-        const toggleBtn = document.getElementById("toggleBtn");
-        let isUsingVideo = hasStream;
-
-        function updateUI() {{
-            if (isUsingVideo) {{
-                videoEl.style.display = "block";
-                iframeEl.style.display = "none";
-                toggleBtn.textContent = "🌐 Switch to Web Player / المشغل المدمج";
-                try {{ videoEl.play(); }} catch (e) {{}}
-            }} else {{
-                try {{ videoEl.pause(); }} catch (e) {{}}
-                videoEl.style.display = "none";
-                iframeEl.style.display = "block";
-                if (!iframeEl.src || iframeEl.src === "about:blank") {{
-                    iframeEl.src = embedUrl;
-                }}
-                toggleBtn.textContent = "🎞️ Switch to Direct Stream / المشغل المباشر";
-            }}
-        }}
-
-        function togglePlayer() {{
-            if (!hasStream && isUsingVideo) return;
-            isUsingVideo = !isUsingVideo;
-            updateUI();
-        }}
-
-        function handleVideoError() {{
-            console.warn("[SD Preview] Direct stream failed to load; falling back to Web Embed player.");
-            isUsingVideo = false;
-            updateUI();
-        }}
-
-        if (videoEl) {{
-            videoEl.addEventListener("error", handleVideoError);
-            const sourceEl = videoEl.querySelector("source");
-            if (sourceEl) {{
-                sourceEl.addEventListener("error", handleVideoError);
-            }}
-        }}
-    </script>
-</body>
-</html>
-"""
 
 
 def open_video_preview(
@@ -329,32 +118,89 @@ def open_video_preview(
     selected_sub_track: Optional[Dict[str, Any]] = None,
     theme: Optional[Dict[str, str]] = None,
     on_log: Optional[Callable[[str], None]] = None,
-    selected_audio_track: Optional[Dict[str, Any]] = None
+    selected_audio_track: Optional[Dict[str, Any]] = None,
+    options: Optional[List[Any]] = None,
+    audio_tracks: Optional[List[Dict[str, Any]]] = None,
+    subtitle_tracks: Optional[List[Dict[str, Any]]] = None,
+    default_dest_path: str = "",
+    on_confirm: Optional[Callable[[Any, str], None]] = None,
+    on_open_in_main: Optional[Callable[[Any, str], None]] = None,
+    on_cancel: Optional[Callable[[], None]] = None,
+    parent_app: Optional[Any] = None,
+    modal_ref: Optional[Any] = None,
+    use_bridge: bool = True
 ) -> str:
     """
-    Builds and opens a real, VidMate-style video preview with live WebVTT subtitles
-    in a dedicated chromeless native desktop window.
+    Builds and opens a real, VidMate-style video preview with synchronized live audio dubbing,
+    asynchronous subtitles, and interactive format picker in a chromeless native window.
     """
     clean_url = str(url or "").strip()
     title = str(video_title or "Video Preview").strip()
     if on_log:
         on_log(f"[PREVIEW] Preparing video preview for: {title[:40]}...")
 
-    # 1. Direct progressive MP4 stream
     stream_url = _find_progressive_mp4_url(stream_info, info_dict, source_url=clean_url)
 
-    # 2. Extract video ID for YouTube embed
     yt_match = re.search(r'(?:v=|\/|youtu\.be\/|embed\/)([0-9A-Za-z_-]{11})', clean_url)
     video_id = yt_match.group(1) if yt_match else (info_dict.get("id") if isinstance(info_dict, dict) else None)
 
-    # 3. Process subtitles if selected
+    # Subtitle metadata
     vtt_data_uri = None
     sub_label = None
     sub_lang = "ar"
     if selected_sub_track and selected_sub_track.get("sub_id") not in (None, "none"):
         sub_label = selected_sub_track.get("label") or selected_sub_track.get("language") or "Subtitles"
         sub_lang = (selected_sub_track.get("language") or "ar").split("-")[0].split("_")[0] or "ar"
+
+    # Audio dubbing metadata
+    dub_audio_url = None
+    audio_label = None
+    if selected_audio_track and selected_audio_track.get("track_id") != "original":
+        dub_audio_url = selected_audio_track.get("url")
+        audio_label = selected_audio_track.get("label") or selected_audio_track.get("language")
+
+    # Determine quality badge
+    quality_label = getattr(stream_info, "resolution_label", None) if stream_info else None
+    if not quality_label and stream_url:
+        quality_label = "Direct MP4"
+    elif not quality_label:
+        quality_label = "Web Player"
+
+    # Set up preview bridge session
+    sid = None
+    port = None
+    target_launch_url = None
+    if use_bridge:
         try:
+            from ...services.preview_stream_bridge import register_preview_session, get_preview_bridge_port
+            port = get_preview_bridge_port()
+            sid = register_preview_session(
+                url=clean_url,
+                video_title=title,
+                info_dict=info_dict,
+                options=options or ([stream_info] if stream_info else []),
+                audio_tracks=audio_tracks or ([selected_audio_track] if selected_audio_track else []),
+                subtitle_tracks=subtitle_tracks or ([selected_sub_track] if selected_sub_track else []),
+                default_dest_path=default_dest_path,
+                on_confirm=on_confirm,
+                on_open_in_main=on_open_in_main,
+                on_cancel=on_cancel,
+                parent_app=parent_app,
+                modal_ref=modal_ref,
+            )
+            target_launch_url = f"http://127.0.0.1:{port}/player?sid={sid}"
+            if not stream_url:
+                stream_url = f"http://127.0.0.1:{port}/stream_video?sid={sid}&q_idx=0"
+            if dub_audio_url and not dub_audio_url.startswith("http://127.0.0.1"):
+                dub_audio_url = f"http://127.0.0.1:{port}/stream_audio?sid={sid}&a_idx=1"
+        except Exception as exc:
+            if on_log:
+                on_log(f"[PREVIEW] Note: Local bridge setup skipped: {exc}")
+
+    # Fallback to synchronous subtitle conversion ONLY when not using bridge
+    if not sid and selected_sub_track and selected_sub_track.get("sub_id") not in (None, "none"):
+        try:
+            from ...services.subtitle_downloader import download_subtitle_as_srt
             temp_sub_stem = os.path.join(tempfile.gettempdir(), f"_sd_prev_{os.getpid()}_{int(time.time()*1000)}")
             srt_path = download_subtitle_as_srt(selected_sub_track, f"{temp_sub_stem}.mp4")
             if srt_path and os.path.isfile(srt_path):
@@ -363,22 +209,10 @@ def open_video_preview(
                 vtt_data_uri = _convert_srt_to_vtt_data_uri(srt_text)
                 try: os.remove(srt_path)
                 except Exception: pass
-                try:
-                    def_srt = f"{temp_sub_stem}.srt"
-                    if os.path.exists(def_srt): os.remove(def_srt)
-                except Exception: pass
-        except Exception as exc:
-            if on_log:
-                on_log(f"[PREVIEW] Note: Subtitle overlay conversion skipped: {exc}")
+        except Exception:
+            pass
 
-    # 4. Determine quality badge
-    quality_label = getattr(stream_info, "resolution_label", None) if stream_info else None
-    if not quality_label and stream_url:
-        quality_label = "Direct MP4"
-    elif not quality_label:
-        quality_label = "Web Player"
-
-    # 5. Generate self-contained HTML
+    # Generate self-contained HTML
     html_content = generate_preview_html(
         url=clean_url,
         video_title=title,
@@ -387,15 +221,26 @@ def open_video_preview(
         video_id=video_id,
         sub_label=sub_label,
         quality_label=quality_label,
-        sub_lang=sub_lang
+        sub_lang=sub_lang,
+        dub_audio_url=dub_audio_url,
+        audio_label=audio_label,
+        selected_audio_track=selected_audio_track,
+        audio_tracks=audio_tracks,
+        options=options,
+        subtitle_tracks=subtitle_tracks,
+        default_dest_path=default_dest_path,
+        sid=sid,
+        bridge_port=port,
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")
     with open(temp_html, "w", encoding="utf-8") as hf:
         hf.write(html_content)
 
-    # 6. Launch Native Window (Zero Tkinter thread deadlocks)
-    # Check pywebview first
+    launch_uri = target_launch_url if (options is not None and target_launch_url) else f"file:///{temp_html.replace(os.sep, '/')}"
+    win_size = "920,720" if options else "860,560"
+
+    # 1. Check pywebview
     pywebview_available = False
     try:
         import webview  # type: ignore
@@ -408,9 +253,10 @@ def open_video_preview(
             if getattr(sys, "frozen", False):
                 cmd = [sys.executable, "--preview-html", temp_html]
             else:
+                w, h = map(int, win_size.split(","))
                 cmd = [
                     sys.executable, "-c",
-                    f"import webview; webview.create_window({repr(title)}, {repr(temp_html)}, width=860, height=560); webview.start()"
+                    f"import webview; webview.create_window({repr(title)}, {repr(launch_uri)}, width={w}, height={h}); webview.start()"
                 ]
             cflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if IS_WINDOWS else 0
             subprocess.Popen(cmd, creationflags=cflags)
@@ -420,12 +266,11 @@ def open_video_preview(
         except Exception:
             pass
 
-    # Launch Chromeless native app window (Edge, Chrome, Brave)
+    # 2. Chromeless native app window (Edge, Chrome, Brave)
     browser_exe = _find_chromeless_browser()
     if browser_exe:
-        file_uri = f"file:///{temp_html.replace(os.sep, '/')}"
-        app_arg = f"--app={file_uri}"
-        cmd = [browser_exe, app_arg, "--window-size=860,560"]
+        app_arg = f"--app={launch_uri}"
+        cmd = [browser_exe, app_arg, f"--window-size={win_size}"]
         try:
             subprocess.Popen(cmd)
             if on_log:
@@ -434,9 +279,9 @@ def open_video_preview(
         except Exception:
             pass
 
-    # Fallback to system default browser
+    # 3. Fallback to system default browser
     try:
-        webbrowser.open(f"file:///{temp_html.replace(os.sep, '/')}")
+        webbrowser.open(launch_uri)
         if on_log:
             on_log("[PREVIEW] Opened preview in default web browser.")
     except Exception as exc:

@@ -92,6 +92,14 @@ from .browser import (
     generate_host_manifest,
     generate_launcher_batch,
 )
+from .preview_stream_bridge import (
+    PreviewSession,
+    start_preview_bridge,
+    get_preview_bridge_port,
+    register_preview_session,
+    get_preview_session,
+    unregister_preview_session,
+)
 
 __all__ = [
     "IS_WINDOWS",
@@ -176,4 +184,10 @@ __all__ = [
     "get_default_extension_origins",
     "generate_host_manifest",
     "generate_launcher_batch",
+    "PreviewSession",
+    "start_preview_bridge",
+    "get_preview_bridge_port",
+    "register_preview_session",
+    "get_preview_session",
+    "unregister_preview_session",
 ]

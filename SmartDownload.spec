@@ -36,6 +36,8 @@ a = Analysis(
     ] + yt_datas,
     hiddenimports=[
         'smart_download',
+        'smart_download.services.preview_stream_bridge',
+        'smart_download.ui.modals.preview_html_builder',
         'updater',
         'youtube_resolver',
         'browser_bridge',

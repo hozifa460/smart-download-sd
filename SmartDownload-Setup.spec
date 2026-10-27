@@ -33,6 +33,8 @@ a = Analysis(
     ],
     hiddenimports=[
         'smart_download',
+        'smart_download.services.preview_stream_bridge',
+        'smart_download.ui.modals.preview_html_builder',
         'win32com',
         'win32com.client',
         'register_browser',

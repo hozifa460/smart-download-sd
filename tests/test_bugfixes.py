@@ -399,5 +399,339 @@ class TestHardenedFFmpeg(unittest.TestCase):
                 self.assertEqual(bin_path, os.path.abspath(__file__))
 
 
+class TestPreviewStreamBridgeAndUnifiedVidMatePlayer(unittest.TestCase):
+    """
+    Comprehensive verification for:
+    - preview_stream_bridge.py loopback endpoints (/player, /subtitle.vtt, /api/update_filename, /api/action)
+    - header-forwarding media stream proxy (/stream_video Range request handling with custom headers)
+    - generate_preview_html live audio dubbing synchronization and Bottom Settings controls
+    - QualitySelectionModal embedded header banner and unified preview integration
+    """
+
+    def setUp(self):
+        from smart_download.services.preview_stream_bridge import start_preview_bridge, get_preview_bridge_port
+        self.port = get_preview_bridge_port()
+        self.base_url = f"http://127.0.0.1:{self.port}"
+
+    def test_preview_stream_bridge_endpoints(self):
+        """Verifies /player, /subtitle.vtt, /api/update_filename, and /api/action over 127.0.0.1."""
+        from smart_download.services.preview_stream_bridge import (
+            register_preview_session,
+            get_preview_session,
+            unregister_preview_session,
+        )
+        from smart_download.services.youtube_models import VideoFormatOption
+        import urllib.request
+        import json
+
+        on_confirm_mock = MagicMock()
+        on_open_in_main_mock = MagicMock()
+        on_cancel_mock = MagicMock()
+
+        opt = VideoFormatOption(
+            format_id="best_1080",
+            resolution_label="1080p (Full HD)",
+            height=1080,
+            ext="mp4",
+            filesize_approx=15_000_000,
+            is_progressive=True,
+            video_url="https://v16-webapp.tiktok.com/video.mp4",
+            video_headers={"Referer": "https://www.tiktok.com/", "User-Agent": "TikTok 1.0"}
+        )
+        audio_tracks = [
+            {"track_id": "original", "label": "Original Audio", "url": ""},
+            {"track_id": "dub-ar", "label": "Arabic Dub", "url": "https://cdn.example.com/audio_ar.m4a", "language": "ar"},
+        ]
+        subtitle_tracks = [
+            {"sub_id": "none", "label": "None"},
+            {"sub_id": "ar-sub", "label": "Arabic [ar]", "url": "https://cdn.example.com/sub_ar.vtt", "language": "ar"},
+        ]
+
+        sid = register_preview_session(
+            url="https://www.tiktok.com/@user/video/9876543210",
+            video_title="TikTok Viral Clip",
+            options=[opt],
+            audio_tracks=audio_tracks,
+            subtitle_tracks=subtitle_tracks,
+            default_dest_path="C:\\Downloads\\video.mp4",
+            on_confirm=on_confirm_mock,
+            on_open_in_main=on_open_in_main_mock,
+            on_cancel=on_cancel_mock,
+        )
+
+        try:
+            # 1. GET /player?sid=<sid>
+            player_url = f"{self.base_url}/player?sid={sid}"
+            with urllib.request.urlopen(player_url, timeout=5) as resp:
+                self.assertEqual(resp.getcode(), 200)
+                ct = resp.headers.get("Content-Type", "")
+                self.assertIn("text/html", ct)
+                content = resp.read().decode("utf-8")
+                self.assertIn("TikTok Viral Clip", content)
+                self.assertIn("1080p (Full HD)", content)
+                self.assertIn("Download Selected Quality", content)
+                self.assertIn("TikTok", content)
+
+            # 2. GET /subtitle.vtt?sid=<sid>&s_idx=1
+            sub_url = f"{self.base_url}/subtitle.vtt?sid={sid}&s_idx=1"
+            # Mock subtitle download
+            def mock_sub_download(track, out_path):
+                srt_path = out_path.replace(".mp4", ".srt")
+                with open(srt_path, "w", encoding="utf-8") as f:
+                    f.write("1\n00:00:01,000 --> 00:00:03,000\nمرحبا بكم في المعاينة\n")
+                return srt_path
+
+            with patch("smart_download.services.preview_stream_bridge.download_subtitle_as_srt", side_effect=mock_sub_download):
+                with urllib.request.urlopen(sub_url, timeout=5) as resp:
+                    self.assertEqual(resp.getcode(), 200)
+                    self.assertIn("text/vtt", resp.headers.get("Content-Type", ""))
+                    vtt_text = resp.read().decode("utf-8")
+                    self.assertTrue(vtt_text.startswith("WEBVTT"))
+                    self.assertIn("00:00:01.000 --> 00:00:03.000", vtt_text)
+                    self.assertIn("مرحبا بكم في المعاينة", vtt_text)
+
+            # Verify in-memory cache
+            sess = get_preview_session(sid)
+            self.assertIsNotNone(sess)
+            self.assertIn(1, sess.cached_subtitles)
+
+            # 3. POST /api/update_filename?sid=<sid>
+            update_url = f"{self.base_url}/api/update_filename?sid={sid}"
+            req_data = json.dumps({"q_idx": 0, "sub_mode": "hard_burn", "current_dest": "C:\\Downloads\\video.mp4"}).encode("utf-8")
+            req = urllib.request.Request(update_url, data=req_data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertEqual(resp.getcode(), 200)
+                data = json.loads(resp.read().decode("utf-8"))
+                self.assertIn("dest_path", data)
+                self.assertIn("[Sub]", data["dest_path"])
+
+            # 4. POST /api/action?sid=<sid> with action="download"
+            action_url = f"{self.base_url}/api/action?sid={sid}"
+            act_data = json.dumps({
+                "action": "download",
+                "q_idx": 0,
+                "a_idx": 1,
+                "s_idx": 1,
+                "sub_mode": "hard_burn",
+                "dest_path": "C:\\Downloads\\video.mp4"
+            }).encode("utf-8")
+            req = urllib.request.Request(action_url, data=act_data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertEqual(resp.getcode(), 200)
+                data = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(data.get("status"), "ok")
+                self.assertEqual(data.get("action"), "download")
+
+            on_confirm_mock.assert_called_once()
+            call_opt, call_dest = on_confirm_mock.call_args[0]
+            self.assertEqual(call_opt.selected_audio_track, audio_tracks[1])
+            self.assertEqual(call_opt.selected_subtitle_track, subtitle_tracks[1])
+            self.assertEqual(call_opt.subtitle_embed_mode, "hard_burn")
+            self.assertIn("[Sub]", call_dest)
+
+            # 5. POST /api/action?sid=<sid> with action="open_in_main"
+            act_data_main = json.dumps({
+                "action": "open_in_main",
+                "q_idx": 0,
+                "a_idx": 0,
+                "s_idx": 0,
+                "sub_mode": "soft_embed",
+                "dest_path": "C:\\Downloads\\video.mp4"
+            }).encode("utf-8")
+            req = urllib.request.Request(action_url, data=act_data_main, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertEqual(resp.getcode(), 200)
+            on_open_in_main_mock.assert_called_once()
+        finally:
+            unregister_preview_session(sid)
+
+    def test_preview_stream_bridge_header_forwarding_proxy(self):
+        """Verifies Range requests and HTTP headers (User-Agent, Referer, Cookie) are forwarded upstream."""
+        from smart_download.services.preview_stream_bridge import register_preview_session, unregister_preview_session
+        from smart_download.services.youtube_models import VideoFormatOption
+        import urllib.request
+
+        opt = VideoFormatOption(
+            format_id="ig_reel",
+            resolution_label="1080p",
+            height=1080,
+            ext="mp4",
+            filesize_approx=4_000_000,
+            is_progressive=True,
+            video_url="https://scontent.cdninstagram.com/v/t50/reel.mp4",
+            video_headers={
+                "User-Agent": "InstagramBot 21.0",
+                "Referer": "https://www.instagram.com/reel/xyz/",
+                "Cookie": "sessionid=test_cookie_123"
+            }
+        )
+
+        sid = register_preview_session(
+            url="https://www.instagram.com/reel/xyz/",
+            video_title="Instagram Reel",
+            options=[opt]
+        )
+
+        try:
+            stream_url = f"{self.base_url}/stream_video?sid={sid}&q_idx=0"
+            _real_urlopen = urllib.request.urlopen
+            captured_requests = []
+
+            def mock_upstream_urlopen(req, **kwargs):
+                url_str = req.full_url if hasattr(req, "full_url") else str(req)
+                if "127.0.0.1" in url_str:
+                    return _real_urlopen(req, **kwargs)
+                captured_requests.append(req)
+                resp = MagicMock()
+                resp.getcode.return_value = 206
+                resp.headers = {
+                    "Content-Type": "video/mp4",
+                    "Content-Range": "bytes 0-1023/4000000",
+                    "Content-Length": "1024",
+                    "Accept-Ranges": "bytes"
+                }
+                resp.read.side_effect = [b"A" * 1024, b""]
+                return resp
+
+            with patch("urllib.request.urlopen", side_effect=mock_upstream_urlopen):
+                client_req = urllib.request.Request(stream_url, headers={"Range": "bytes=0-1023"})
+                with urllib.request.urlopen(client_req, timeout=5) as resp:
+                    self.assertEqual(resp.getcode(), 206)
+                    self.assertEqual(resp.headers.get("Accept-Ranges"), "bytes")
+                    self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "*")
+                    body = resp.read()
+                    self.assertEqual(len(body), 1024)
+
+            self.assertEqual(len(captured_requests), 1)
+            up_req = captured_requests[0]
+            self.assertEqual(up_req.full_url, "https://scontent.cdninstagram.com/v/t50/reel.mp4")
+            self.assertEqual(up_req.get_header("Range"), "bytes=0-1023")
+            self.assertEqual(up_req.get_header("Referer"), "https://www.instagram.com/reel/xyz/")
+            self.assertEqual(up_req.get_header("Cookie"), "sessionid=test_cookie_123")
+            self.assertEqual(up_req.get_header("User-agent"), "InstagramBot 21.0")
+        finally:
+            unregister_preview_session(sid)
+
+    def test_generate_preview_html_audio_dubbing_sync_and_settings(self):
+        """Verifies generate_preview_html renders dub audio element, sync JS, badges, and settings panel."""
+        from smart_download.ui.modals.preview_html_builder import generate_preview_html
+        from smart_download.services.youtube_models import VideoFormatOption
+
+        opt1 = VideoFormatOption(
+            format_id="137", resolution_label="1080p (Full HD)", height=1080,
+            ext="mp4", filesize_approx=25_000_000, fps=60, note="60 FPS • Lossless"
+        )
+        opt2 = VideoFormatOption(
+            format_id="22", resolution_label="720p (HD)", height=720,
+            ext="mp4", filesize_approx=10_000_000, fps=30, note="Standard Progressive"
+        )
+
+        audio_track = {
+            "track_id": "ar-dub",
+            "language": "ar",
+            "label": "العربية (مدبلج)",
+            "url": "https://stream.example.com/dub_ar.m4a"
+        }
+
+        html_out = generate_preview_html(
+            url="https://twitter.com/user/status/123456789",
+            video_title="Twitter X Video",
+            stream_url="https://video.twimg.com/vid.mp4",
+            selected_audio_track=audio_track,
+            options=[opt1, opt2],
+            audio_tracks=[{"track_id": "original", "label": "Original Audio"}, audio_track],
+            subtitle_tracks=[{"sub_id": "none", "label": "No Subtitles"}, {"sub_id": "ar", "label": "Arabic"}],
+            default_dest_path="C:\\Downloads\\tweet.mp4",
+            platform_name="Twitter / X"
+        )
+
+        # 1. Elements verification
+        self.assertIn('<audio id="dubAudioEl"', html_out)
+        self.assertIn('<video id="videoEl"', html_out)
+        self.assertIn('Twitter / X', html_out)
+        self.assertIn('🔊 العربية (مدبلج)', html_out)
+
+        # 2. Synchronization JS logic verification
+        self.assertIn("dubAudioEl.currentTime = videoEl.currentTime", html_out)
+        self.assertIn("videoEl.muted = true", html_out)
+        self.assertIn("0.28", html_out)  # Snap threshold
+        self.assertIn("dubAudioEl.play()", html_out)
+        self.assertIn("dubAudioEl.pause()", html_out)
+        self.assertIn("videoEl.addEventListener(\"volumechange\"", html_out)
+        self.assertIn("videoEl.addEventListener(\"play\"", html_out)
+        self.assertIn("videoEl.addEventListener(\"pause\"", html_out)
+        self.assertIn("videoEl.addEventListener(\"seeking\"", html_out)
+        self.assertIn("videoEl.addEventListener(\"seeked\"", html_out)
+        self.assertIn("videoEl.addEventListener(\"waiting\"", html_out)
+        self.assertIn("videoEl.addEventListener(\"playing\"", html_out)
+        self.assertIn("videoEl.addEventListener(\"ratechange\"", html_out)
+        self.assertIn("videoEl.addEventListener(\"timeupdate\"", html_out)
+
+        # 3. Settings panel verification
+        self.assertIn("table class=\"format-table\"", html_out)
+        self.assertIn("1080p (Full HD)", html_out)
+        self.assertIn("720p (HD)", html_out)
+        self.assertIn("select id=\"audioSelect\"", html_out)
+        self.assertIn("select id=\"subSelect\"", html_out)
+        self.assertIn("select id=\"modeSelect\"", html_out)
+        self.assertIn("input type=\"text\" id=\"destInput\"", html_out)
+        self.assertIn("Download Selected Quality", html_out)
+        self.assertIn("Open in Main Window", html_out)
+
+    def test_quality_modal_embedded_preview_banner(self):
+        """Verifies QualitySelectionModal renders the compact embedded Preview Header Banner and preview button."""
+        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+        from smart_download.services.youtube_models import VideoFormatOption
+        import tkinter as tk
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+        except Exception:
+            self.skipTest("Tkinter display not available")
+
+        try:
+            opt = VideoFormatOption(
+                format_id="22", resolution_label="720p", height=720,
+                ext="mp4", filesize_approx=5000, is_progressive=True,
+                video_url="https://example.com/video.mp4"
+            )
+            theme = {
+                "c_bg": "#000", "c_panel": "#111", "c_panel_light": "#222",
+                "c_border": "#333", "c_accent": "#444", "c_accent_dark": "#555",
+                "c_text_bright": "#fff", "c_text_muted": "#aaa", "c_input_bg": "#000", "c_success": "#0f0"
+            }
+            modal = QualitySelectionModal(
+                parent=root,
+                video_title="Banner Test Video",
+                duration=120,
+                options=[opt],
+                default_dest_path="banner_test.mp4",
+                theme=theme,
+                on_confirm=lambda o, d: None,
+                video_url="https://www.tiktok.com/@user/video/111"
+            )
+
+            # Check banner exists
+            self.assertTrue(hasattr(modal, "card_info"))
+            self.assertTrue(hasattr(modal, "btn_banner_preview"))
+            self.assertIsInstance(modal.btn_banner_preview, tk.Button)
+            self.assertTrue(hasattr(modal, "btn_preview_video"))
+
+            # Test preview launch passes options and callbacks
+            with patch("smart_download.ui.modals.video_preview_modal.open_video_preview") as mock_prev:
+                modal._on_preview_video()
+                mock_prev.assert_called_once()
+                kwargs = mock_prev.call_args[1]
+                self.assertEqual(kwargs.get("options"), [opt])
+                self.assertEqual(kwargs.get("url"), "https://www.tiktok.com/@user/video/111")
+                self.assertEqual(kwargs.get("modal_ref"), modal)
+
+            modal.destroy()
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+
 if __name__ == "__main__":
     unittest.main()
