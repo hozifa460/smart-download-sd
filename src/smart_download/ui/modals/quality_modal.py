@@ -57,13 +57,6 @@ class QualitySelectionModal(tk.Toplevel):
 
         self.selected_option: Optional[VideoFormatOption] = self.options[0] if self.options else None
         self._confirmed = False
-        if self.selected_option and self.dest_path:
-            self.dest_path = apply_media_filename_tags(
-                self.dest_path,
-                quality_label=self.selected_option.resolution_label,
-                is_sub_burned=False,
-                ext=self.selected_option.ext
-            )
 
         self.title(tr("modal_quality_title", "Select Video Quality — Smart Download"))
         self.configure(bg=self.theme["c_bg"])
@@ -495,7 +488,7 @@ class QualitySelectionModal(tk.Toplevel):
         if not self.selected_option:
             return
         self._attach_selected_tracks()
-        final_dest = self._resolve_final_dest()
+        final_dest = self.entry_dest.get().strip() or self.dest_path
         self._confirmed = True
         try: self.grab_release()
         except Exception: pass

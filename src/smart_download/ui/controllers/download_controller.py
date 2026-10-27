@@ -40,7 +40,8 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
         """Queues a download task, starting it immediately if no download is currently running."""
         if not hasattr(self, "_download_queue"):
             self._download_queue = []
-
+        reserved = self.history_manager.get_active_or_queued_paths() if (hasattr(self, "history_manager") and self.history_manager) else None
+        dest = generate_unique_destination_path(dest, reserved_paths=reserved)
         if not (self.engine and getattr(self.engine, "is_running", False)):
             self._start_download_with_engine(url, dest, max_conn, bytes_limit)
         else:
@@ -52,6 +53,8 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                     self._refresh_history_table()
                 except Exception:
                     pass
+
+    enqueue_download = queue_download
 
     def _on_start_download(self, skip_resolver: bool = False):
         if getattr(self, "_is_resolving_start", False):

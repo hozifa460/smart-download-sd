@@ -141,7 +141,7 @@ def generate_unique_destination_path(
 
     reserved_norm = {os.path.normcase(os.path.abspath(p)) for p in (reserved_paths or []) if p}
 
-    def _is_path_occupied(p: str) -> bool:
+    def _is_path_occupied(p: str, is_dest: bool = False) -> bool:
         if not p:
             return False
         try:
@@ -151,7 +151,8 @@ def generate_unique_destination_path(
             pass
         if os.path.exists(p):
             return True
-        if not allow_resume_existing_parts:
+        can_resume = allow_resume_existing_parts and is_dest
+        if not can_resume:
             for suffix in (
                 ".sd_parts",
                 ".tdm_parts",
@@ -164,7 +165,7 @@ def generate_unique_destination_path(
                     return True
         return False
 
-    if not _is_path_occupied(dest_path):
+    if not _is_path_occupied(dest_path, is_dest=True):
         return dest_path
 
     dirname, filename = os.path.split(dest_path)
@@ -181,7 +182,7 @@ def generate_unique_destination_path(
 
     while True:
         candidate = os.path.join(dirname, f"{root_base} ({counter}){ext}")
-        if not _is_path_occupied(candidate):
+        if not _is_path_occupied(candidate, is_dest=False):
             return candidate
         counter += 1
 
@@ -205,7 +206,7 @@ def apply_media_filename_tags(
 
     clean_base = re.sub(r'\s*\[(?:\d{3,4}p|2160p|1440p|1080p|720p|480p|360p|240p|144p|4k|8k|audio|mp3|m4a)\]', '', base, flags=re.IGNORECASE)
     clean_base = re.sub(r'\s*\[sub\]', '', clean_base, flags=re.IGNORECASE)
-    clean_base = re.sub(r'\s*\(\d+\)$', '', clean_base)
+    clean_base = re.sub(r'(\s*\(\d+\))+$', '', clean_base)
     clean_base = clean_base.strip()
 
     q_tag = ""

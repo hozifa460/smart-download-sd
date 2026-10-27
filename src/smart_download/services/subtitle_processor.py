@@ -270,6 +270,8 @@ def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> 
                     "skip_download": True, "quiet": True, "no_warnings": True,
                     "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
                 }
+                if isinstance(sub_track.get("http_headers"), dict) and sub_track["http_headers"]:
+                    ydl_opts["http_headers"] = sub_track["http_headers"]
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([sub_track["webpage_url"]])
                 for fn in os.listdir(tmp_dir):

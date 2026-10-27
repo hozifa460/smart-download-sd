@@ -148,7 +148,8 @@ class TestVersionComparisonAndUnification(unittest.TestCase):
             if os.path.isfile(dist_ext_manifest):
                 with open(dist_ext_manifest, "r", encoding="utf-8") as f:
                     ext_data = json.load(f)
-                self.assertEqual(ext_data.get("version"), "2.0.0")
+                from smart_download.services.updater_service import APP_VERSION
+                self.assertEqual(ext_data.get("version"), APP_VERSION)
                 self.assertEqual(ext_data.get("name"), "Smart Download (SD) Integration")
 
 
