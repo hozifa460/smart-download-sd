@@ -20,6 +20,7 @@ except Exception:
     def tr(key: str, default: str = "") -> str:  # type: ignore
         return default
 
+from .youtube_models import find_ffmpeg_bin
 from .subtitle_processor import (
     ISO_639_2,
     _format_srt_timestamp,
@@ -191,7 +192,7 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
     tracks: List[Dict[str, Any]] = [{
         "sub_id": "none", "language": "none", "label": "None / بدون ترجمة",
         "url": "", "ext": "", "is_auto": False, "fallback_urls": [], "http_headers": {},
-        "webpage_url": webpage_url,
+        "webpage_url": webpage_url, "base_url": "",
     }]
     manual_subs = info.get("subtitles") or {}
     auto_subs = info.get("automatic_captions") or {}
@@ -215,6 +216,24 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
                 continue
             url, ext = res
 
+            base_url = ""
+            if "tlang=" in url:
+                base_url = re.sub(r'([?&])tlang=[^&]*(&|$)', r'\1', url).replace("?&", "?").rstrip("?&")
+            elif not is_auto:
+                base_url = url
+            if not base_url and is_auto:
+                for orig_cand in (str(info.get("language") or "en").lower(), "en"):
+                    if orig_cand in manual_subs:
+                        m_res = _pick_best_sub_url(manual_subs[orig_cand])
+                        if m_res and m_res[0]:
+                            base_url = m_res[0]
+                            break
+                    if not base_url and orig_cand in auto_subs:
+                        a_res = _pick_best_sub_url(auto_subs[orig_cand])
+                        if a_res and a_res[0]:
+                            base_url = a_res[0]
+                            break
+
             fallback_urls: List[str] = []
             sub_headers = dict(base_headers)
             for f in flist:
@@ -236,6 +255,7 @@ def extract_subtitle_tracks(info: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "fallback_urls": fallback_urls,
                 "http_headers": sub_headers,
                 "webpage_url": webpage_url,
+                "base_url": base_url,
             })
 
     def _sub_sort_key(t: Dict[str, Any]) -> Tuple[int, int, str]:
@@ -464,5 +484,6 @@ __all__ = [
     "embed_subtitle_into_mp4",
     "burn_subtitle_into_video",
     "handle_subtitles_post_download",
+    "find_ffmpeg_bin",
     "build_audio_subtitle_row",
 ]

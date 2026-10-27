@@ -205,7 +205,7 @@ def apply_media_filename_tags(
     base, old_ext = os.path.splitext(filename)
 
     clean_base = re.sub(r'\s*\[(?:\d{3,4}p|2160p|1440p|1080p|720p|480p|360p|240p|144p|4k|8k|audio|mp3|m4a)\]', '', base, flags=re.IGNORECASE)
-    clean_base = re.sub(r'\s*\[sub\]', '', clean_base, flags=re.IGNORECASE)
+    clean_base = re.sub(r'\s*\[sub(?:-burned)?\]', '', clean_base, flags=re.IGNORECASE)
     clean_base = re.sub(r'(\s*\(\d+\))+$', '', clean_base)
     clean_base = clean_base.strip()
 

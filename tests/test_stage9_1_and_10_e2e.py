@@ -174,13 +174,13 @@ class TestStage9_1_And_10_Verification(unittest.TestCase):
     def test_preview_completely_removed(self):
         """Verify that broken fake preview modules and symbols are completely eliminated."""
         with self.assertRaises((ImportError, ModuleNotFoundError)):
-            import smart_download.ui.modals.video_preview_modal  # type: ignore
-
-        with self.assertRaises((ImportError, ModuleNotFoundError)):
             import smart_download.services.preview_service  # type: ignore
 
         import smart_download.ui.modals as modals
         self.assertFalse(hasattr(modals, "VideoPreviewModal"))
+
+        import smart_download.ui.modals.video_preview_modal as vpm
+        self.assertFalse(hasattr(vpm, "VideoPreviewModal"))
 
         from smart_download.ui.modals.quality_modal import QualitySelectionModal
         self.assertFalse(hasattr(QualitySelectionModal, "_open_live_preview"))

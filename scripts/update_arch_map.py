@@ -166,6 +166,10 @@ FILE_METADATA: Dict[str, Dict[str, str]] = {
         "responsibility": "Subtitle processing, VTT-to-SRT conversion, FFmpeg soft-muxing, and frame burn-in delivery modes.",
         "when_to_edit": "Edit when modifying subtitle delivery modes (srt_only, soft_embed, hard_burn) or FFmpeg subtitle embedding."
     },
+    "src/smart_download/services/subtitle_downloader.py": {
+        "responsibility": "Subtitle downloading, VTT/XML/JSON parsing, GTX translation, and SRT persistence.",
+        "when_to_edit": "Edit when modifying subtitle fetching, timedtext parsing, or auto-translation fallbacks."
+    },
     "src/smart_download/services/ytdlp_updater.py": {
         "responsibility": "YtDlpAutoUpdater managing dynamic in-process yt-dlp package updates in %APPDATA%.",
         "when_to_edit": "Edit when changing yt-dlp PyPI/GitHub download logic or sys.meta_path finder hooks."
@@ -319,6 +323,10 @@ FILE_METADATA: Dict[str, Dict[str, str]] = {
     "src/smart_download/ui/modals/quality_modal.py": {
         "responsibility": "QualitySelectionModal presenting video resolutions and audio bitrates for media.",
         "when_to_edit": "Edit when modifying media format selection dialog, badges, or treeview."
+    },
+    "src/smart_download/ui/modals/video_preview_modal.py": {
+        "responsibility": "VidMate-style in-app video preview modal with live WebVTT subtitles and chromeless player.",
+        "when_to_edit": "Edit when modifying video preview playback, WebVTT subtitle overlay, or player window launcher."
     },
     "src/smart_download/ui/modals/refresh_modal.py": {
         "responsibility": "RefreshLinkModal prompting for updated download link when a session expires.",

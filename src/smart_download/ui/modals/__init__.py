@@ -9,6 +9,7 @@ from .confirm_modal import (
 from .candidates_modal import MultipleCandidatesModal
 from .refresh_modal import RefreshLinkModal, RefreshLinkDialog
 from .update_modal import AppUpdateModal
+from .video_preview_modal import open_video_preview, generate_preview_html
 
 __all__ = [
     "FetchingLinkToast",
@@ -22,5 +23,7 @@ __all__ = [
     "RefreshLinkModal",
     "RefreshLinkDialog",
     "AppUpdateModal",
+    "open_video_preview",
+    "generate_preview_html",
 ]
 

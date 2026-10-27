@@ -1,21 +1,25 @@
 """
 Subtitle processing, VTT-to-SRT conversion, FFmpeg soft-muxing, and frame burn-in.
-Dedicated service for flexible subtitle delivery modes (Stage 8.1).
+Dedicated service for flexible subtitle delivery modes (Stage 8.1 & Stage 9).
 """
 import os
 import re
 import sys
-import html
 import time
 import subprocess
 import shutil
-import urllib.request
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
-try:
-    import requests
-except ImportError:
-    requests = None
+from .subtitle_downloader import (
+    _format_srt_timestamp,
+    _format_seconds_to_srt,
+    _parse_timestamp_or_seconds,
+    _parse_xml_subtitles_to_srt,
+    _parse_json_subtitles_to_srt,
+    convert_vtt_to_srt,
+    download_subtitle_as_srt,
+    _translate_srt_cues_via_gtx,
+)
 
 try:
     from .youtube_models import find_ffmpeg_bin, detect_installed_cookie_browsers
@@ -26,274 +30,28 @@ except Exception:
 IS_WINDOWS = sys.platform.startswith("win")
 
 ISO_639_2: Dict[str, str] = {
-    "en": "eng", "ar": "ara", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", "pt": "por", "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi", "zh-hans": "chi", "zh-hant": "chi", "hi": "hin", "tr": "tur", "id": "ind", "nl": "nld", "pl": "pol", "vi": "vie", "th": "tha", "sv": "swe", "no": "nor", "da": "dan", "fi": "fin",
+    "en": "eng", "ar": "ara", "es": "spa", "fr": "fra", "de": "deu", "it": "ita", "pt": "por",
+    "ru": "rus", "ja": "jpn", "ko": "kor", "zh": "chi", "zh-hans": "chi", "zh-hant": "chi",
+    "hi": "hin", "tr": "tur", "id": "ind", "nl": "nld", "pl": "pol", "vi": "vie", "th": "tha",
+    "sv": "swe", "no": "nor", "da": "dan", "fi": "fin",
 }
 
 
-def _format_srt_timestamp(ts: str) -> str:
-    """Converts MM:SS.mmm, MM:SS,mmm, HH:MM:SS.mmm, or HH:MM:SS,mmm into standard SRT HH:MM:SS,mmm."""
-    parts = ts.strip().split(":")
-    if len(parts) == 2: h, m, s = "00", parts[0].zfill(2), parts[1]
-    elif len(parts) == 3: h, m, s = parts[0].zfill(2), parts[1].zfill(2), parts[2]
-    else: return ts
-    s = s.replace(",", ".")
-    if "." in s:
-        sec, ms = s.split(".", 1)
-        return f"{h}:{m}:{sec.zfill(2)},{ms[:3].ljust(3, '0')}"
-    return f"{h}:{m}:{s.zfill(2)},000"
-
-
-def _format_seconds_to_srt(seconds: float) -> str:
-    """Formats float seconds into SRT timestamp HH:MM:SS,mmm."""
-    if seconds < 0: seconds = 0.0
-    hrs, mins, secs = int(seconds // 3600), int((seconds % 3600) // 60), int(seconds % 60)
-    ms = int(round((seconds - int(seconds)) * 1000))
-    if ms >= 1000: secs += 1; ms = 0
-    return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
-
-
-def _parse_timestamp_or_seconds(val: str) -> float:
-    """Parses seconds string (e.g. '1.5s', '12.4', '1500ms') or HH:MM:SS.mmm into float seconds."""
-    s = str(val or "").strip().replace(",", ".")
-    if s.lower().endswith("ms"):
-        try: return float(s[:-2].strip()) / 1000.0
-        except Exception: return 0.0
-    s = s.rstrip("sS")
-    if ":" in s:
-        parts = s.split(":")
+def strip_burn_tag_from_filename(filepath: str) -> str:
+    """Strips [Sub-Burned] or [Sub] tag from file on disk if burning was not performed."""
+    if not filepath or not os.path.exists(filepath):
+        return filepath
+    dir_name, file_name = os.path.split(filepath)
+    new_name = re.sub(r'\s*\[(?:sub|sub-burned)\]', '', file_name, flags=re.IGNORECASE).strip()
+    if new_name != file_name:
+        new_path = os.path.join(dir_name, new_name)
         try:
-            if len(parts) == 2: return int(parts[0]) * 60 + float(parts[1])
-            if len(parts) == 3: return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-            if len(parts) == 4: return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2]) + float(parts[3]) / 30.0
-        except Exception: return 0.0
-    try: return float(s)
-    except Exception: return 0.0
-
-
-def _parse_xml_subtitles_to_srt(text: str) -> str:
-    """Parses YouTube timedtext XML (<transcript>, <tt>, <text>, <p>) into valid SRT."""
-    cues: List[str] = []
-    cue_idx = 1
-    tag_pat = re.compile(r'<(?:[a-zA-Z0-9_-]+:)?(?:text|p)\b([^>]*?)>(.*?)</(?:[a-zA-Z0-9_-]+:)?(?:text|p)>', re.DOTALL | re.IGNORECASE)
-    attr_pat = re.compile(r'([a-zA-Z0-9_:-]+)\s*=\s*(?:[\'"]([^\'"]*)[\'"]|([^\s>]+))')
-    for m in tag_pat.finditer(text):
-        attrs = {k: v1 if v1 != "" else v2 for k, v1, v2 in attr_pat.findall(m.group(1))}
-        t_val, start_val = attrs.get("t"), attrs.get("start") or attrs.get("begin")
-        if not start_val and not t_val: continue
-        try:
-            start = float(t_val) / 1000.0 if t_val else _parse_timestamp_or_seconds(start_val)
-            d_val, dur_val, end_val = attrs.get("d"), attrs.get("dur"), attrs.get("end")
-            if d_val: end = start + max(0.5, float(d_val) / 1000.0)
-            elif dur_val: end = start + max(0.5, _parse_timestamp_or_seconds(dur_val))
-            elif end_val: end = _parse_timestamp_or_seconds(end_val)
-            else: end = start + 2.0
-            body = html.unescape(re.sub(r'<[^>]+>', '', re.sub(r'</?s\b[^>]*>', '', re.sub(r'<br\s*/?>', '\n', m.group(2), flags=re.IGNORECASE), flags=re.IGNORECASE))).strip()
-            if body:
-                cues.append(f"{cue_idx}\n{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}\n{body}")
-                cue_idx += 1
-        except Exception: continue
-    return "\n\n".join(cues) + ("\n" if cues else "")
-
-
-def _parse_json_subtitles_to_srt(text: str) -> str:
-    """Parses YouTube json3 timedtext into valid SRT."""
-    import json
-    try: data = json.loads(text.lstrip("\ufeff"))
-    except Exception: return ""
-    events = data.get("events")
-    if not isinstance(events, list): return ""
-    cues: List[str] = []
-    cue_idx = 1
-    for ev in events:
-        if not isinstance(ev, dict): continue
-        start_ms, dur_ms = ev.get("tStartMs"), ev.get("dDurationMs", 2000)
-        if start_ms is None: continue
-        start = float(start_ms) / 1000.0
-        end = start + max(0.5, float(dur_ms or 2000) / 1000.0)
-        segs = ev.get("segs", [])
-        body = "".join(str(s.get("utf8", "")) for s in segs if isinstance(s, dict)).strip() if isinstance(segs, list) and segs else str(ev.get("text", "")).strip()
-        body = html.unescape(re.sub(r'<[^>]+>', '', body)).strip()
-        if body:
-            cues.append(f"{cue_idx}\n{_format_seconds_to_srt(start)} --> {_format_seconds_to_srt(end)}\n{body}")
-            cue_idx += 1
-    return "\n\n".join(cues) + ("\n" if cues else "")
-
-
-def convert_vtt_to_srt(vtt_text: str) -> str:
-    """Converts WebVTT, YouTube XML (srv1/srv3/transcript/ttml), or JSON3 into standard SubRip (.srt)."""
-    raw = str(vtt_text or "").lstrip("\ufeff").strip()
-    if not raw:
-        return ""
-
-    # 1. JSON3 format
-    if ("\"events\"" in raw or "'events'" in raw) and raw.startswith("{"):
-        parsed_json = _parse_json_subtitles_to_srt(raw)
-        if parsed_json:
-            return parsed_json
-
-    # 2. XML format (<transcript>, <tt>, <text>, <p>)
-    if any(tag in raw for tag in ("<transcript", "<tt", "<text", "<p")):
-        parsed_xml = _parse_xml_subtitles_to_srt(raw)
-        if parsed_xml:
-            return parsed_xml
-
-    # 3. WebVTT format
-    blocks = re.split(r'\r?\n\r?\n+', raw)
-    srt_cues: List[str] = []
-    cue_index = 1
-    timestamp_pat = re.compile(
-        r'((?:\d+:)?\d{1,2}:\d{2}[.,]\d+)\s*-->\s*((?:\d+:)?\d{1,2}:\d{2}[.,]\d+)'
-    )
-
-    for block in blocks:
-        lines = [line.strip() for line in block.splitlines() if line.strip()]
-        if not lines:
-            continue
-        ts_line_idx, ts_match = -1, None
-        for idx, line in enumerate(lines):
-            m = timestamp_pat.search(line)
-            if m:
-                ts_line_idx, ts_match = idx, m
-                break
-        if ts_line_idx == -1 or not ts_match:
-            continue
-
-        start_ts = _format_srt_timestamp(ts_match.group(1))
-        end_ts = _format_srt_timestamp(ts_match.group(2))
-        srt_timing = f"{start_ts} --> {end_ts}"
-
-        cue_lines = lines[ts_line_idx + 1:]
-        cleaned = [html.unescape(re.sub(r'<[^>]+>', '', cl)).strip() for cl in cue_lines]
-        valid_lines = [l for l in cleaned if l]
-        if not valid_lines:
-            continue
-
-        srt_cues.append(f"{cue_index}\n{srt_timing}\n" + "\n".join(valid_lines))
-        cue_index += 1
-
-    return "\n\n".join(srt_cues) + ("\n" if srt_cues else "")
-
-
-def download_subtitle_as_srt(sub_track: Dict[str, Any], video_filepath: str) -> Optional[str]:
-    """
-    Downloads subtitle, converts VTT/XML/JSON to SRT, and saves alongside video in pure UTF-8.
-    Tries fallback_urls if primary URL fails or yields invalid content.
-    Never writes .srt if srt_content is empty or lacks '-->' timing.
-    """
-    if not sub_track or sub_track.get("sub_id") in (None, "none"):
-        return None
-
-    primary_url = sub_track.get("url") or ""
-    fallbacks = sub_track.get("fallback_urls") or []
-    cand_urls = [u for u in [primary_url] + fallbacks if u]
-    if not cand_urls:
-        return None
-
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0"}
-    if isinstance(sub_track.get("http_headers"), dict):
-        headers.update(sub_track["http_headers"])
-
-    def _fetch(url: str, cookies: Any = None) -> Optional[str]:
-        if requests is not None:
-            try:
-                kw: Dict[str, Any] = {"headers": headers, "timeout": 15}
-                if cookies is not None: kw["cookies"] = cookies
-                r = requests.get(url, **kw)
-                if r.status_code == 200: return r.content.decode("utf-8", errors="replace")
-            except Exception: pass
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            if cookies is not None:
-                opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
-                with opener.open(req, timeout=15) as resp: return resp.read().decode("utf-8", errors="replace")
-            with urllib.request.urlopen(req, timeout=15) as resp: return resp.read().decode("utf-8", errors="replace")
-        except Exception: return None
-
-    def _convert(txt: Optional[str]) -> str:
-        if not txt or not txt.strip(): return ""
-        c = convert_vtt_to_srt(txt)
-        return c if c and "-->" in c else (txt if "-->" in txt else "")
-
-    srt_content = ""
-    for u in cand_urls:
-        srt_content = _convert(_fetch(u))
-        if srt_content: break
-
-    if not srt_content:
-        try:
-            import yt_dlp.cookies
-            for b in detect_installed_cookie_browsers():
-                try: cj = yt_dlp.cookies.extract_cookies_from_browser(b)
-                except Exception: cj = None
-                if not cj: continue
-                try:
-                    cstr = "; ".join(f"{c.name}={c.value}" for c in cj)
-                    if cstr: headers["Cookie"] = cstr
-                except Exception: pass
-                for u in cand_urls:
-                    srt_content = _convert(_fetch(u, cookies=cj))
-                    if srt_content: break
-                if srt_content: break
-        except Exception: pass
-
-    if not srt_content and sub_track.get("webpage_url"):
-        try:
-            import tempfile, yt_dlp
-            lang = sub_track.get("language") or "en"
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                ydl_opts: Dict[str, Any] = {
-                    "writesubtitles": True, "writeautomaticsub": True,
-                    "subtitleslangs": [lang], "subtitlesformat": "srt/vtt/ttml/srv3/json3/best",
-                    "skip_download": True, "quiet": True, "no_warnings": True,
-                    "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
-                }
-                if isinstance(sub_track.get("http_headers"), dict) and sub_track["http_headers"]:
-                    ydl_opts["http_headers"] = sub_track["http_headers"]
-
-                def _scan_tmp() -> str:
-                    for fn in os.listdir(tmp_dir):
-                        fp = os.path.join(tmp_dir, fn)
-                        if os.path.isfile(fp) and any(fp.endswith(e) for e in (".srt", ".vtt", ".ttml", ".srv3", ".xml", ".json3")):
-                            try:
-                                with open(fp, "r", encoding="utf-8-sig", errors="replace") as sf:
-                                    sc = _convert(sf.read())
-                                    if sc: return sc
-                            except Exception: pass
-                    return ""
-
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    try: ydl.download([sub_track["webpage_url"]])
-                    except Exception: pass
-                srt_content = _scan_tmp()
-
-                if not srt_content:
-                    for b in detect_installed_cookie_browsers():
-                        try:
-                            ydl_opts["cookiesfrombrowser"] = (b,)
-                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                                ydl.download([sub_track["webpage_url"]])
-                            srt_content = _scan_tmp()
-                            if srt_content: break
-                        except Exception: pass
-        except Exception: pass
-
-    if not srt_content or "-->" not in srt_content:
-        return None
-
-    stem = os.path.splitext(video_filepath)[0]
-    srt_path = f"{stem}.{sub_track.get('language') or 'sub'}.srt"
-    default_srt_path = f"{stem}.srt"
-    try:
-        with open(srt_path, "w", encoding="utf-8-sig") as f:
-            f.write(srt_content)
-        try:
-            with open(default_srt_path, "w", encoding="utf-8-sig") as f:
-                f.write(srt_content)
+            if not os.path.exists(new_path) or os.path.samefile(filepath, new_path):
+                os.replace(filepath, new_path)
+                return new_path
         except Exception:
             pass
-        return srt_path
-    except Exception:
-        return None
+    return filepath
 
 
 def embed_subtitle_into_mp4(
@@ -369,7 +127,7 @@ def burn_subtitle_into_video(
     on_log: Optional[Callable[[str], None]] = None,
     cancel_event: Optional[Any] = None
 ) -> bool:
-    """Burns subtitles directly onto video frames using FFmpeg's subtitles filter with veryfast H.264."""
+    """Burns subtitles directly onto video frames using a robust 3-candidate FFmpeg filter and transcode chain."""
     if cancel_event and cancel_event.is_set():
         return False
     if not ffmpeg_path or not os.path.isfile(video_path) or not os.path.isfile(srt_path):
@@ -388,16 +146,18 @@ def burn_subtitle_into_video(
             bf.write(srt_content)
     except Exception as exc:
         if on_log:
-            on_log(f"[SUBTITLES] Warning: Failed to prepare UTF-8 BOM SRT: {exc}")
+            on_log(f"[SUBTITLES] Warning: Failed to prepare UTF-8 SRT: {exc}")
         return False
 
-    vf_primary = f"subtitles=filename={burn_srt_name}:charenc=UTF-8"
-    vf_fallback = f"subtitles={burn_srt_name}"
-    cmd = [
-        ffmpeg_path, "-y", "-i", abs_video, "-vf", vf_primary,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-        "-c:a", "copy", "-f", "mp4", temp_burn_mp4
+    escaped_path = burn_srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+    # Candidate 1: subtitles=filename={burn_srt_name}:charenc=UTF-8 with audio transcode AAC
+    # Candidate 2: subtitles={burn_srt_name} with audio transcode AAC (no libiconv dependency)
+    # Candidate 3: subtitles='{escaped_path}' with audio transcode AAC
+    candidate_vfs = [
+        f"subtitles=filename={burn_srt_name}:charenc=UTF-8",
+        f"subtitles={burn_srt_name}",
+        f"subtitles='{escaped_path}'",
     ]
 
     p: Optional[subprocess.Popen] = None
@@ -441,33 +201,38 @@ def burn_subtitle_into_video(
                     return -999, "Cancelled"
 
     try:
-        rc, err = _run_burn_cmd(cmd)
-        if rc != 0 and not (cancel_event and cancel_event.is_set()):
-            cmd_alt = list(cmd)
-            try:
-                vf_idx = cmd_alt.index("-vf")
-                cmd_alt[vf_idx + 1] = vf_fallback
-            except ValueError: pass
-            rc, err = _run_burn_cmd(cmd_alt)
-            if rc == 0: cmd = cmd_alt
-        if rc != 0 and not (cancel_event and cancel_event.is_set()):
-            if on_log:
-                on_log("[SUBTITLES] Burn with -c:a copy failed; retrying with audio transcode (-c:a aac)...")
-            cmd_retry = list(cmd)
-            try:
-                a_idx = cmd_retry.index("-c:a")
-                cmd_retry[a_idx:a_idx + 2] = ["-c:a", "aac", "-b:a", "192k"]
-            except ValueError:
-                cmd_retry.extend(["-c:a", "aac", "-b:a", "192k"])
-            rc, err = _run_burn_cmd(cmd_retry)
+        success = False
+        last_err = ""
+        for idx, vf in enumerate(candidate_vfs, 1):
+            if cancel_event and cancel_event.is_set():
+                break
+            cmd = [
+                ffmpeg_path, "-y", "-i", abs_video, "-vf", vf,
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                "-c:a", "aac", "-b:a", "192k", "-f", "mp4", temp_burn_mp4
+            ]
+            rc, err = _run_burn_cmd(cmd)
+            if rc == 0:
+                if os.path.isfile(temp_burn_mp4) and os.path.getsize(temp_burn_mp4) > 0:
+                    os.replace(temp_burn_mp4, abs_video)
+                if on_log:
+                    on_log(f"[SUBTITLES] Successfully burned subtitles permanently into video frames (Candidate {idx}).")
+                success = True
+                break
+            else:
+                last_err = err
+                if on_log and err:
+                    on_log(f"[SUBTITLES] Burn candidate {idx} failed (code {rc}): {err[-180:].strip()}")
+                if os.path.exists(temp_burn_mp4):
+                    try: os.remove(temp_burn_mp4)
+                    except Exception: pass
 
-        if rc == 0 and os.path.isfile(temp_burn_mp4) and os.path.getsize(temp_burn_mp4) > 0:
-            os.replace(temp_burn_mp4, abs_video)
-            if on_log:
-                on_log("[SUBTITLES] Successfully burned subtitles permanently into video frames.")
+        if success:
             return True
-        if on_log and err:
-            on_log(f"[SUBTITLES] FFmpeg burn error (code {rc}): {err[-200:].strip()}")
+
+        if on_log and last_err:
+            on_log(f"[SUBTITLES] All subtitle burn candidates failed: {last_err[-200:].strip()}")
         if os.path.exists(temp_burn_mp4):
             try: os.remove(temp_burn_mp4)
             except Exception: pass
@@ -491,28 +256,30 @@ def burn_subtitle_into_video(
             except Exception: pass
 
 
-
 def handle_subtitles_post_download(
     stream_info: Any, output_path: str, on_log: Optional[Callable[[str], None]] = None,
     cancel_event: Optional[Any] = None
 ) -> None:
     """Post-download pipeline: handles external SRT, soft-muxing, or hard burning based on selected mode."""
     sub = getattr(stream_info, "subtitle_track", None)
-    if not sub or sub.get("sub_id") in (None, "none") or not sub.get("url") or (cancel_event and cancel_event.is_set()):
+    if not sub or sub.get("sub_id") in (None, "none") or (not sub.get("url") and not sub.get("base_url")) or (cancel_event and cancel_event.is_set()):
         return
     try:
         if on_log:
             on_log(f"[SUBTITLES] Downloading subtitle track: {sub.get('label', sub.get('language', 'sub'))}...")
         srt_path = download_subtitle_as_srt(sub, output_path)
+        mode = getattr(stream_info, "subtitle_embed_mode", "soft_embed")
+
         if not srt_path or not os.path.isfile(srt_path) or (cancel_event and cancel_event.is_set()):
             if on_log and not (cancel_event and cancel_event.is_set()):
                 on_log("[SUBTITLES] Warning: Failed to download or convert subtitle track.")
+            if mode == "hard_burn":
+                strip_burn_tag_from_filename(output_path)
             return
 
         if on_log:
             on_log(f"[SUBTITLES] Saved subtitle to {os.path.basename(srt_path)}")
 
-        mode = getattr(stream_info, "subtitle_embed_mode", "soft_embed")
         if mode == "srt_only" or (cancel_event and cancel_event.is_set()):
             if on_log and mode == "srt_only":
                 on_log("[SUBTITLES] External .srt saved (SRT-only mode selected; skipping video mux).")
@@ -522,6 +289,8 @@ def handle_subtitles_post_download(
         if not ffmpeg_bin:
             if on_log:
                 on_log("[SUBTITLES] FFmpeg not found; skipping video subtitle embedding/burning.")
+            if mode == "hard_burn":
+                strip_burn_tag_from_filename(output_path)
             return
 
         if not output_path.lower().endswith(".mp4"):
@@ -535,6 +304,7 @@ def handle_subtitles_post_download(
             if not ok and not (cancel_event and cancel_event.is_set()):
                 if on_log:
                     on_log("[SUBTITLES] Hard burn failed; falling back to soft subtitle embedding.")
+                strip_burn_tag_from_filename(output_path)
                 embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)
         else:
             embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)

@@ -79,6 +79,22 @@ class MediaOptionsBarMixin:
         self.cb_main_audio = ttk.Combobox(row1, state="readonly", font=("Segoe UI", 8), width=22)
         self.cb_main_audio.pack(side=tk.LEFT, padx=(4, 8))
 
+        self.btn_main_preview = tk.Button(
+            row1,
+            text=tr("btn_preview_short", "🎬 Preview"),
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=8,
+            pady=2,
+            command=self._open_main_media_preview
+        )
+        self.btn_main_preview.pack(side=tk.RIGHT, padx=(4, 0))
+
         self.btn_reopen_quality = tk.Button(
             row1,
             text=tr("btn_media_quality_options", "🎞️ خيارات الجودة والترجمة"),
@@ -93,7 +109,7 @@ class MediaOptionsBarMixin:
             pady=2,
             command=self._reopen_media_quality_modal
         )
-        self.btn_reopen_quality.pack(side=tk.RIGHT)
+        self.btn_reopen_quality.pack(side=tk.RIGHT, padx=(0, 4))
 
         # Row 2: Subtitles (Combobox), Subtitle Delivery Mode (Combobox)
         row2 = tk.Frame(self.media_options_frame, bg=self.c_panel)
@@ -231,14 +247,8 @@ class MediaOptionsBarMixin:
                     m_idx = self.cb_main_sub_mode.current()
                     if 0 <= m_idx < len(self._main_sub_mode_codes):
                         sub_mode = self._main_sub_mode_codes[m_idx]
-                updated = apply_media_filename_tags(
-                    cur,
-                    quality_label=opt.resolution_label,
-                    is_sub_burned=(sub_mode == "hard_burn"),
-                    ext=opt.ext
-                )
-                self.entry_dest.delete(0, tk.END)
-                self.entry_dest.insert(0, updated)
+                updated = apply_media_filename_tags(cur, quality_label=opt.resolution_label, is_sub_burned=(sub_mode == "hard_burn"), ext=opt.ext)
+                self.entry_dest.delete(0, tk.END); self.entry_dest.insert(0, updated)
 
     def _on_main_sub_changed(self, event=None):
         """Enables or disables subtitle mode combobox based on selected subtitle."""
@@ -439,8 +449,35 @@ class MediaOptionsBarMixin:
             on_open_in_main=_on_open_in_main,
             parent_app=self,
             audio_tracks=ctx.get("audio_tracks", []),
-            subtitle_tracks=ctx.get("subtitle_tracks", [])
+            subtitle_tracks=ctx.get("subtitle_tracks", []),
+            video_url=ctx.get("url", ""),
+            raw_info=info
         )
+
+    def _open_main_media_preview(self):
+        """Launches in-app VidMate-style preview directly from the Main Window Media Bar."""
+        ctx = getattr(self, "_pending_media_context", None) or {}
+        url = ctx.get("url") or (self.url_input.get().strip() if hasattr(self, "url_input") else "")
+        info = ctx.get("info") or getattr(self, "_last_yt_info", {}) or {}
+        raw_title = info.get("title") or ctx.get("title") or "Video Preview"
+        selected_opt = None
+        if hasattr(self, "cb_main_quality") and getattr(self, "_main_media_options", None):
+            idx = self.cb_main_quality.current()
+            if 0 <= idx < len(self._main_media_options): selected_opt = self._main_media_options[idx]
+        selected_sub = None
+        if hasattr(self, "cb_main_sub") and getattr(self, "_main_subtitle_tracks", None):
+            sub_idx = self.cb_main_sub.current()
+            if 0 <= sub_idx < len(self._main_subtitle_tracks): selected_sub = self._main_subtitle_tracks[sub_idx]
+        theme_dict = getattr(self, "_theme_dict", None) or ({"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_border": self.c_border, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_success": self.c_success, "c_text_bright": self.c_text_bright, "c_text_muted": self.c_text_muted, "c_input_bg": self.c_input_bg} if hasattr(self, "c_bg") else {})
+        try:
+            from ..modals.video_preview_modal import open_video_preview
+            open_video_preview(
+                parent=self.root if hasattr(self, "root") else None, url=url, video_title=raw_title,
+                stream_info=selected_opt, info_dict=info, selected_sub_track=selected_sub,
+                theme=theme_dict, on_log=self.log if hasattr(self, "log") else print
+            )
+        except Exception as e:
+            if hasattr(self, "log"): self.log(f"[PREVIEW ERROR] {e}")
 
     def _start_pending_media_download(self):
         """Starts media download directly using the selections made in the Main Window Media Bar."""
@@ -494,20 +531,13 @@ class MediaOptionsBarMixin:
 
         try: max_conn = int(self.conn_var.get())
         except Exception: max_conn = 8
-        try: kb_lim = float(self.entry_custom_speed.get().strip())
-        except Exception: kb_lim = 0.0
-        bytes_limit = kb_lim * 1024.0 if kb_lim > 0 else 0.0
+        try: bytes_limit = max(0.0, float(self.entry_custom_speed.get().strip())) * 1024.0
+        except Exception: bytes_limit = 0.0
 
         if not resolver and hasattr(self, "log"):
-            resolver = YouTubeResolver(
-                on_log=self.log,
-                cookies_from_browser=getattr(self, "cookies_browser", "auto"),
-                cookies_file=getattr(self, "cookies_file", "")
-            )
+            resolver = YouTubeResolver(on_log=self.log, cookies_from_browser=getattr(self, "cookies_browser", "auto"), cookies_file=getattr(self, "cookies_file", ""))
         stream_info = resolver.build_stream_info(info, selected_opt) if resolver else None
-        self._last_media_context = dict(ctx)
-        self._last_media_context["selected_option"] = selected_opt
-        self._last_media_context["final_dest"] = final_dest
+        self._last_media_context = {**dict(ctx), "selected_option": selected_opt, "final_dest": final_dest}
         self._pending_media_context = None
 
         if stream_info and hasattr(self, "_launch_stream_coordinator"):

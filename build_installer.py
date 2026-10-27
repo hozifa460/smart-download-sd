@@ -214,6 +214,16 @@ def prepare_payload():
     if os.path.isfile(hm_script):
         shutil.copy2(hm_script, os.path.join(PAYLOAD_DIR, "host_manifest.py"))
 
+    # 5. FFmpeg binary bundling if available
+    try:
+        from smart_download.services.youtube_models import find_ffmpeg_bin
+        ffmpeg_bin = find_ffmpeg_bin()
+        if ffmpeg_bin and os.path.isfile(ffmpeg_bin):
+            shutil.copy2(ffmpeg_bin, os.path.join(PAYLOAD_DIR, "ffmpeg.exe"))
+            print(f"[+] Bundled FFmpeg into payload: {ffmpeg_bin}")
+    except Exception as e:
+        print(f"[-] Note: FFmpeg bundling skipped ({e})")
+
     print(f"[+] Installer payload prepared at: {PAYLOAD_DIR}")
 
 

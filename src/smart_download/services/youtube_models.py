@@ -316,10 +316,18 @@ def extract_youtube_id(url: str) -> Optional[str]:
 
 
 def find_ffmpeg_bin() -> Optional[str]:
-    """Finds FFmpeg executable in PATH or next to the executable / project root."""
-    bin_path = shutil.which("ffmpeg")
-    if bin_path:
-        return bin_path
+    """
+    Finds FFmpeg executable in bundled dirs, PATH, imageio_ffmpeg, WinGet, Scoop, or Chocolatey.
+    Searches in order:
+    1. Bundled PyInstaller directory (sys._MEIPASS and os.path.dirname(sys.executable)).
+    2. shutil.which("ffmpeg").
+    3. imageio_ffmpeg.get_ffmpeg_exe().
+    4. Windows WinGet, Scoop, Chocolatey, and standard install paths.
+    """
+    is_win = sys.platform.startswith("win")
+    exe_name = "ffmpeg.exe" if is_win else "ffmpeg"
+
+    # 1. Bundled PyInstaller directory and runtime paths
     app_dirs = [
         getattr(sys, "_MEIPASS", ""),
         os.path.dirname(sys.executable) if hasattr(sys, "executable") else "",
@@ -328,9 +336,49 @@ def find_ffmpeg_bin() -> Optional[str]:
     ]
     for d in app_dirs:
         if d:
-            candidate = os.path.join(d, "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg")
+            candidate = os.path.join(d, exe_name)
             if os.path.isfile(candidate):
-                return candidate
+                return os.path.abspath(candidate)
+
+    # 2. PATH
+    bin_path = shutil.which("ffmpeg") or shutil.which(exe_name)
+    if bin_path and os.path.isfile(bin_path):
+        return os.path.abspath(bin_path)
+
+    # 3. imageio_ffmpeg
+    try:
+        import imageio_ffmpeg
+        img_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if img_exe and os.path.isfile(img_exe):
+            return os.path.abspath(img_exe)
+    except Exception:
+        pass
+
+    # 4. Windows WinGet, Scoop, and Chocolatey install paths
+    if is_win:
+        user_prof = os.environ.get("USERPROFILE", "")
+        local_app = os.environ.get("LOCALAPPDATA", "")
+        fixed_cands = [
+            os.path.join(user_prof, "scoop", "apps", "ffmpeg", "current", "bin", "ffmpeg.exe"),
+            r"C:\ProgramData\chocolatey\bin\ffmpeg.exe",
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+            os.path.join(local_app, "Programs", "ffmpeg", "bin", "ffmpeg.exe"),
+        ]
+        for cand in fixed_cands:
+            if cand and os.path.isfile(cand):
+                return os.path.abspath(cand)
+
+        winget_pkgs = os.path.join(local_app, "Microsoft", "WinGet", "Packages")
+        if os.path.isdir(winget_pkgs):
+            try:
+                for root, _, files in os.walk(winget_pkgs):
+                    if "ffmpeg.exe" in files:
+                        p = os.path.join(root, "ffmpeg.exe")
+                        if os.path.isfile(p):
+                            return os.path.abspath(p)
+            except Exception:
+                pass
+
     return None
 
 

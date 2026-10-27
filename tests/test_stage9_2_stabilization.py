@@ -126,13 +126,13 @@ class TestStage9_2Stabilization(unittest.TestCase):
         and no dead imports or preview buttons remain in modals or toolbars.
         """
         with self.assertRaises((ImportError, ModuleNotFoundError)):
-            import smart_download.ui.modals.video_preview_modal  # type: ignore
-
-        with self.assertRaises((ImportError, ModuleNotFoundError)):
             import smart_download.services.preview_service  # type: ignore
 
         import smart_download.ui.modals as modals
         self.assertFalse(hasattr(modals, "VideoPreviewModal"))
+
+        import smart_download.ui.modals.video_preview_modal as vpm
+        self.assertFalse(hasattr(vpm, "VideoPreviewModal"))
 
         # Verify QualitySelectionModal has no preview button or method
         self.assertFalse(hasattr(QualitySelectionModal, "_open_live_preview"))

@@ -253,5 +253,7 @@
   "opt_sub_burn": "Hard-burn into video",
   "ctx_redownload_quality": "🎞️ Re-Download with Different Quality",
   "btn_quality_reopen": "🎞️ Quality / Dubbing & Subtitles",
-  "btn_live_preview": "▶️ Live Preview"
+  "btn_live_preview": "▶️ Live Preview",
+  "btn_preview_video": "🎬 Preview Video",
+  "btn_preview_short": "🎬 Preview"
 }

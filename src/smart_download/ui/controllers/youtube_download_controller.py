@@ -271,7 +271,9 @@ class YouTubeDownloadControllerMixin:
                             on_open_in_main=_on_open_in_main,
                             parent_app=self,
                             audio_tracks=audio_tracks,
-                            subtitle_tracks=subtitle_tracks
+                            subtitle_tracks=subtitle_tracks,
+                            video_url=url,
+                            raw_info=info
                         )
                     except Exception as e:
                         self._quality_modal = None

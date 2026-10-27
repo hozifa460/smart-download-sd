@@ -253,5 +253,7 @@
   "opt_sub_burn": "حرق دائم على الفيديو",
   "ctx_redownload_quality": "🎞️ إعادة التحميل بجودة مختلفة",
   "btn_quality_reopen": "🎞️ الجودة / الصوت والترجمة",
-  "btn_live_preview": "▶️ معاينة الفيديو بالصوت والترجمة"
+  "btn_live_preview": "▶️ معاينة الفيديو بالصوت والترجمة",
+  "btn_preview_video": "🎬 معاينة الفيديو",
+  "btn_preview_short": "🎬 معاينة"
 }

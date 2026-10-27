@@ -38,7 +38,9 @@ class QualitySelectionModal(tk.Toplevel):
         on_open_in_main: Optional[Callable[[VideoFormatOption, str], None]] = None,
         parent_app: Optional[Any] = None,
         audio_tracks: Optional[List[Dict[str, Any]]] = None,
-        subtitle_tracks: Optional[List[Dict[str, Any]]] = None
+        subtitle_tracks: Optional[List[Dict[str, Any]]] = None,
+        video_url: str = "",
+        raw_info: Optional[Dict[str, Any]] = None
     ):
         super().__init__(parent)
         self.video_title = str(video_title or "YouTube Video")
@@ -52,53 +54,40 @@ class QualitySelectionModal(tk.Toplevel):
         self.parent_app = parent_app
         self.audio_tracks = audio_tracks or []
         self.subtitle_tracks = subtitle_tracks or []
+        self.video_url = str(video_url or "")
+        self.raw_info = raw_info or {}
         self.cb_audio = None
         self.cb_sub = None
-
         self.selected_option: Optional[VideoFormatOption] = self.options[0] if self.options else None
         self._confirmed = False
 
         self.title(tr("modal_quality_title", "Select Video Quality — Smart Download"))
         self.configure(bg=self.theme["c_bg"])
-        # Do not use grab_set(): Overrideredirect parent causes Win32 message pump traps and UI freezes
 
-        # Determine parent DPI scale
-        try:
-            dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
-        except Exception:
-            dpi = 96.0
+        try: dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
+        except Exception: dpi = 96.0
         dpi_scale = max(1.0, dpi / 96.0)
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        dlg_w, dlg_h = min(int(740 * dpi_scale), max(640, int(sw * 0.92))), min(int(620 * dpi_scale), max(520, int(sh * 0.88)))
 
-        # Center on parent window with DPI scaling (or center on screen if parent is hidden/minimized)
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        dlg_w = min(int(740 * dpi_scale), max(640, int(sw * 0.92)))
-        dlg_h = min(int(620 * dpi_scale), max(520, int(sh * 0.88)))
-
-        is_parent_vis = False
-        try:
-            if parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal":
-                is_parent_vis = True
+        is_p_vis = False
+        try: is_p_vis = bool(parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal")
         except Exception: pass
-
-        if is_parent_vis:
+        if is_p_vis:
             try:
                 self.transient(parent)
                 px, py = parent.winfo_x(), parent.winfo_y()
                 pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
                 x, y = max(0, px + (pw - dlg_w) // 2), max(0, py + (ph - dlg_h) // 2)
-            except Exception:
-                x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
+            except Exception: x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
         else:
             try: self.transient(""); self.deiconify()
             except Exception: pass
             x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
-
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
         self.minsize(min(640, dlg_w), min(520, dlg_h))
 
-        ico_path = get_resource_path("app_icon.ico")
-        png_path = get_resource_path("app_icon.png")
+        ico_path, png_path = get_resource_path("app_icon.ico"), get_resource_path("app_icon.png")
         if os.path.isfile(ico_path):
             try: self.iconbitmap(ico_path)
             except Exception: pass
@@ -112,12 +101,10 @@ class QualitySelectionModal(tk.Toplevel):
         self._topmost_job = None
         self._idle_job = None
         try:
-            self.lift()
-            self.attributes("-topmost", True)
+            self.lift(); self.attributes("-topmost", True)
             self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
             self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
-        except Exception:
-            pass
+        except Exception: pass
 
         self._build_ui()
         animate_window_open(self, duration_ms=130)
@@ -126,66 +113,46 @@ class QualitySelectionModal(tk.Toplevel):
         self.bind("<Return>", lambda e: self._on_download())
 
     def _build_ui(self):
-        c_bg = self.theme["c_bg"]
-        c_panel = self.theme["c_panel"]
-        c_panel_light = self.theme["c_panel_light"]
-        c_border = self.theme["c_border"]
-        c_accent = self.theme["c_accent"]
-        c_accent_dark = self.theme["c_accent_dark"]
-        c_success = self.theme["c_success"]
-        c_text_bright = self.theme["c_text_bright"]
-        c_text_muted = self.theme["c_text_muted"]
-        c_input_bg = self.theme["c_input_bg"]
+        c_bg, c_panel = self.theme["c_bg"], self.theme["c_panel"]
+        c_panel_light, c_border = self.theme["c_panel_light"], self.theme["c_border"]
+        c_accent, c_accent_dark = self.theme["c_accent"], self.theme["c_accent_dark"]
+        c_success, c_text_bright = self.theme["c_success"], self.theme["c_text_bright"]
+        c_text_muted, c_input_bg = self.theme["c_text_muted"], self.theme["c_input_bg"]
 
-        # Outer border
         outer = tk.Frame(self, bg=c_border, padx=1, pady=1)
         outer.pack(fill=tk.BOTH, expand=True)
 
         body = tk.Frame(outer, bg=c_bg, padx=16, pady=14)
         body.pack(fill=tk.BOTH, expand=True)
 
-        # Header Title
-        lbl_head = tk.Label(
-            body,
-            text=tr("modal_quality_header", "🎥 SELECT VIDEO RESOLUTION & QUALITY"),
-            font=("Segoe UI", 11, "bold"),
-            bg=c_bg,
-            fg=c_accent
-        )
+        lbl_head = tk.Label(body, text=tr("modal_quality_header", "🎥 SELECT VIDEO RESOLUTION & QUALITY"), font=("Segoe UI", 11, "bold"), bg=c_bg, fg=c_accent)
         lbl_head.pack(anchor="w", pady=(0, 6))
 
-        # Video Info Card
         card_info = tk.Frame(body, bg=c_panel, padx=12, pady=10, relief="flat", highlightbackground=c_border, highlightthickness=1)
         card_info.pack(fill=tk.X, pady=(0, 10))
 
         title_display = self.video_title if len(self.video_title) <= 90 else self.video_title[:87] + "..."
-        lbl_title = tk.Label(card_info, text=title_display, font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright, anchor="w", justify="left")
-        lbl_title.pack(fill=tk.X)
+        tk.Label(card_info, text=title_display, font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright, anchor="w", justify="left").pack(fill=tk.X)
 
-        dur_mins = self.duration // 60
-        dur_secs = self.duration % 60
+        dur_mins, dur_secs = self.duration // 60, self.duration % 60
         dur_str = f"{dur_mins:02d}:{dur_secs:02d}" if self.duration > 0 else "Live / Unknown"
-        lbl_meta = tk.Label(card_info, text=f"Duration: {dur_str}  •  Formats Detected: {len(self.options)}", font=("Segoe UI", 8), bg=c_panel, fg=c_text_muted, anchor="w")
-        lbl_meta.pack(fill=tk.X, pady=(2, 0))
+        tk.Label(card_info, text=f"Duration: {dur_str}  •  Formats Detected: {len(self.options)}", font=("Segoe UI", 8), bg=c_panel, fg=c_text_muted, anchor="w").pack(fill=tk.X, pady=(2, 0))
 
-        # Format Options Table
         table_frame = tk.Frame(body, bg=c_panel, highlightbackground=c_border, highlightthickness=1)
         table_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         columns = ("res", "ext", "size", "fps", "mode")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8, selectmode="browse", style="Custom.Treeview")
 
-        self.tree.heading("res", text=tr("modal_col_res", "Resolution / Quality"), anchor="w")
-        self.tree.heading("ext", text=tr("modal_col_ext", "Format"), anchor="center")
-        self.tree.heading("size", text=tr("modal_col_size", "Est. Size"), anchor="e")
-        self.tree.heading("fps", text=tr("modal_col_fps", "FPS"), anchor="center")
-        self.tree.heading("mode", text=tr("modal_col_type", "Stream Details"), anchor="w")
-
-        self.tree.column("res", width=170, minwidth=130, anchor="w")
-        self.tree.column("ext", width=70, minwidth=50, anchor="center")
-        self.tree.column("size", width=100, minwidth=80, anchor="e")
-        self.tree.column("fps", width=55, minwidth=40, anchor="center")
-        self.tree.column("mode", width=250, minwidth=180, anchor="w")
+        for col, txt, anc, w in (
+            ("res", tr("modal_col_res", "Resolution / Quality"), "w", 170),
+            ("ext", tr("modal_col_ext", "Format"), "center", 70),
+            ("size", tr("modal_col_size", "Est. Size"), "e", 100),
+            ("fps", tr("modal_col_fps", "FPS"), "center", 55),
+            ("mode", tr("modal_col_type", "Stream Details"), "w", 250),
+        ):
+            self.tree.heading(col, text=txt, anchor=anc)
+            self.tree.column(col, width=w, anchor=anc)
 
         # Scrollbar
         scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
@@ -297,6 +264,22 @@ class QualitySelectionModal(tk.Toplevel):
             )
             self.btn_download_mp3.pack(side=tk.LEFT, padx=(8, 0))
 
+        self.btn_preview_video = tk.Button(
+            btn_row,
+            text=tr("btn_preview_video", "🎬 Preview Video"),
+            font=("Segoe UI", 9, "bold"),
+            bg=c_panel_light,
+            fg=c_accent,
+            relief="flat",
+            activebackground=c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=14,
+            pady=6,
+            command=self._on_preview_video
+        )
+        self.btn_preview_video.pack(side=tk.LEFT, padx=(8, 0))
+
         self.btn_cancel = tk.Button(
             btn_row,
             text=tr("modal_btn_cancel", "✕ Cancel"),
@@ -349,14 +332,9 @@ class QualitySelectionModal(tk.Toplevel):
             parent_dir = os.path.dirname(target_path)
             parent_base = os.path.basename(os.path.normpath(parent_dir)) if parent_dir else ""
             new_ext = ".mp3"
-            subfolders_lower = {v.lower() for v in CATEGORY_SUBFOLDERS.values()}
-            if parent_base in CATEGORY_SUBFOLDERS.values() or parent_base.lower() in subfolders_lower:
-                updated_dest = resolve_categorized_path(
-                    parent_dir,
-                    os.path.basename(base) + new_ext,
-                    auto_categorize=True,
-                    create_dir=False
-                )
+            sub_low = {v.lower() for v in CATEGORY_SUBFOLDERS.values()}
+            if parent_base in CATEGORY_SUBFOLDERS.values() or parent_base.lower() in sub_low:
+                updated_dest = resolve_categorized_path(parent_dir, os.path.basename(base) + new_ext, auto_categorize=True, create_dir=False)
             else:
                 updated_dest = base + new_ext
             self.entry_dest.delete(0, tk.END)
@@ -484,6 +462,26 @@ class QualitySelectionModal(tk.Toplevel):
         except Exception: pass
         self.on_confirm(self.selected_option, final_dest)
 
+    def _on_preview_video(self):
+        """Launches in-app VidMate-style preview with live subtitle track."""
+        if not self.selected_option:
+            return
+        self._attach_selected_tracks()
+        sel_sub = getattr(self.selected_option, "subtitle_track", None)
+        try:
+            from .video_preview_modal import open_video_preview
+            open_video_preview(
+                parent=self,
+                url=self.video_url,
+                video_title=self.video_title,
+                stream_info=self.selected_option,
+                info_dict=self.raw_info,
+                selected_sub_track=sel_sub,
+                theme=self.theme
+            )
+        except Exception:
+            pass
+
     def _on_open_in_main(self):
         if not self.selected_option:
             return
@@ -516,12 +514,12 @@ class QualitySelectionModal(tk.Toplevel):
     def destroy(self):
         try: self.withdraw()
         except Exception: pass
-        for job_attr in ("_idle_job", "_topmost_job"):
-            job = getattr(self, job_attr, None)
-            if job:
-                try: self.after_cancel(job)
+        for a in ("_idle_job", "_topmost_job"):
+            j = getattr(self, a, None)
+            if j:
+                try: self.after_cancel(j)
                 except Exception: pass
-                setattr(self, job_attr, None)
+                setattr(self, a, None)
         if hasattr(self, "_modal_icon_photo"):
             _detach_photo_tk(self._modal_icon_photo)
             self._modal_icon_photo = None
