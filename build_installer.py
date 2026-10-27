@@ -29,8 +29,48 @@ STALE_DIST_ARTIFACTS = (
 )
 
 
+def clean_stale_shadow_modules():
+    """Removes any stale smart_download.py or smart_download.pyc files from build/, dist/, core_plugin, and root."""
+    search_dirs = [
+        os.path.join(BASE_DIR, "build"),
+        DIST_DIR,
+    ]
+    try:
+        appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+        plugin_dir = os.path.join(appdata, "SmartDownload", "core_plugin")
+        if os.path.isdir(plugin_dir):
+            search_dirs.append(plugin_dir)
+    except Exception:
+        pass
+
+    for d in search_dirs:
+        if not os.path.isdir(d):
+            continue
+        for root, dirs, files in os.walk(d):
+            for fname in files:
+                if fname.lower() in ("smart_download.py", "smart_download.pyc"):
+                    fpath = os.path.join(root, fname)
+                    try:
+                        os.chmod(fpath, 0o777)
+                        os.remove(fpath)
+                        print(f"[*] Removed stale shadow file: {fpath}")
+                    except Exception as e:
+                        print(f"[-] Warning: Failed to remove {fpath}: {e}")
+
+    for root_shadow in ("smart_download.py", "smart_download.pyc"):
+        fpath = os.path.join(BASE_DIR, root_shadow)
+        if os.path.isfile(fpath):
+            try:
+                os.chmod(fpath, 0o777)
+                os.remove(fpath)
+                print(f"[*] Removed stale root shadow file: {fpath}")
+            except Exception as e:
+                print(f"[-] Warning: Failed to remove root shadow file {fpath}: {e}")
+
+
 def clean_stale_dist_artifacts():
     """Removes legacy TurboDownloader artifacts from dist/ and syncs the Smart Download extension folder."""
+    clean_stale_shadow_modules()
     if not os.path.isdir(DIST_DIR):
         return
     for name in STALE_DIST_ARTIFACTS:
@@ -52,6 +92,7 @@ def clean_stale_dist_artifacts():
 
 def build_app(rebuild: bool = False):
     """Compiles dist/SmartDownload.exe using PyInstaller."""
+    clean_stale_shadow_modules()
     exe_path = os.path.join(DIST_DIR, "SmartDownload.exe")
     if not rebuild and os.path.isfile(exe_path):
         clean_stale_dist_artifacts()
@@ -69,6 +110,25 @@ def build_app(rebuild: bool = False):
 
     if not os.path.isfile(exe_path):
         raise FileNotFoundError(f"Expected binary not found after build: {exe_path}")
+
+    # Mandatory Post-Build Binary Smoke Verification
+    print("[*] Verifying built SmartDownload.exe (--test-startup)...")
+    try:
+        verify_res = subprocess.run(
+            [exe_path, "--test-startup"],
+            cwd=BASE_DIR,
+            timeout=30,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"Built SmartDownload.exe timed out during --test-startup verification: {e}")
+
+    if verify_res.returncode != 0:
+        err_msg = verify_res.stderr.strip() if verify_res.stderr else ""
+        raise RuntimeError(f"Built SmartDownload.exe failed --test-startup verification (exit code {verify_res.returncode}) {err_msg}".strip())
+
+    print("[+] SmartDownload.exe passed --test-startup verification successfully.")
 
     clean_stale_dist_artifacts()
     print(f"[+] SmartDownload.exe successfully built: {os.path.getsize(exe_path):,} bytes")

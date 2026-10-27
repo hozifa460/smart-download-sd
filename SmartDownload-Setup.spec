@@ -1,5 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
+
+_src_path = os.path.abspath('src')
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
+
 from PyInstaller.utils.hooks import collect_submodules
 
 payload_dir = os.path.abspath('installer_payload')
@@ -7,7 +13,7 @@ sd_hidden = collect_submodules('smart_download')
 
 a = Analysis(
     ['installer.py'],
-    pathex=['src'],
+    pathex=[_src_path],
     binaries=[],
     datas=[
         (payload_dir, 'payload'),

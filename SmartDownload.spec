@@ -1,4 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+import sys
+
+_src_path = os.path.abspath('src')
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
+
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 yt_hidden = collect_submodules('yt_dlp')
@@ -8,7 +15,7 @@ sd_hidden = collect_submodules('smart_download')
 
 a = Analysis(
     ['turbo_downloader.py'],
-    pathex=['src'],
+    pathex=[_src_path],
     binaries=[],
     datas=[
         ('extension', 'extension'),
