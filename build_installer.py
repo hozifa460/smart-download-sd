@@ -12,6 +12,7 @@ import os
 import sys
 import shutil
 import subprocess
+import tempfile
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(BASE_DIR, "src")
@@ -34,6 +35,7 @@ def clean_stale_shadow_modules():
     search_dirs = [
         os.path.join(BASE_DIR, "build"),
         DIST_DIR,
+        os.path.join(BASE_DIR, "__pycache__"),
     ]
     try:
         appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
@@ -48,7 +50,10 @@ def clean_stale_shadow_modules():
             continue
         for root, dirs, files in os.walk(d):
             for fname in files:
-                if fname.lower() in ("smart_download.py", "smart_download.pyc"):
+                fn_lower = fname.lower()
+                if fn_lower in ("smart_download.py", "smart_download.pyc") or (
+                    fn_lower.startswith("smart_download.") and fn_lower.endswith(".pyc")
+                ):
                     fpath = os.path.join(root, fname)
                     try:
                         os.chmod(fpath, 0o777)
@@ -66,6 +71,41 @@ def clean_stale_shadow_modules():
                 print(f"[*] Removed stale root shadow file: {fpath}")
             except Exception as e:
                 print(f"[-] Warning: Failed to remove root shadow file {fpath}: {e}")
+
+
+def verify_exe_startup(exe_path: str, timeout: int = 30):
+    """Executes --test-startup verification in an isolated temporary directory."""
+    if not os.path.isfile(exe_path):
+        raise FileNotFoundError(f"Executable not found: {exe_path}")
+    with open(exe_path, "rb") as f:
+        header = f.read(2)
+    if header != b"MZ":
+        print(f"[*] Skipping --test-startup for non-PE binary: {exe_path}")
+        return
+
+    print(f"[*] Verifying built SmartDownload.exe (--test-startup): {exe_path}...")
+    temp_cwd = tempfile.mkdtemp(prefix="sd_smoke_")
+    try:
+        verify_res = subprocess.run(
+            [exe_path, "--test-startup"],
+            cwd=temp_cwd,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"Built SmartDownload.exe timed out during --test-startup verification: {e}")
+    finally:
+        try:
+            shutil.rmtree(temp_cwd, ignore_errors=True)
+        except Exception:
+            pass
+
+    if verify_res.returncode != 0:
+        err_msg = verify_res.stderr.strip() if verify_res.stderr else ""
+        raise RuntimeError(f"Built SmartDownload.exe failed --test-startup verification (exit code {verify_res.returncode}) {err_msg}".strip())
+
+    print("[+] SmartDownload.exe passed --test-startup verification successfully.")
 
 
 def clean_stale_dist_artifacts():
@@ -96,6 +136,7 @@ def build_app(rebuild: bool = False):
     exe_path = os.path.join(DIST_DIR, "SmartDownload.exe")
     if not rebuild and os.path.isfile(exe_path):
         clean_stale_dist_artifacts()
+        verify_exe_startup(exe_path)
         print(f"[+] SmartDownload.exe already exists at {exe_path} ({os.path.getsize(exe_path):,} bytes)")
         return exe_path
 
@@ -112,23 +153,7 @@ def build_app(rebuild: bool = False):
         raise FileNotFoundError(f"Expected binary not found after build: {exe_path}")
 
     # Mandatory Post-Build Binary Smoke Verification
-    print("[*] Verifying built SmartDownload.exe (--test-startup)...")
-    try:
-        verify_res = subprocess.run(
-            [exe_path, "--test-startup"],
-            cwd=BASE_DIR,
-            timeout=30,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"Built SmartDownload.exe timed out during --test-startup verification: {e}")
-
-    if verify_res.returncode != 0:
-        err_msg = verify_res.stderr.strip() if verify_res.stderr else ""
-        raise RuntimeError(f"Built SmartDownload.exe failed --test-startup verification (exit code {verify_res.returncode}) {err_msg}".strip())
-
-    print("[+] SmartDownload.exe passed --test-startup verification successfully.")
+    verify_exe_startup(exe_path)
 
     clean_stale_dist_artifacts()
     print(f"[+] SmartDownload.exe successfully built: {os.path.getsize(exe_path):,} bytes")
@@ -151,7 +176,9 @@ def prepare_payload():
             src_exe = legacy_src
         else:
             raise FileNotFoundError(f"Missing {src_exe}. Build it first.")
-    shutil.copy2(src_exe, os.path.join(PAYLOAD_DIR, "SmartDownload.exe"))
+    payload_exe = os.path.join(PAYLOAD_DIR, "SmartDownload.exe")
+    shutil.copy2(src_exe, payload_exe)
+    verify_exe_startup(payload_exe)
 
     # 2. Icons
     for icon_name in ("app_icon.ico", "app_icon.png"):

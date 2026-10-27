@@ -605,6 +605,18 @@ class TestStandaloneExeBuild(unittest.TestCase):
                 pass
             time.sleep(0.5)
 
+    def test_clean_stale_shadow_modules(self):
+        """Verifies that clean_stale_shadow_modules purges shadow files from __pycache__ and root."""
+        from build_installer import clean_stale_shadow_modules
+        pycache_dir = os.path.join(PROJECT_ROOT, "__pycache__")
+        os.makedirs(pycache_dir, exist_ok=True)
+        dummy_pyc = os.path.join(pycache_dir, "smart_download.cpython-999.pyc")
+        with open(dummy_pyc, "w") as f:
+            f.write("dummy")
+        self.assertTrue(os.path.isfile(dummy_pyc))
+        clean_stale_shadow_modules()
+        self.assertFalse(os.path.isfile(dummy_pyc), "Dummy shadow pyc was not removed by clean_stale_shadow_modules")
+
 
 if __name__ == "__main__":
     unittest.main()
