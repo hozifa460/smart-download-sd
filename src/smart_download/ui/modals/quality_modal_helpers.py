@@ -25,25 +25,17 @@ def attach_selected_tracks_to_option(
         idx = cb_audio.current()
         if 0 <= idx < len(audio_tracks):
             selected_option.selected_audio_track = audio_tracks[idx]
-    sub_mode = "soft_embed"
+    sub_mode = "hard_burn"
     if cb_sub:
         mode_fn = getattr(cb_sub, "get_selected_mode", None)
-        sub_mode = mode_fn() if callable(mode_fn) else getattr(cb_sub, "_selected_mode", "soft_embed")
-    selected_option.subtitle_embed_mode = sub_mode or "soft_embed"
+        sub_mode = mode_fn() if callable(mode_fn) else getattr(cb_sub, "_selected_mode", "hard_burn")
+    selected_option.subtitle_embed_mode = sub_mode or "hard_burn"
     if subtitle_tracks and cb_sub:
         idx = cb_sub.current()
-        if idx <= 0 and len(subtitle_tracks) > 1 and (sub_mode == "hard_burn" or getattr(cb_sub, "_user_touched_mode", False)):
-            ar_idx = next(
-                (i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")),
-                None
-            )
-            idx = ar_idx if ar_idx is not None else 1
-            try:
-                cb_sub.current(idx)
-            except Exception:
-                pass
-        if 0 <= idx < len(subtitle_tracks):
+        if 0 < idx < len(subtitle_tracks):
             selected_option.selected_subtitle_track = subtitle_tracks[idx]
+        else:
+            selected_option.selected_subtitle_track = None
 
 
 def resolve_final_dest(

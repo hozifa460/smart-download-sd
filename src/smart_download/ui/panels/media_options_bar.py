@@ -421,6 +421,11 @@ class MediaOptionsBarMixin:
         theme_d = getattr(self, "_theme_dict", None) or ({"c_bg": self.c_bg, "c_panel": self.c_panel, "c_panel_light": self.c_panel_light, "c_border": self.c_border, "c_accent": self.c_accent, "c_accent_dark": self.c_accent_dark, "c_success": self.c_success, "c_text_bright": self.c_text_bright, "c_text_muted": self.c_text_muted, "c_input_bg": self.c_input_bg} if hasattr(self, "c_bg") else {})
         dest_p = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or (self.dest_input.get().strip() if hasattr(self, "dest_input") else "")
 
+        sel_mode = "hard_burn"
+        if hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes"):
+            m_idx = self.cb_main_sub_mode.current()
+            if 0 <= m_idx < len(self._main_sub_mode_codes): sel_mode = self._main_sub_mode_codes[m_idx]
+
         def _sync_ui(opt, dst):
             if opt and opts and hasattr(self, "cb_main_quality"):
                 for i, o in enumerate(opts):
@@ -432,20 +437,19 @@ class MediaOptionsBarMixin:
                     if a == sel_a or a.get("track_id") == sel_a.get("track_id"):
                         self.cb_main_audio.current(i); break
             sel_s = getattr(opt, "selected_subtitle_track", None)
-            if subs and sel_s and hasattr(self, "cb_main_sub"):
+            if subs and hasattr(self, "cb_main_sub"):
                 for i, s in enumerate(subs):
-                    if s == sel_s or s.get("sub_id") == sel_s.get("sub_id"):
+                    if (sel_s and (s == sel_s or s.get("sub_id") == sel_s.get("sub_id"))) or (not sel_s and i == 0):
                         self.cb_main_sub.current(i)
-                        if hasattr(self, "cb_main_sub_mode"):
-                            self.cb_main_sub_mode.configure(state="readonly" if i > 0 else "disabled")
+                        if hasattr(self, "cb_main_sub_mode"): self.cb_main_sub_mode.configure(state="readonly" if i > 0 else "disabled")
                         break
             sm = getattr(opt, "subtitle_embed_mode", None)
-            if sm and hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes"):
-                if sm in self._main_sub_mode_codes:
-                    self.cb_main_sub_mode.current(self._main_sub_mode_codes.index(sm))
+            if sm and hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes") and sm in self._main_sub_mode_codes:
+                self.cb_main_sub_mode.current(self._main_sub_mode_codes.index(sm))
             if dst and hasattr(self, "entry_dest") and self.entry_dest and tk:
-                self.entry_dest.delete(0, tk.END)
-                self.entry_dest.insert(0, dst)
+                self.entry_dest.delete(0, tk.END); self.entry_dest.insert(0, dst)
+            ctx["selected_option"] = opt
+            if dst: ctx["final_dest"] = dst
 
         def _on_preview_confirm(selected_opt, final_dest):
             _sync_ui(selected_opt, final_dest)
@@ -458,8 +462,7 @@ class MediaOptionsBarMixin:
                 from ...services.youtube_service import YouTubeResolver
                 resolver = YouTubeResolver(on_log=self.log, cookies_from_browser=getattr(self, "cookies_browser", "auto"), cookies_file=getattr(self, "cookies_file", ""))
             stream_info = resolver.build_stream_info(info, selected_opt) if resolver else None
-            self._last_media_context = {**dict(ctx), "selected_option": selected_opt, "final_dest": final_dest}
-            self._pending_media_context = None
+            self._last_media_context = {**dict(ctx), "selected_option": selected_opt, "final_dest": final_dest}; self._pending_media_context = None
             if stream_info and hasattr(self, "_launch_stream_coordinator"):
                 self._launch_stream_coordinator(stream_info, final_dest, max_conn, bytes_limit)
 
@@ -471,7 +474,8 @@ class MediaOptionsBarMixin:
                 selected_audio_track=sel_aud, options=opts, audio_tracks=auds, subtitle_tracks=subs,
                 default_dest_path=dest_p, on_confirm=_on_preview_confirm,
                 on_open_in_main=lambda opt, dst: _sync_ui(opt, dst),
-                parent_app=self, on_log=self.log if hasattr(self, "log") else print
+                parent_app=self, on_log=self.log if hasattr(self, "log") else print,
+                subtitle_embed_mode=sel_mode
             )
         except Exception as e:
             if hasattr(self, "log"): self.log(f"[PREVIEW ERROR] {e}")

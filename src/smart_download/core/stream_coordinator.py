@@ -532,14 +532,15 @@ class StreamDownloadCoordinator:
 
     def _process_subtitles(self, target_path: str):
         sub = getattr(self.stream_info, "subtitle_track", None)
-        mode = getattr(self.stream_info, "subtitle_embed_mode", "soft_embed")
+        mode = getattr(self.stream_info, "subtitle_embed_mode", "hard_burn")
         if sub and sub.get("sub_id") not in (None, "none") and (sub.get("url") or sub.get("base_url")):
             try:
                 if mode == "hard_burn" and self.on_progress and os.path.isfile(target_path):
                     cur_sz = os.path.getsize(target_path)
                     self.on_progress(cur_sz, cur_sz, self._last_active_speed, "Burning Subtitles...", 0)
                 from ..services.youtube_tracks import handle_subtitles_post_download
-                handle_subtitles_post_download(self.stream_info, target_path, on_log=self.log, cancel_event=self._cancel_event)
+                f_path = handle_subtitles_post_download(self.stream_info, target_path, on_log=self.log, cancel_event=self._cancel_event)
+                if f_path and os.path.isfile(f_path): self.destination_path = f_path
             except Exception as e:
                 self.log(f"[SUBTITLES] Warning: {e}")
 

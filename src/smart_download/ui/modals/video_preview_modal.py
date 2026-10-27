@@ -129,7 +129,7 @@ def open_video_preview(
     parent_app: Optional[Any] = None,
     modal_ref: Optional[Any] = None,
     use_bridge: bool = True,
-    subtitle_embed_mode: str = "soft_embed"
+    subtitle_embed_mode: str = "hard_burn"
 ) -> str:
     """
     Builds and opens a real, VidMate-style video preview with synchronized live audio dubbing,

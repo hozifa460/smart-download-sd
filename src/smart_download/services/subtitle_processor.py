@@ -75,7 +75,9 @@ def _get_ascii_safe_temp_dir(fallback_dir: str) -> str:
     import tempfile
     candidates = [
         tempfile.gettempdir(),
+        r"C:\Users\Public",
         r"C:\Users\Public\Documents",
+        r"C:\Users\Public\Downloads",
         r"C:\Temp",
         r"C:\Windows\Temp",
     ]
@@ -290,7 +292,12 @@ def burn_subtitle_into_video(
             rc, err = _run_burn_cmd(cmd)
             if rc == 0:
                 if os.path.isfile(temp_burn_mp4) and os.path.getsize(temp_burn_mp4) > 0:
-                    os.replace(temp_burn_mp4, abs_video)
+                    for _ in range(3):
+                        try:
+                            os.replace(temp_burn_mp4, abs_video)
+                            break
+                        except Exception:
+                            time.sleep(0.08)
                 if on_log:
                     on_log(f"[SUBTITLES] Successfully burned subtitles permanently into video frames (Candidate {idx}).")
                 success = True
@@ -334,23 +341,23 @@ def burn_subtitle_into_video(
 def handle_subtitles_post_download(
     stream_info: Any, output_path: str, on_log: Optional[Callable[[str], None]] = None,
     cancel_event: Optional[Any] = None
-) -> None:
-    """Post-download pipeline: handles external SRT, soft-muxing, or hard burning based on selected mode."""
-    sub = getattr(stream_info, "subtitle_track", None)
+) -> str:
+    """Post-download pipeline: handles external SRT, soft-muxing, or hard burning based on selected mode. Returns final output path."""
+    sub = getattr(stream_info, "subtitle_track", None) or getattr(stream_info, "selected_subtitle_track", None)
     if not sub or sub.get("sub_id") in (None, "none") or (not sub.get("url") and not sub.get("base_url")) or (cancel_event and cancel_event.is_set()):
-        return
+        return output_path
     try:
         if on_log:
             on_log(f"[SUBTITLES] Downloading subtitle track: {sub.get('label', sub.get('language', 'sub'))}...")
         srt_path = download_subtitle_as_srt(sub, output_path)
-        mode = getattr(stream_info, "subtitle_embed_mode", "soft_embed")
+        mode = getattr(stream_info, "subtitle_embed_mode", "hard_burn")
 
         if not srt_path or not os.path.isfile(srt_path) or (cancel_event and cancel_event.is_set()):
             if on_log and not (cancel_event and cancel_event.is_set()):
                 on_log("[SUBTITLES] Warning: Failed to download or convert subtitle track.")
             if mode == "hard_burn":
                 output_path = strip_burn_tag_from_filename(output_path)
-            return
+            return output_path
 
         if on_log:
             on_log(f"[SUBTITLES] Saved subtitle to {os.path.basename(srt_path)}")
@@ -358,7 +365,7 @@ def handle_subtitles_post_download(
         if mode == "srt_only" or (cancel_event and cancel_event.is_set()):
             if on_log and mode == "srt_only":
                 on_log("[SUBTITLES] External .srt saved (SRT-only mode selected; skipping video mux).")
-            return
+            return output_path
 
         ffmpeg_bin = find_ffmpeg_bin()
         if not ffmpeg_bin:
@@ -366,17 +373,18 @@ def handle_subtitles_post_download(
                 on_log("[SUBTITLES] FFmpeg not found; skipping video subtitle embedding/burning.")
             if mode == "hard_burn":
                 output_path = strip_burn_tag_from_filename(output_path)
-            return
+            return output_path
 
         if not output_path.lower().endswith(".mp4"):
-            return
+            return output_path
 
         sub_kwargs = {"cancel_event": cancel_event} if cancel_event is not None else {}
-        stem = os.path.splitext(output_path)[0]
-        default_srt = f"{stem}.srt"
+        orig_stem = os.path.splitext(output_path)[0]
+        default_srt = f"{orig_stem}.srt"
 
         def _cleanup_srt():
-            for p_path in (srt_path, default_srt):
+            cur_stem = os.path.splitext(output_path)[0]
+            for p_path in {srt_path, default_srt, f"{cur_stem}.srt"}:
                 if p_path and os.path.isfile(p_path):
                     try:
                         os.remove(p_path)
@@ -400,7 +408,9 @@ def handle_subtitles_post_download(
             soft_ok = embed_subtitle_into_mp4(output_path, srt_path, sub.get("language", "und"), ffmpeg_bin, on_log=on_log, **sub_kwargs)
             if soft_ok:
                 _cleanup_srt()
+        return output_path
     except Exception as exc:
         if on_log:
             on_log(f"[SUBTITLES] Warning: Subtitle handling encountered an issue: {exc}")
+        return output_path
 

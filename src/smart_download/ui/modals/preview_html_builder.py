@@ -212,7 +212,7 @@ function syncStateToBridge() {
             q_idx: selected_q_idx,
             a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
             s_idx: subSelect ? parseInt(subSelect.value) : 0,
-            sub_mode: modeSelect ? modeSelect.value : "soft_embed",
+            sub_mode: modeSelect ? modeSelect.value : "hard_burn",
             dest_path: destInput ? destInput.value.trim() : ""
         })
     }).catch(e => {});
@@ -221,7 +221,7 @@ function requestUpdatedFilename() {
     if (!sid || !destInput) return;
     fetch(`${bridgeBase}/api/update_filename?sid=${encodeURIComponent(sid)}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q_idx: selected_q_idx, sub_mode: modeSelect ? modeSelect.value : "soft_embed", current_dest: destInput.value })
+        body: JSON.stringify({ q_idx: selected_q_idx, sub_mode: modeSelect ? modeSelect.value : "hard_burn", current_dest: destInput.value })
     }).then(r => r.json()).then(d => { if (d && d.dest_path) destInput.value = d.dest_path; }).catch(e => {});
 }
 function doAction(actionType) {
@@ -235,7 +235,7 @@ function doAction(actionType) {
             action: actionType, q_idx: selected_q_idx,
             a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
             s_idx: subSelect ? parseInt(subSelect.value) : 0,
-            sub_mode: modeSelect ? modeSelect.value : "soft_embed",
+            sub_mode: modeSelect ? modeSelect.value : "hard_burn",
             dest_path: destInput ? destInput.value.trim() : ""
         })
     }).then(r => r.json()).then(() => { setTimeout(() => { window.close(); }, 120); }).catch(() => { window.close(); });
@@ -267,7 +267,7 @@ def generate_preview_html(
     bridge_port: Optional[int] = None,
     platform_name: Optional[str] = None,
     selected_sub_track: Optional[Dict[str, Any]] = None,
-    subtitle_embed_mode: str = "soft_embed"
+    subtitle_embed_mode: str = "hard_burn"
 ) -> str:
     """Generates modern dark-themed HTML5 preview player with synchronized dubbing and controls."""
     safe_title = html.escape(video_title or "Video Preview")

@@ -384,8 +384,10 @@ class YouTubeFormatBuilderMixin:
 
         res_str = opt.resolution_label if (opt.resolution_label and "Vertical" in opt.resolution_label) else (f"{opt.height}p" if opt.height > 0 else "Audio Only")
 
-        sel_audio = getattr(opt, "selected_audio_track", None)
-        sub_track = getattr(opt, "selected_subtitle_track", None)
+        sel_audio = getattr(opt, "selected_audio_track", None) or getattr(opt, "audio_track", None)
+        sub_track = getattr(opt, "selected_subtitle_track", None) or getattr(opt, "subtitle_track", None)
+        if sub_track and sub_track.get("sub_id") in (None, "none"):
+            sub_track = None
         sub_mode = getattr(opt, "subtitle_embed_mode", None)
         if not sub_mode:
             try:
@@ -409,7 +411,7 @@ class YouTubeFormatBuilderMixin:
                     opt.ext = sel_audio["ext"]
                 if sel_audio.get("filesize"):
                     opt.filesize_approx = int(sel_audio["filesize"])
-        elif is_dubbed_selection and has_ffmpeg():
+        elif is_dubbed_selection and (not opt.is_progressive or has_ffmpeg()):
             opt.is_progressive = False
             opt.audio_url = sel_audio["url"]
             opt.audio_ext = sel_audio.get("ext", "m4a")

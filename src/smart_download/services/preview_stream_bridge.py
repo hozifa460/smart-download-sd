@@ -82,7 +82,7 @@ def register_preview_session(
     sid: Optional[str] = None,
     selected_audio_track: Optional[Dict[str, Any]] = None,
     selected_sub_track: Optional[Dict[str, Any]] = None,
-    subtitle_embed_mode: str = "soft_embed"
+    subtitle_embed_mode: str = "hard_burn"
 ) -> str:
     """Registers an active media preview session and returns its unique random session ID token."""
     start_preview_bridge()
@@ -93,7 +93,7 @@ def register_preview_session(
         subtitle_tracks=subtitle_tracks or [], default_dest_path=str(default_dest_path or "").strip(),
         on_confirm=on_confirm, on_open_in_main=on_open_in_main, on_cancel=on_cancel, parent_app=parent_app,
         modal_ref=modal_ref, selected_audio_track=selected_audio_track, selected_sub_track=selected_sub_track,
-        subtitle_embed_mode=subtitle_embed_mode or "soft_embed"
+        subtitle_embed_mode=subtitle_embed_mode or "hard_burn"
     )
     with _SESSIONS_LOCK:
         _SESSIONS[session_id] = session
@@ -427,20 +427,19 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         q_idx = int(body.get("q_idx", 0))
         a_idx = int(body.get("a_idx", 0))
         s_idx = int(body.get("s_idx", 0))
-        sub_mode = str(body.get("sub_mode", "soft_embed"))
+        sub_mode = str(body.get("sub_mode", "hard_burn"))
         dest_path = str(body.get("dest_path", "")).strip()
 
         selected_opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
         if selected_opt:
             if session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
                 selected_opt.selected_audio_track = session.audio_tracks[a_idx]
-            selected_opt.subtitle_embed_mode = sub_mode or "soft_embed"
+            selected_opt.subtitle_embed_mode = sub_mode or "hard_burn"
             if session.subtitle_tracks:
-                if s_idx <= 0 and len(session.subtitle_tracks) > 1 and sub_mode == "hard_burn":
-                    ar_idx = next((i for i, s in enumerate(session.subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
-                    s_idx = ar_idx if ar_idx is not None else 1
-                if 0 <= s_idx < len(session.subtitle_tracks):
+                if 0 < s_idx < len(session.subtitle_tracks):
                     selected_opt.selected_subtitle_track = session.subtitle_tracks[s_idx]
+                else:
+                    selected_opt.selected_subtitle_track = None
 
         final_dest = dest_path or session.default_dest_path
         if selected_opt:
@@ -476,16 +475,16 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_api_sync_state(self, session: PreviewSession, body: Dict[str, Any]) -> None:
         """Synchronizes format, dubbed audio, subtitle, and mode selections live to Tkinter modal."""
-        q_idx = int(body.get("q_idx", 0))
-        a_idx = int(body.get("a_idx", 0))
-        s_idx = int(body.get("s_idx", 0))
-        sub_mode = str(body.get("sub_mode", "soft_embed"))
+        q_idx, a_idx, s_idx = int(body.get("q_idx", 0)), int(body.get("a_idx", 0)), int(body.get("s_idx", 0))
+        sub_mode = str(body.get("sub_mode", "hard_burn"))
         dest_path = str(body.get("dest_path", "")).strip()
 
         if session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
             session.selected_audio_track = session.audio_tracks[a_idx]
-        if session.subtitle_tracks and 0 <= s_idx < len(session.subtitle_tracks):
+        if session.subtitle_tracks and 0 < s_idx < len(session.subtitle_tracks):
             session.selected_sub_track = session.subtitle_tracks[s_idx]
+        else:
+            session.selected_sub_track = None
         session.subtitle_embed_mode = sub_mode
         if dest_path:
             session.default_dest_path = dest_path
@@ -515,12 +514,16 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 if hasattr(m, "cb_sub") and m.cb_sub:
                     m.cb_sub.current(s_idx)
                     m.cb_sub._selected_mode = sub_mode
+                    m.cb_sub._user_touched_mode = True
                     if hasattr(m.cb_sub, "_mode_var"):
                         m.cb_sub._mode_var.set(sub_mode)
-                    if hasattr(m.cb_sub, "_sub_mode_cb") and hasattr(m.cb_sub._sub_mode_cb, "current"):
+                    mode_cb = getattr(m.cb_sub, "_mode_combobox", None) or getattr(m.cb_sub, "_sub_mode_cb", None)
+                    if mode_cb and hasattr(mode_cb, "current"):
                         codes = getattr(m.cb_sub, "_mode_codes", ["soft_embed", "hard_burn", "srt_only"])
                         if sub_mode in codes:
-                            m.cb_sub._sub_mode_cb.current(codes.index(sub_mode))
+                            mode_cb.current(codes.index(sub_mode))
+                        if hasattr(mode_cb, "configure"):
+                            mode_cb.configure(state="readonly" if s_idx > 0 else "disabled")
                 if dest_path and hasattr(m, "entry_dest") and m.entry_dest:
                     import tkinter as tk
                     m.entry_dest.delete(0, tk.END)

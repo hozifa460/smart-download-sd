@@ -462,7 +462,7 @@ class QualitySelectionModal(tk.Toplevel):
                 parent_app=self.parent_app,
                 modal_ref=self,
                 use_bridge=True,
-                subtitle_embed_mode=getattr(self.selected_option, "subtitle_embed_mode", "soft_embed"),
+                subtitle_embed_mode=getattr(self.selected_option, "subtitle_embed_mode", "hard_burn"),
             )
         except Exception:
             pass

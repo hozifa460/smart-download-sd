@@ -992,6 +992,7 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         mock_modal.cb_audio = MagicMock()
         mock_modal.cb_sub = MagicMock()
         mock_modal.cb_sub._mode_var = MagicMock()
+        mock_modal.cb_sub._mode_combobox = MagicMock()
         mock_modal.cb_sub._sub_mode_cb = MagicMock()
         mock_modal.cb_sub._mode_codes = ["soft_embed", "hard_burn", "srt_only"]
         mock_modal.entry_dest = MagicMock()
@@ -1035,10 +1036,26 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             mock_modal.cb_audio.current.assert_called_with(1)
             mock_modal.cb_sub.current.assert_called_with(1)
             self.assertEqual(mock_modal.cb_sub._selected_mode, "hard_burn")
+            self.assertTrue(mock_modal.cb_sub._user_touched_mode)
             mock_modal.cb_sub._mode_var.set.assert_called_with("hard_burn")
-            mock_modal.cb_sub._sub_mode_cb.current.assert_called_with(1)
+            mock_modal.cb_sub._mode_combobox.current.assert_called_with(1)
+            mock_modal.cb_sub._mode_combobox.configure.assert_called_with(state="readonly")
             mock_modal.entry_dest.delete.assert_called_with(0, "end")
             mock_modal.entry_dest.insert.assert_called_with(0, r"C:\Downloads\TestVideo [720p] [Sub].mp4")
+
+            # Now test s_idx = 0 disables combobox and clears subtitle track
+            after_callbacks.clear()
+            payload_nosub = json.dumps({
+                "q_idx": 1, "a_idx": 0, "s_idx": 0, "sub_mode": "hard_burn", "dest_path": r"C:\Downloads\TestVideo [720p].mp4"
+            }).encode("utf-8")
+            req_nosub = urllib.request.Request(sync_url, data=payload_nosub, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req_nosub, timeout=5) as resp:
+                self.assertEqual(resp.getcode(), 200)
+            self.assertEqual(len(after_callbacks), 1)
+            after_callbacks[0]()
+            self.assertIsNone(opt1.selected_subtitle_track)
+            mock_modal.cb_sub.current.assert_called_with(0)
+            mock_modal.cb_sub._mode_combobox.configure.assert_called_with(state="disabled")
         finally:
             unregister_preview_session(sid)
 
