@@ -235,9 +235,14 @@ def install_application(
     try:
         try:
             from ..services.core_patch_updater import get_core_plugin_dir
+            stale_plugin_dir = get_core_plugin_dir()
         except Exception:
-            from smart_download.services.core_patch_updater import get_core_plugin_dir
-        stale_plugin_dir = get_core_plugin_dir()
+            try:
+                from smart_download.services.core_patch_updater import get_core_plugin_dir
+                stale_plugin_dir = get_core_plugin_dir()
+            except Exception:
+                appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+                stale_plugin_dir = os.path.join(appdata, "SmartDownload", "core_plugin")
         if stale_plugin_dir and os.path.isdir(stale_plugin_dir):
             shutil.rmtree(stale_plugin_dir, ignore_errors=True)
     except Exception:

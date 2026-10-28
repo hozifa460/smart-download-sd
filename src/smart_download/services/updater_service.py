@@ -54,6 +54,13 @@ YTDLP_GITHUB_RELEASES_API = YTDLP_GITHUB_LATEST_API
 
 def get_app_data_dir() -> str:
     """Returns persistent application data directory (%APPDATA%\\SmartDownload on Windows)."""
+    cfg_override = os.environ.get("SD_CONFIG_DIR")
+    if cfg_override:
+        try:
+            os.makedirs(cfg_override, exist_ok=True)
+        except Exception:
+            pass
+        return cfg_override
     if sys.platform.startswith("win"):
         appdata = os.environ.get("APPDATA")
         if appdata:

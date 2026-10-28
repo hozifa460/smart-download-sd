@@ -377,6 +377,26 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
                      patch("sys.frozen", True, create=True):
                     mode = init_core_loader(force=False)
                     self.assertEqual(mode, "plugin")
+
+                # Clean up imported modules from previous test
+                for k in list(sys.modules.keys()):
+                    if k == "smart_download" or k.startswith("smart_download."):
+                        sys.modules.pop(k, None)
+                sys.modules.update(orig_modules)
+
+                # 4. Older version + force=True or force=False -> MUST NOT activate (returns None)
+                with open(ver_file, "w", encoding="utf-8") as f:
+                    json.dump({"version": "1.0.0"}, f)
+                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
+                     patch("sys.frozen", True, create=True):
+                    self.assertIsNone(init_core_loader(force=False))
+                    self.assertIsNone(init_core_loader(force=True))
+
+                # 5. CoreHotPatchUpdater.activate_plugin directly rejects same or older version when force=False
+                up_same = CoreHotPatchUpdater(plugin_dir=plugin_root, current_version=APP_VERSION)
+                with open(ver_file, "w", encoding="utf-8") as f:
+                    json.dump({"version": APP_VERSION}, f)
+                self.assertFalse(up_same.activate_plugin(force=False))
             finally:
                 sys.path[:] = orig_sys_path
                 sys.meta_path[:] = orig_meta_path

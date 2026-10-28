@@ -440,8 +440,8 @@ class CoreHotPatchUpdater:
 
             plugin_ver = self.get_plugin_version()
             if not force and plugin_ver:
-                if is_newer_version(self.current_version, plugin_ver):
-                    self.log(f"[CORE PATCH] Bundled core ({self.current_version}) is newer than plugin ({plugin_ver}); keeping bundled.")
+                if not is_newer_version(plugin_ver, self.current_version):
+                    self.log(f"[CORE PATCH] Plugin ({plugin_ver}) is not strictly newer than current ({self.current_version}); keeping current.")
                     return False
 
             return _purge_and_reimport_core(self.plugin_dir)

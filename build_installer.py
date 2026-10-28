@@ -310,7 +310,7 @@ def main():
         except Exception as e:
             print(f"[-] Error updating installed application in default directory: {e}")
 
-    if args.rebuild_all:
+    if not args.installer_only:
         print("[*] Packaging and applying core patch...")
         try:
             from smart_download.services.core_patch_updater import build_core_patch_zip, CoreHotPatchUpdater
