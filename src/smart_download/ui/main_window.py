@@ -220,7 +220,12 @@ class ModernFramelessGUI(
                                for arg in sys.argv[1:])
         self._start_hidden: bool = bool(start_hidden)
         self._was_started_hidden: bool = bool(start_hidden)
-        self._startup_enabled: bool = bool(get_setting("startup_enabled", is_startup_enabled()))
+        if get_setting("startup_enabled", None) is True and not is_startup_enabled():
+            try:
+                enable_startup(minimized=True)
+            except Exception:
+                pass
+        self._startup_enabled: bool = bool(is_startup_enabled())
         self.minimize_to_tray: bool = bool(get_setting("minimize_to_tray", True))
         self.auto_categorize_folders: bool = bool(get_setting("auto_categorize_folders", True))
         self.history_manager = DownloadHistoryManager()

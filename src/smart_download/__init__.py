@@ -16,6 +16,7 @@ from .config import (
     save_settings,
     get_setting,
     set_setting,
+    get_base_downloads_dir,
 )
 from .locales.i18n import LocalizationManager, tr, get_current_language, set_current_language
 from .core.engine import TurboDownloadEngine
@@ -40,6 +41,7 @@ __all__ = [
     "save_settings",
     "get_setting",
     "set_setting",
+    "get_base_downloads_dir",
     "LocalizationManager",
     "tr",
     "get_current_language",

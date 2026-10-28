@@ -15,7 +15,7 @@ except Exception:
     ttk = None  # type: ignore
 
 from smart_download.i18n import tr
-from smart_download.config import get_setting, set_setting
+from smart_download.config import get_setting, set_setting, get_base_downloads_dir
 from smart_download.utils.file_ops import (
     apply_media_filename_tags,
     generate_unique_destination_path,
@@ -358,7 +358,8 @@ class MediaOptionsBarMixin:
         first_ext = first_opt.ext if first_opt else "mp4"
         first_lbl = first_opt.resolution_label if first_opt else ""
 
-        target_dest = preferred_dest if (preferred_dest and clean_title.lower() in os.path.basename(preferred_dest).lower()) else (ctx.get("final_dest") or preferred_dest or os.path.join(os.path.expanduser("~"), "Downloads", f"{clean_title}.{first_ext}"))
+        base_dl = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
+        target_dest = preferred_dest if (preferred_dest and clean_title.lower() in os.path.basename(preferred_dest).lower()) else (ctx.get("final_dest") or preferred_dest or os.path.join(base_dl, f"{clean_title}.{first_ext}"))
         initial_dest = apply_media_filename_tags(target_dest, quality_label=first_lbl, is_sub_burned=False, ext=first_ext)
         reserved = self.history_manager.get_active_or_queued_paths() if getattr(self, "history_manager", None) else None
         dest = generate_unique_destination_path(initial_dest, reserved_paths=reserved)
@@ -508,13 +509,10 @@ class MediaOptionsBarMixin:
 
             if hasattr(self, "cb_main_sub") and subtitle_tracks:
                 s_idx = self.cb_main_sub.current()
-                if s_idx <= 0 and len(subtitle_tracks) > 1 and sub_mode == "hard_burn":
-                    ar_idx = next((i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
-                    s_idx = ar_idx if ar_idx is not None else 1
-                    try: self.cb_main_sub.current(s_idx)
-                    except Exception: pass
-                if 0 <= s_idx < len(subtitle_tracks):
+                if 0 < s_idx < len(subtitle_tracks):
                     selected_opt.selected_subtitle_track = subtitle_tracks[s_idx]
+                else:
+                    selected_opt.selected_subtitle_track = None
 
         final_dest = (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "") or ctx.get("final_dest", "")
         if selected_opt:

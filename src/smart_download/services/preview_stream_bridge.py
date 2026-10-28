@@ -233,20 +233,24 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
     def _resolve_video_target(self, session: PreviewSession, q_idx: int) -> tuple[str, Dict[str, str]]:
         """Finds the best progressive playable stream URL and forwarding HTTP headers."""
         opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
-        if opt and getattr(opt, "is_progressive", False) and not getattr(opt, "is_audio_only", False) and getattr(opt, "video_url", None):
+        if opt and getattr(opt, "is_audio_only", False) and getattr(opt, "audio_url", None):
+            return str(opt.audio_url), dict(getattr(opt, "audio_headers", {}) or {})
+
+        if opt and getattr(opt, "is_progressive", False) and getattr(opt, "video_url", None):
             return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
 
-        # Check info_dict formats for fast progressive MP4
+        target_h = int(getattr(opt, "height", 0) or 720) if opt else 720
+        dub_active = bool(session.selected_audio_track and session.selected_audio_track.get("track_id") not in (None, "original") and session.selected_audio_track.get("url"))
+
         formats = session.info_dict.get("formats") or []
         prog_formats = [
             f for f in formats
             if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none"
             and str(f.get("ext") or "").lower() == "mp4"
         ]
-        if prog_formats:
-            prog_formats.sort(key=lambda f: int(f.get("height") or 0), reverse=True)
-            fast = [f for f in prog_formats if int(f.get("height") or 0) <= 720]
-            chosen = fast[0] if fast else prog_formats[0]
+
+        if prog_formats and not dub_active:
+            chosen = min(prog_formats, key=lambda f: abs(int(f.get("height") or 0) - target_h))
             headers = dict(chosen.get("http_headers") or {})
             if "Referer" not in headers and session.url:
                 headers["Referer"] = session.url
@@ -254,6 +258,13 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if opt and getattr(opt, "video_url", None):
             return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
+
+        if prog_formats:
+            chosen = min(prog_formats, key=lambda f: abs(int(f.get("height") or 0) - target_h))
+            headers = dict(chosen.get("http_headers") or {})
+            if "Referer" not in headers and session.url:
+                headers["Referer"] = session.url
+            return str(chosen.get("url") or ""), headers
 
         headers = dict(session.info_dict.get("http_headers") or {})
         if "Referer" not in headers and session.url:
@@ -364,7 +375,12 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             session.default_dest_path = chosen
             try:
                 from ..config import set_setting
-                set_setting("last_download_dir", os.path.dirname(os.path.abspath(chosen)))
+                from ..utils.file_ops import CATEGORY_SUBFOLDERS
+                cd = os.path.dirname(os.path.abspath(chosen))
+                auto_cat = getattr(session.parent_app, "auto_categorize_folders", True) if session.parent_app else True
+                if auto_cat and os.path.basename(cd).lower() in {s.lower() for s in CATEGORY_SUBFOLDERS.values()}:
+                    cd = os.path.dirname(cd)
+                set_setting("last_download_dir", cd)
             except Exception: pass
             self._send_json({"ok": True, "dest": chosen})
         else:

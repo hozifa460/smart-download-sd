@@ -11,7 +11,7 @@ except Exception:
     filedialog = None  # type: ignore
 
 from smart_download.i18n import tr
-from smart_download.config import get_setting, set_setting
+from smart_download.config import get_setting, set_setting, get_base_downloads_dir
 from smart_download.utils import CATEGORY_SUBFOLDERS, resolve_categorized_path, derive_download_filename
 from .controls_panel import ControlsPanelMixin
 
@@ -50,8 +50,7 @@ class InputsPanelMixin(ControlsPanelMixin):
         self.lbl_dest = tk.Label(dest_row, text=tr("lbl_dest"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
         self.lbl_dest.pack(side=tk.LEFT)
 
-        saved_dir = get_setting("last_download_dir", "")
-        downloads_dir = saved_dir if (saved_dir and os.path.isdir(saved_dir)) else os.path.join(os.path.expanduser("~"), "Downloads")
+        downloads_dir = self._get_base_downloads_dir()
         default_fn = "cloudflare_50mb.bin"
         if getattr(self, "auto_categorize_folders", True):
             default_dest = resolve_categorized_path(downloads_dir, default_fn, auto_categorize=True)
@@ -66,6 +65,10 @@ class InputsPanelMixin(ControlsPanelMixin):
 
         if hasattr(self, "_build_media_options_bar"):
             self._build_media_options_bar(card)
+
+    def _get_base_downloads_dir(self) -> str:
+        """Returns the user's saved base download directory or defaults to ~/Downloads."""
+        return get_base_downloads_dir()
 
     def _paste_url(self):
         try:
@@ -82,14 +85,19 @@ class InputsPanelMixin(ControlsPanelMixin):
             return
         path = filedialog.asksaveasfilename(
             title="Select Destination File",
-            initialdir=os.path.dirname(self.entry_dest.get()) or os.path.expanduser("~"),
+            initialdir=os.path.dirname(self.entry_dest.get()) or self._get_base_downloads_dir(),
             initialfile=os.path.basename(self.entry_dest.get()) or "download.bin"
         )
         if path:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, path)
             try:
-                set_setting("last_download_dir", os.path.dirname(path))
+                chosen_dir = os.path.dirname(os.path.abspath(path))
+                base_name = os.path.basename(chosen_dir)
+                subfolders_lower = {s.lower() for s in CATEGORY_SUBFOLDERS.values()}
+                if getattr(self, "auto_categorize_folders", True) and (base_name in CATEGORY_SUBFOLDERS.values() or base_name.lower() in subfolders_lower):
+                    chosen_dir = os.path.dirname(chosen_dir)
+                set_setting("last_download_dir", chosen_dir)
             except Exception:
                 pass
 
@@ -119,7 +127,7 @@ class InputsPanelMixin(ControlsPanelMixin):
             return
         fn = derive_download_filename(url)
         cur_dest = self.entry_dest.get().strip()
-        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        downloads_dir = self._get_base_downloads_dir()
         dest_dir = os.path.dirname(cur_dest) if cur_dest else downloads_dir
         if not os.path.isdir(dest_dir):
             dest_dir = downloads_dir

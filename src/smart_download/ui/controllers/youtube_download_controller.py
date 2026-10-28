@@ -11,6 +11,7 @@ except Exception:
     tk = None  # type: ignore
 
 from smart_download.i18n import tr
+from smart_download.config import get_base_downloads_dir
 from smart_download.utils.file_ops import (
     resolve_categorized_path,
     generate_unique_destination_path,
@@ -109,7 +110,8 @@ class YouTubeDownloadControllerMixin:
                 clean_title = sanitize_filename(raw_title)
                 duration = int(info.get("duration") or 0)
 
-                dest_dir = os.path.dirname(dest) or os.path.join(os.path.expanduser("~"), "Downloads")
+                downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
+                dest_dir = os.path.dirname(dest) or downloads_dir
                 try:
                     os.makedirs(dest_dir, exist_ok=True)
                 except Exception:
@@ -117,7 +119,6 @@ class YouTubeDownloadControllerMixin:
 
                 initial_ext = options[0].ext or "mp4"
                 initial_fn = f"{clean_title}.{initial_ext}"
-                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
                 if getattr(self, "auto_categorize_folders", True) and hasattr(self, "_is_downloads_or_category_subfolder") and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
                     initial_dest = resolve_categorized_path(downloads_dir, initial_fn, auto_categorize=True)
                 else:

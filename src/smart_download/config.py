@@ -204,3 +204,11 @@ def set_setting(key: str, value: Any) -> bool:
     """Sets and persists a single setting value."""
     return save_settings({key: value})
 
+
+def get_base_downloads_dir() -> str:
+    """Returns the user's saved base download directory or defaults to ~/Downloads."""
+    saved_dir = str(get_setting("last_download_dir", "") or "").strip()
+    if saved_dir and os.path.isdir(saved_dir):
+        return saved_dir
+    return os.path.join(os.path.expanduser("~"), "Downloads")
+

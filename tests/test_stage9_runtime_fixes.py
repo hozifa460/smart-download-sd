@@ -505,18 +505,15 @@ class TestFetchingToastSafety(unittest.TestCase):
 
 
 class TestSubtitleAutoSelection(unittest.TestCase):
-    """Verifies subtitle auto-selection when hard_burn mode is chosen."""
+    """Verifies subtitle auto-selection when user actively touches mode vs No Subtitles default."""
 
-    def test_auto_select_track_when_hard_burn(self):
+    def test_no_subtitles_respected_when_mode_not_touched(self):
         from smart_download.ui.modals.quality_modal import QualitySelectionModal
 
         sub_tracks = [
             {"track_idx": 0, "name": "None", "code": "none"},
             {"track_idx": 1, "name": "Arabic", "code": "ar", "url": "https://example.com/sub.vtt"},
         ]
-
-        mock_parent = MagicMock()
-        mock_parent.winfo_exists.return_value = False
 
         opt = VideoFormatOption(
             format_id="137",
@@ -533,14 +530,47 @@ class TestSubtitleAutoSelection(unittest.TestCase):
         modal.cb_sub = MagicMock()
         modal.cb_sub.current.return_value = 0
         modal.cb_sub.get_selected_mode.return_value = "hard_burn"
+        modal.cb_sub._user_touched_mode = False
         modal.cb_audio = None
 
-        # When hard_burn is chosen and cb_sub is at 0 (None)
         modal._attach_selected_tracks()
 
-        # Verify track 1 (Arabic) is auto-selected
+        # When _user_touched_mode is False, idx == 0 must NOT be overridden
+        self.assertIsNone(opt.selected_subtitle_track)
+        self.assertEqual(opt.subtitle_embed_mode, "hard_burn")
+
+    def test_auto_select_track_when_user_touched_mode(self):
+        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+
+        sub_tracks = [
+            {"track_idx": 0, "name": "None", "code": "none"},
+            {"track_idx": 1, "name": "Arabic", "code": "ar", "url": "https://example.com/sub.vtt"},
+        ]
+
+        opt = VideoFormatOption(
+            format_id="137",
+            resolution_label="1080p",
+            height=1080,
+            ext="mp4",
+            filesize_approx=1000000,
+        )
+
+        modal = QualitySelectionModal.__new__(QualitySelectionModal)
+        modal.selected_option = opt
+        modal.audio_tracks = []
+        modal.subtitle_tracks = sub_tracks
+        modal.cb_sub = MagicMock()
+        modal.cb_sub.current.return_value = 0
+        modal.cb_sub.get_selected_mode.return_value = "hard_burn"
+        modal.cb_sub._user_touched_mode = True
+        modal.cb_audio = None
+
+        modal._attach_selected_tracks()
+
+        # When _user_touched_mode is True, track 1 is auto-selected
         self.assertEqual(opt.selected_subtitle_track, sub_tracks[1])
         self.assertEqual(opt.subtitle_embed_mode, "hard_burn")
+
 
 
 class TestHistoryRedownloadQuality(unittest.TestCase):

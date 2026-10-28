@@ -12,7 +12,7 @@ except Exception:
     filedialog = None  # type: ignore
 
 from smart_download.i18n import tr
-from smart_download.config import set_setting
+from smart_download.config import get_setting, set_setting
 from smart_download.utils import resolve_categorized_path
 from smart_download.services import is_startup_enabled, enable_startup, disable_startup
 
@@ -63,6 +63,11 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
                     return
             except Exception:
                 return
+            if get_setting("startup_enabled", None) is True and not is_startup_enabled():
+                try:
+                    enable_startup(minimized=True)
+                except Exception:
+                    pass
             enabled = is_startup_enabled()
             self._startup_enabled = enabled
             if enabled:

@@ -402,7 +402,7 @@ class QualitySelectionModal(tk.Toplevel):
 
     def _on_browse(self):
         cur = self.entry_dest.get().strip()
-        init_dir = os.path.dirname(cur) if cur else os.path.expanduser("~")
+        init_dir = os.path.dirname(cur) if cur else (getattr(self.parent_app, "_get_base_downloads_dir", lambda: os.path.expanduser("~"))())
         init_file = os.path.basename(cur) if cur else "download.mp4"
         chosen = filedialog.asksaveasfilename(parent=self, title="Save Video As", initialdir=init_dir, initialfile=init_file)
         if chosen:
@@ -411,7 +411,10 @@ class QualitySelectionModal(tk.Toplevel):
             self.dest_path = chosen
             try:
                 from ...config import set_setting
-                set_setting("last_download_dir", os.path.dirname(os.path.abspath(chosen)))
+                cd = os.path.dirname(os.path.abspath(chosen))
+                if getattr(self.parent_app, "auto_categorize_folders", True) and os.path.basename(cd).lower() in {s.lower() for s in CATEGORY_SUBFOLDERS.values()}:
+                    cd = os.path.dirname(cd)
+                set_setting("last_download_dir", cd)
             except Exception: pass
 
     def _attach_selected_tracks(self):

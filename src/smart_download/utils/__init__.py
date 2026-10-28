@@ -20,6 +20,7 @@ from .file_ops import (
     open_containing_folder,
     generate_unique_destination_path,
     apply_media_filename_tags,
+    get_base_downloads_dir,
 )
 
 try:
@@ -66,6 +67,7 @@ __all__ = [
     "open_containing_folder",
     "generate_unique_destination_path",
     "apply_media_filename_tags",
+    "get_base_downloads_dir",
     "_detach_photo_tk",
     "_detach_widget_tk_refs",
     "_drain_bg_tk_callbacks",

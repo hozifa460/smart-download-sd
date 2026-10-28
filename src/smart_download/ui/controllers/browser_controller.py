@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 
 import tkinter as tk
 
+from ...config import get_base_downloads_dir
 from ...utils.url_utils import is_potential_html_url, derive_download_filename
 from ...utils.file_ops import resolve_categorized_path
 from ...services.youtube_service import is_media_url, extract_media_platform, sanitize_filename
@@ -50,7 +51,7 @@ class BrowserControllerMixin:
         self.entry_url.insert(0, url)
 
         # Populate Destination entry
-        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
         cur_dest = self.entry_dest.get().strip()
         dest_dir = os.path.dirname(cur_dest) if cur_dest else downloads_dir
         if not os.path.isdir(dest_dir):
@@ -105,7 +106,7 @@ class BrowserControllerMixin:
                         self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
                     self._last_probed_info = dict(info)
 
-                    downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                    downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
                     cur_d = self.entry_dest.get().strip()
                     dest_dir = os.path.dirname(cur_d) if cur_d else downloads_dir
                     if not os.path.isdir(dest_dir):

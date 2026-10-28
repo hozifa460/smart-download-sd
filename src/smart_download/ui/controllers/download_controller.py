@@ -22,7 +22,7 @@ from smart_download.services.youtube_service import (
     extract_media_platform,
     sanitize_filename,
 )
-from smart_download.utils import resolve_categorized_path, derive_download_filename, generate_unique_destination_path
+from smart_download.utils import resolve_categorized_path, derive_download_filename, generate_unique_destination_path, get_base_downloads_dir
 from smart_download.ui.modals.quality_modal import QualitySelectionModal
 from smart_download.ui.modals.confirm_modal import DownloadConfirmationModal
 from smart_download.ui.modals.candidates_modal import MultipleCandidatesModal
@@ -124,7 +124,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             if info.get("resolved"):
                 self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
 
-            downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+            downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
             dest_dir = os.path.dirname(dest) if dest else downloads_dir
             if not os.path.isdir(dest_dir):
                 dest_dir = downloads_dir

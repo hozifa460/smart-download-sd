@@ -39,7 +39,6 @@ class ControlsPanelMixin:
         self.lbl_limit = tk.Label(row1, text=tr("lbl_speed_limiter"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
         self.lbl_limit.pack(side=tk.LEFT)
 
-        self.limit_preset_var = tk.StringVar(value="Unlimited")
         self.preset_options = [
             "Unlimited",
             "128 KB/s",
@@ -52,6 +51,10 @@ class ControlsPanelMixin:
             "20.0 MB/s",
             "Custom"
         ]
+        saved_preset = str(get_setting("speed_limit_preset", "Unlimited") or "Unlimited")
+        if saved_preset not in self.preset_options:
+            saved_preset = "Unlimited"
+        self.limit_preset_var = tk.StringVar(value=saved_preset)
         preset_combo = ttk.Combobox(row1, textvariable=self.limit_preset_var, values=self.preset_options, width=12, state="readonly")
         preset_combo.pack(side=tk.LEFT, padx=(4, 8))
         preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
@@ -60,8 +63,12 @@ class ControlsPanelMixin:
         self.lbl_custom = tk.Label(row1, text=tr("lbl_custom_speed"), font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
         self.lbl_custom.pack(side=tk.LEFT)
 
+        try:
+            saved_kbps = int(get_setting("custom_speed_limit_kbps", 0) or 0)
+        except Exception:
+            saved_kbps = 0
         self.entry_custom_speed = tk.Entry(row1, font=("Segoe UI", 9), width=7, bg=self.c_input_bg, fg=self.c_text_bright, insertbackground=self.c_accent, relief="flat")
-        self.entry_custom_speed.insert(0, "0")
+        self.entry_custom_speed.insert(0, str(saved_kbps))
         self.entry_custom_speed.pack(side=tk.LEFT, padx=(4, 6), ipady=1)
         self.entry_custom_speed.bind("<Return>", lambda e: self._apply_speed_limit())
 
@@ -101,6 +108,29 @@ class ControlsPanelMixin:
 
         self.lbl_slider_val = tk.Label(row_slider, text=f"{tr('lbl_unlimited', 'Unlimited')} (0 KB/s)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent, width=18, anchor="w")
         self.lbl_slider_val.pack(side=tk.RIGHT)
+
+        if saved_kbps > 0 or saved_preset != "Unlimited":
+            preset_map = {
+                "Unlimited": 0, "128 KB/s": 128, "256 KB/s": 256, "512 KB/s": 512,
+                "1.0 MB/s": 1024, "2.0 MB/s": 2048, "5.0 MB/s": 5120,
+                "10.0 MB/s": 10240, "20.0 MB/s": 20480,
+            }
+            if saved_kbps == 0 and saved_preset in preset_map and preset_map[saved_preset] > 0:
+                saved_kbps = preset_map[saved_preset]
+                self.entry_custom_speed.delete(0, tk.END)
+                self.entry_custom_speed.insert(0, str(saved_kbps))
+            if hasattr(self, "_apply_speed_limit") and callable(self._apply_speed_limit):
+                self._apply_speed_limit()
+            else:
+                self.speed_limit = saved_kbps * 1024.0
+                if hasattr(self, "slider_speed"):
+                    self.slider_speed.set(min(20480, saved_kbps))
+                if saved_kbps > 0:
+                    disp = f"{saved_kbps / 1024.0:.1f} MB/s ({saved_kbps:,} KB/s)" if saved_kbps >= 1024 else f"{saved_kbps} KB/s"
+                    if hasattr(self, "lbl_active_limit"):
+                        self.lbl_active_limit.configure(text=tr("lbl_current_limit", "● Current: {limit}").format(limit=disp), fg=self.c_warning)
+                    if hasattr(self, "lbl_slider_val"):
+                        self.lbl_slider_val.configure(text=disp, fg=self.c_warning)
 
         # Primary Transfer Controls Row (Row 1)
         row_transfers = tk.Frame(card, bg=self.c_panel)

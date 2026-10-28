@@ -577,6 +577,7 @@ class TestTurboDownloader(unittest.TestCase):
         app._refresh_chunk_displays()
         self.assertEqual(len(app.tree_chunks.get_children()), 2)
 
+        app._on_slider_moved("0")
         app.exit_completely()
 
     def test_permissive_ssl_context_properties(self):

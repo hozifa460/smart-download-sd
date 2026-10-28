@@ -13,7 +13,7 @@ except Exception:
     tk = None  # type: ignore
 
 from smart_download.i18n import tr
-from smart_download.config import get_setting, set_setting
+from smart_download.config import get_setting, set_setting, get_base_downloads_dir
 from smart_download.utils import (
     get_clipboard_text,
     is_downloadable_url,
@@ -278,7 +278,7 @@ class ClipboardControllerMixin:
             pass
 
         # Derive and populate destination
-        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
         cur_dest = ""
         try:
             cur_dest = self.entry_dest.get().strip()
@@ -339,7 +339,7 @@ class ClipboardControllerMixin:
                     if info.get("resolved"):
                         self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
 
-                    downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                    downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
                     cur_d = ""
                     try:
                         cur_d = self.entry_dest.get().strip()

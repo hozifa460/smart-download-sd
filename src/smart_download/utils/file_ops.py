@@ -6,7 +6,7 @@ import sys
 import subprocess
 from typing import Tuple, Dict, Optional, Iterable, Set
 
-from ..config import IS_WINDOWS
+from ..config import IS_WINDOWS, get_base_downloads_dir
 from .magic_detector import MagicBytesDetector
 from .archive_utils import calculate_file_integrity, auto_unpack_archive
 
@@ -249,5 +249,6 @@ __all__ = [
     "open_containing_folder",
     "generate_unique_destination_path",
     "apply_media_filename_tags",
+    "get_base_downloads_dir",
 ]
 

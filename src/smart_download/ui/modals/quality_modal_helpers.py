@@ -36,7 +36,7 @@ def attach_selected_tracks_to_option(
     selected_option.subtitle_position = sub_pos or "bottom"
     if subtitle_tracks and cb_sub:
         idx = cb_sub.current()
-        if idx <= 0 and len(subtitle_tracks) > 1 and (sub_mode == "hard_burn" or getattr(cb_sub, "_user_touched_mode", False)):
+        if idx <= 0 and len(subtitle_tracks) > 1 and getattr(cb_sub, "_user_touched_mode", False):
             ar_idx = next(
                 (i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")),
                 None

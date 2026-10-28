@@ -346,6 +346,7 @@ def build_audio_subtitle_row(
         pref_s = str(get_setting("preferred_subtitle_lang", "none") or "").lower()
         s_idx = next((i for i, s in enumerate(subtitle_tracks) if pref_s != "none" and pref_s in (str(s.get("language") or "").lower(), str(s.get("sub_id") or "").lower())), 0)
         cb_sub.current(s_idx)
+        cb_sub._user_touched_mode = False
         cb_sub.pack(side=tk.LEFT, padx=(0, 8))
 
         mode_options = [

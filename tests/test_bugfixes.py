@@ -1106,6 +1106,143 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         self.assertEqual(stream_info.audio_url, "https://audio.example.com/dub.m4a")
         self.assertEqual(stream_info.audio_size, 2_000_000)
 
+    def test_speed_limiter_startup_settings_loaded(self):
+        """Verifies that ControlsPanelMixin initializes with saved speed_limit_preset and custom_speed_limit_kbps."""
+        from smart_download.ui.panels.controls_panel import ControlsPanelMixin
+
+        class DummyControls(ControlsPanelMixin):
+            def __init__(self):
+                self.c_panel = "#1e293b"
+                self.c_border = "#334155"
+                self.c_accent = "#6366f1"
+                self.c_accent_dark = "#4f46e5"
+                self.c_text_bright = "#f8fafc"
+                self.c_text_muted = "#94a3b8"
+                self.c_input_bg = "#0f172a"
+                self.c_panel_light = "#334155"
+                self.c_success = "#10b981"
+                self.c_warning = "#f59e0b"
+                self.dpi_scale = 1.0
+                self.speed_limit = 0.0
+                self.applied_limit_called = False
+
+            def _on_conn_changed(self, event=None): pass
+            def _on_preset_selected(self, event=None): pass
+            def _on_slider_moved(self, val): pass
+            def __getattr__(self, name):
+                return lambda *args, **kwargs: None
+            def _apply_speed_limit(self):
+                self.applied_limit_called = True
+                kb = float(self.entry_custom_speed.get())
+                self.speed_limit = kb * 1024.0
+
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            with patch("smart_download.ui.panels.controls_panel.get_setting") as mock_get:
+                mock_get.side_effect = lambda k, d=None: {
+                    "max_connections": 8,
+                    "speed_limit_preset": "2.0 MB/s",
+                    "custom_speed_limit_kbps": 2048,
+                }.get(k, d)
+
+                panel = DummyControls()
+                panel._build_limiter_and_actions_card(root)
+
+                self.assertEqual(panel.limit_preset_var.get(), "2.0 MB/s")
+                self.assertEqual(panel.entry_custom_speed.get(), "2048")
+                self.assertTrue(panel.applied_limit_called)
+                self.assertEqual(panel.speed_limit, 2048 * 1024.0)
+        finally:
+            root.destroy()
+
+    def test_last_download_dir_preserved_and_category_stripped(self):
+        """Verifies get_base_downloads_dir returns last_download_dir and browsing strips category subfolder."""
+        from smart_download.config import get_base_downloads_dir
+        from smart_download.utils.file_ops import CATEGORY_SUBFOLDERS
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            custom_dir = os.path.join(tmp_dir, "CustomDownloads")
+            os.makedirs(custom_dir, exist_ok=True)
+
+            with patch("smart_download.config.get_setting", return_value=custom_dir):
+                self.assertEqual(get_base_downloads_dir(), custom_dir)
+
+            # Test category subfolder stripping
+            video_sub = os.path.join(custom_dir, "Video")
+            sub_low = {s.lower() for s in CATEGORY_SUBFOLDERS.values()}
+            self.assertIn(os.path.basename(video_sub).lower(), sub_low)
+            stripped = os.path.dirname(video_sub)
+            self.assertEqual(stripped, custom_dir)
+
+    def test_preview_video_target_respects_selected_quality(self):
+        """Verifies _resolve_video_target respects target_h of selected option."""
+        from smart_download.services.preview_stream_bridge import PreviewBridgeRequestHandler, PreviewSession
+        from smart_download.services.youtube_models import VideoFormatOption
+
+        handler = PreviewBridgeRequestHandler.__new__(PreviewBridgeRequestHandler)
+
+        # Case 1: Audio-only option
+        opt_audio = VideoFormatOption(
+            format_id="140", resolution_label="Audio 128k", height=0, ext="m4a", filesize_approx=1000,
+            is_audio_only=True, audio_url="https://audio.example.com/140.m4a", audio_headers={"H": "1"}
+        )
+        session1 = PreviewSession(sid="s1", url="https://example.com/video", video_title="Audio", options=[opt_audio], info_dict={}, audio_tracks=[], subtitle_tracks=[])
+        url, headers = handler._resolve_video_target(session1, 0)
+        self.assertEqual(url, "https://audio.example.com/140.m4a")
+        self.assertEqual(headers.get("H"), "1")
+
+        # Case 2: Progressive format selection closest to target_h
+        opt_360 = VideoFormatOption(format_id="18", resolution_label="360p", height=360, ext="mp4", filesize_approx=1000, is_progressive=True, video_url="https://example.com/360.mp4")
+        opt_720 = VideoFormatOption(format_id="22", resolution_label="720p", height=720, ext="mp4", filesize_approx=1000, is_progressive=False, video_url="https://example.com/dash_720.mp4")
+        opt_1080 = VideoFormatOption(format_id="137", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=1000, is_progressive=False, video_url="https://example.com/dash_1080.mp4")
+
+        info_dict = {
+            "formats": [
+                {"url": "https://example.com/prog_360.mp4", "height": 360, "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+                {"url": "https://example.com/prog_720.mp4", "height": 720, "vcodec": "avc1", "acodec": "mp4a", "ext": "mp4"},
+            ]
+        }
+        session2 = PreviewSession(sid="s2", url="https://example.com/video", video_title="Video", options=[opt_360, opt_720, opt_1080], info_dict=info_dict, audio_tracks=[], subtitle_tracks=[])
+
+        # When q_idx = 0 (360p progressive)
+        url0, _ = handler._resolve_video_target(session2, 0)
+        self.assertEqual(url0, "https://example.com/360.mp4")
+
+        # When q_idx = 1 (720p), it matches closest prog format 720p
+        url1, _ = handler._resolve_video_target(session2, 1)
+        self.assertEqual(url1, "https://example.com/prog_720.mp4")
+
+        # When q_idx = 2 and dubbing is active, opt.video_url (1080p) is streamed!
+        session2.selected_audio_track = {"track_id": "ar", "url": "https://example.com/dub.m4a"}
+        url2, _ = handler._resolve_video_target(session2, 2)
+        self.assertEqual(url2, "https://example.com/dash_1080.mp4")
+
+    def test_startup_enabled_sync_on_startup(self):
+        """Verifies startup_enabled synchronizes registry when True in settings."""
+        from smart_download.ui.controllers.settings_controller import SettingsControllerMixin
+
+        class DummySettings(SettingsControllerMixin):
+            def __init__(self):
+                self._startup_enabled = False
+                self.c_success = "#10b981"
+                self.c_panel_light = "#334155"
+                self.c_text_muted = "#94a3b8"
+                self.c_panel = "#1e293b"
+                self.btn_startup = MagicMock()
+                self.btn_startup.winfo_exists.return_value = True
+
+        panel = DummySettings()
+        with patch("smart_download.ui.controllers.settings_controller.get_setting", return_value=True):
+            with patch("smart_download.ui.controllers.settings_controller.is_startup_enabled", side_effect=[False, True]):
+                with patch("smart_download.ui.controllers.settings_controller.enable_startup") as mock_enable:
+                    panel._update_startup_btn()
+                    mock_enable.assert_called_once_with(minimized=True)
+                    self.assertTrue(panel._startup_enabled)
+
 
 if __name__ == "__main__":
     unittest.main()
+
