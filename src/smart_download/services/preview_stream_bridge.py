@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from ..locales.i18n import tr
 from ..utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
 from .preview_stream_proxy import compile_and_serve_vtt, stream_upstream_media
+from .subtitle_downloader import download_subtitle_as_srt
 
 _SERVER_LOCK = threading.Lock()
 _BRIDGE_SERVER: Optional[http.server.ThreadingHTTPServer] = None
@@ -315,7 +316,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
         if opt:
-            is_burned = (sub_mode == "hard_burn")
+            has_subs = (bool(session.subtitle_tracks) and len(session.subtitle_tracks) > 1) if (session.selected_sub_track is None) else (session.selected_sub_track.get("sub_id") not in (None, "none"))
+            is_burned = (sub_mode == "hard_burn") and has_subs
             updated = apply_media_filename_tags(
                 cur_dest,
                 quality_label=getattr(opt, "resolution_label", ""),
@@ -394,7 +396,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         final_dest = dest_path or session.default_dest_path
         if selected_opt:
-            is_burned = (getattr(selected_opt, "subtitle_embed_mode", "") == "hard_burn")
+            has_sub = bool(getattr(selected_opt, "selected_subtitle_track", None))
+            is_burned = (getattr(selected_opt, "subtitle_embed_mode", "") == "hard_burn") and has_sub
             final_dest = apply_media_filename_tags(final_dest, quality_label=getattr(selected_opt, "resolution_label", ""), is_sub_burned=is_burned, ext=getattr(selected_opt, "ext", "mp4"))
         hm = getattr(session.parent_app, "history_manager", None)
         reserved = hm.get_active_or_queued_paths() if hm else None
@@ -408,8 +411,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 set_setting("preferred_video_height", -1 if getattr(selected_opt, "is_audio_only", False) else getattr(selected_opt, "height", 0))
                 if getattr(selected_opt, "selected_audio_track", None):
                     set_setting("preferred_audio_lang", selected_opt.selected_audio_track.get("language") or "original")
-                if getattr(selected_opt, "selected_subtitle_track", None):
-                    set_setting("preferred_subtitle_lang", selected_opt.selected_subtitle_track.get("language") or "none")
+                sub_lang = selected_opt.selected_subtitle_track.get("language") if getattr(selected_opt, "selected_subtitle_track", None) else "none"
+                set_setting("preferred_subtitle_lang", sub_lang or "none")
         except Exception: pass
 
         def _dispatch():
@@ -471,8 +474,8 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 set_setting("preferred_video_height", -1 if getattr(opt, "is_audio_only", False) else getattr(opt, "height", 0))
             if session.selected_audio_track:
                 set_setting("preferred_audio_lang", session.selected_audio_track.get("language") or "original")
-            if session.selected_sub_track:
-                set_setting("preferred_subtitle_lang", session.selected_sub_track.get("language") or "none")
+            sub_lang = session.selected_sub_track.get("language") if session.selected_sub_track else "none"
+            set_setting("preferred_subtitle_lang", sub_lang or "none")
         except Exception: pass
 
         def _sync_tk():

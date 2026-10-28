@@ -397,6 +397,27 @@ def build_audio_subtitle_row(
             rb.pack(side=tk.LEFT, padx=(0, 6))
             radio_widgets.append(rb)
 
+        def _on_mode_var_changed(*_):
+            val = mode_var.get()
+            if val in mode_codes:
+                cb_sub._selected_mode = val
+                cb_sub._user_touched_mode = True
+                idx = mode_codes.index(val)
+                if cb_sub_mode.current() != idx:
+                    cb_sub_mode.current(idx)
+                if cb_sub.current() <= 0 and len(subtitle_tracks) > 1:
+                    ar_idx = next((i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), 1)
+                    cb_sub.current(ar_idx)
+                    _on_sub_changed()
+
+        try:
+            mode_var.trace_add("write", _on_mode_var_changed)
+        except Exception:
+            try:
+                mode_var.trace("w", _on_mode_var_changed)
+            except Exception:
+                pass
+
         # Subtitle Position Combobox
         tk.Label(row2, text=tr("lbl_subtitle_pos", "📍 الموضع:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(10, 4))
         pos_codes = ["bottom", "middle", "top"]
@@ -435,11 +456,21 @@ def build_audio_subtitle_row(
         def _get_active_mode() -> str:
             cur_idx = cb_sub_mode.current()
             if 0 <= cur_idx < len(mode_codes):
-                code = mode_codes[cur_idx]
-                cb_sub._selected_mode = code
-                if mode_var.get() != code: mode_var.set(code)
-                return code
-            if mode_var and mode_var.get() in mode_codes: return mode_var.get()
+                cb_code = mode_codes[cur_idx]
+                if cb_code != getattr(cb_sub, "_selected_mode", None):
+                    cb_sub._selected_mode = cb_code
+                    if mode_var and mode_var.get() != cb_code:
+                        mode_var.set(cb_code)
+                    return cb_code
+            if mode_var and mode_var.get() in mode_codes:
+                val = mode_var.get()
+                cb_sub._selected_mode = val
+                idx = mode_codes.index(val)
+                if cb_sub_mode.current() != idx:
+                    cb_sub_mode.current(idx)
+                return val
+            if 0 <= cur_idx < len(mode_codes):
+                return mode_codes[cur_idx]
             return getattr(cb_sub, "_selected_mode", "soft_embed")
 
         cb_sub._mode_combobox = cb_sub_mode

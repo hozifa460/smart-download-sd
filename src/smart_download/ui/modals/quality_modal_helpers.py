@@ -36,10 +36,22 @@ def attach_selected_tracks_to_option(
     selected_option.subtitle_position = sub_pos or "bottom"
     if subtitle_tracks and cb_sub:
         idx = cb_sub.current()
+        if idx <= 0 and len(subtitle_tracks) > 1 and (sub_mode == "hard_burn" or getattr(cb_sub, "_user_touched_mode", False)):
+            ar_idx = next(
+                (i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")),
+                None
+            )
+            idx = ar_idx if ar_idx is not None else 1
+            try:
+                cb_sub.current(idx)
+            except Exception:
+                pass
         if 0 < idx < len(subtitle_tracks):
             selected_option.selected_subtitle_track = subtitle_tracks[idx]
         else:
             selected_option.selected_subtitle_track = None
+    else:
+        selected_option.selected_subtitle_track = None
 
 
 def resolve_final_dest(
@@ -64,7 +76,8 @@ def resolve_final_dest(
             final_dest = os.path.join(downloads_dir, f"{clean_title}.{ext}")
 
     if selected_option:
-        is_sub_burned = getattr(selected_option, "subtitle_embed_mode", "") == "hard_burn"
+        has_sub = bool(getattr(selected_option, "selected_subtitle_track", None))
+        is_sub_burned = (getattr(selected_option, "subtitle_embed_mode", "") == "hard_burn") and has_sub
         final_dest = apply_media_filename_tags(
             final_dest,
             quality_label=getattr(selected_option, "resolution_label", ""),

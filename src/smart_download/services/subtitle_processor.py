@@ -72,6 +72,8 @@ def _is_ascii_writable_dir(path: str) -> bool:
 
 def _get_ascii_safe_temp_dir(fallback_dir: str) -> str:
     """Returns the first existing writable 100% ASCII directory for libass safe fopen on Windows."""
+    if fallback_dir and _is_ascii_writable_dir(fallback_dir):
+        return os.path.abspath(fallback_dir)
     import tempfile
     candidates = [
         tempfile.gettempdir(),

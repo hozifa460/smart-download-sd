@@ -106,7 +106,10 @@ def compile_and_serve_vtt(handler: http.server.BaseHTTPRequestHandler, session: 
             vtt_content = "WEBVTT\n\n"
         else:
             temp_stem = os.path.join(tempfile.gettempdir(), f"_sd_prev_{session.sid}_{s_idx}_{os.getpid()}")
-            srt_path = download_subtitle_as_srt(track, f"{temp_stem}.mp4")
+            import sys
+            bridge_mod = sys.modules.get("smart_download.services.preview_stream_bridge")
+            dl_fn = getattr(bridge_mod, "download_subtitle_as_srt", download_subtitle_as_srt) if bridge_mod else download_subtitle_as_srt
+            srt_path = dl_fn(track, f"{temp_stem}.mp4")
             if srt_path and os.path.isfile(srt_path):
                 with open(srt_path, "r", encoding="utf-8-sig", errors="replace") as sf:
                     srt_text = sf.read()

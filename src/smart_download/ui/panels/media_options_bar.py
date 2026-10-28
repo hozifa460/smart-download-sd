@@ -187,11 +187,14 @@ class MediaOptionsBarMixin:
 
         # 5. Position Selection
         pos = getattr(sel_opt, "subtitle_position", None) or get_setting("subtitle_position", "bottom")
-        self.cb_main_sub_pos.current(self._main_sub_pos_codes.index(pos) if pos in self._main_sub_pos_codes else 0)
+        if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos:
+            self.cb_main_sub_pos.current(self._main_sub_pos_codes.index(pos) if pos in self._main_sub_pos_codes else 0)
 
         sub_state = "readonly" if sub_idx > 0 else "disabled"
-        self.cb_main_sub_mode.configure(state=sub_state)
-        self.cb_main_sub_pos.configure(state=sub_state)
+        if hasattr(self, "cb_main_sub_mode") and self.cb_main_sub_mode:
+            self.cb_main_sub_mode.configure(state=sub_state)
+        if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos:
+            self.cb_main_sub_pos.configure(state=sub_state)
 
     def hide_main_media_bar(self):
         """Hides the Media Settings Bar frame when switching to non-media URLs."""

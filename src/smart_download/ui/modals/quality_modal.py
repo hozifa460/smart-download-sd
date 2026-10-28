@@ -210,9 +210,10 @@ class QualitySelectionModal(tk.Toplevel):
                     sub_mode = getattr(self.cb_sub, "_selected_mode", "soft_embed")
                     if hasattr(self.cb_sub, "get_selected_mode"): sub_mode = self.cb_sub.get_selected_mode()
                     cur = self.entry_dest.get().strip()
+                    has_sub = bool(getattr(self.selected_option, "selected_subtitle_track", None))
                     updated = apply_media_filename_tags(
                         cur, quality_label=self.selected_option.resolution_label,
-                        is_sub_burned=(sub_mode == "hard_burn"), ext=self.selected_option.ext
+                        is_sub_burned=(sub_mode == "hard_burn") and has_sub, ext=self.selected_option.ext
                     )
                     self.entry_dest.delete(0, tk.END)
                     self.entry_dest.insert(0, updated)
@@ -382,10 +383,11 @@ class QualitySelectionModal(tk.Toplevel):
             if hasattr(self, "cb_sub") and self.cb_sub:
                 mode_fn = getattr(self.cb_sub, "get_selected_mode", None)
                 sub_mode = mode_fn() if callable(mode_fn) else getattr(self.cb_sub, "_selected_mode", "soft_embed")
+            has_sub = bool(getattr(opt, "selected_subtitle_track", None))
             updated_dest = apply_media_filename_tags(
                 target_path,
                 quality_label=opt.resolution_label,
-                is_sub_burned=(sub_mode == "hard_burn"),
+                is_sub_burned=(sub_mode == "hard_burn") and has_sub,
                 ext=opt.ext.lower()
             )
             parent_dir = os.path.dirname(updated_dest)
@@ -485,7 +487,8 @@ class QualitySelectionModal(tk.Toplevel):
         if not self.selected_option:
             return
         self._attach_selected_tracks()
-        is_sub_burned = getattr(self.selected_option, "subtitle_embed_mode", "") == "hard_burn"
+        has_sub = bool(getattr(self.selected_option, "selected_subtitle_track", None))
+        is_sub_burned = (getattr(self.selected_option, "subtitle_embed_mode", "") == "hard_burn") and has_sub
         res_lbl = str(getattr(self.selected_option, "resolution_label", "") or "")
         import re
         has_tag = bool(re.search(r'(\d{3,4}p|4K|8K|Audio|MP3|M4A)', res_lbl, re.IGNORECASE))
