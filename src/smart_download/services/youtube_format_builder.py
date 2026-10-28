@@ -395,6 +395,13 @@ class YouTubeFormatBuilderMixin:
                 sub_mode = get_setting("subtitle_embed_mode", "hard_burn")
             except Exception:
                 sub_mode = "hard_burn"
+        sub_pos = getattr(opt, "subtitle_position", None)
+        if not sub_pos:
+            try:
+                from ..config import get_setting
+                sub_pos = get_setting("subtitle_position", "bottom")
+            except Exception:
+                sub_pos = "bottom"
         audio_lang = sel_audio.get("language") if sel_audio else None
 
         is_dubbed_selection = bool(
@@ -454,6 +461,7 @@ class YouTubeFormatBuilderMixin:
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
+                subtitle_position=sub_pos,
                 webpage_url=webpage_url,
             )
         elif opt.is_progressive or not opt.audio_url:
@@ -478,6 +486,7 @@ class YouTubeFormatBuilderMixin:
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
+                subtitle_position=sub_pos,
                 webpage_url=webpage_url,
             )
         else:
@@ -503,6 +512,7 @@ class YouTubeFormatBuilderMixin:
                 subtitle_track=sub_track,
                 audio_language=audio_lang,
                 subtitle_embed_mode=sub_mode,
+                subtitle_position=sub_pos,
                 webpage_url=webpage_url,
             )
 

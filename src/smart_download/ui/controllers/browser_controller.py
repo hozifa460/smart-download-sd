@@ -132,13 +132,8 @@ class BrowserControllerMixin:
                         except Exception:
                             pass
 
-                    if self.is_window_hidden_or_minimized() or not start_immediately or getattr(self, "_auto_start_clipboard", True) or getattr(self, "_was_started_hidden", False):
-                        self._show_download_confirmation_dialog(real_url, resolved_dest)
-                    else:
-                        self._on_start_download(skip_resolver=True)
+                    self._show_download_confirmation_dialog(real_url, resolved_dest)
 
                 self._resolve_real_url_async(url, on_resolved=_on_browser_resolved, show_toast=True)
-            elif self.is_window_hidden_or_minimized() or not start_immediately or getattr(self, "_auto_start_clipboard", True) or getattr(self, "_was_started_hidden", False):
-                self._show_download_confirmation_dialog(url, new_dest)
             else:
-                self._on_start_download(skip_resolver=True)
+                self._show_download_confirmation_dialog(url, new_dest)

@@ -220,7 +220,7 @@ class ModernFramelessGUI(
                                for arg in sys.argv[1:])
         self._start_hidden: bool = bool(start_hidden)
         self._was_started_hidden: bool = bool(start_hidden)
-        self._startup_enabled: bool = is_startup_enabled()
+        self._startup_enabled: bool = bool(get_setting("startup_enabled", is_startup_enabled()))
         self.minimize_to_tray: bool = bool(get_setting("minimize_to_tray", True))
         self.auto_categorize_folders: bool = bool(get_setting("auto_categorize_folders", True))
         self.history_manager = DownloadHistoryManager()
@@ -243,7 +243,7 @@ class ModernFramelessGUI(
         self._gui_dispatch_queue: queue.Queue = queue.Queue()
 
         # Clipboard URL Sniffer (Automatic clipboard monitor)
-        self._clipboard_sniffer_active: bool = True
+        self._clipboard_sniffer_active: bool = bool(get_setting("clipboard_sniffer_active", True))
         self._auto_start_clipboard: bool = True
         self._last_clipboard_url: Optional[str] = None
         self._last_clipboard_seq: Optional[int] = None

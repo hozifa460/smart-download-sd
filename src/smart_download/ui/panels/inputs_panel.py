@@ -11,6 +11,7 @@ except Exception:
     filedialog = None  # type: ignore
 
 from smart_download.i18n import tr
+from smart_download.config import get_setting, set_setting
 from smart_download.utils import CATEGORY_SUBFOLDERS, resolve_categorized_path, derive_download_filename
 from .controls_panel import ControlsPanelMixin
 
@@ -49,7 +50,8 @@ class InputsPanelMixin(ControlsPanelMixin):
         self.lbl_dest = tk.Label(dest_row, text=tr("lbl_dest"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
         self.lbl_dest.pack(side=tk.LEFT)
 
-        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        saved_dir = get_setting("last_download_dir", "")
+        downloads_dir = saved_dir if (saved_dir and os.path.isdir(saved_dir)) else os.path.join(os.path.expanduser("~"), "Downloads")
         default_fn = "cloudflare_50mb.bin"
         if getattr(self, "auto_categorize_folders", True):
             default_dest = resolve_categorized_path(downloads_dir, default_fn, auto_categorize=True)
@@ -86,6 +88,10 @@ class InputsPanelMixin(ControlsPanelMixin):
         if path:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, path)
+            try:
+                set_setting("last_download_dir", os.path.dirname(path))
+            except Exception:
+                pass
 
     def _is_downloads_or_category_subfolder(self, dest_dir: str, downloads_dir: str) -> bool:
         """Checks if dest_dir is either the base downloads_dir or one of its category subfolders."""

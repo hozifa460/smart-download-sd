@@ -129,7 +129,9 @@ def open_video_preview(
     parent_app: Optional[Any] = None,
     modal_ref: Optional[Any] = None,
     use_bridge: bool = True,
-    subtitle_embed_mode: str = "hard_burn"
+    subtitle_embed_mode: str = "hard_burn",
+    selected_q_idx: int = 0,
+    subtitle_position: str = "bottom",
 ) -> str:
     """
     Builds and opens a real, VidMate-style video preview with synchronized live audio dubbing,
@@ -191,10 +193,12 @@ def open_video_preview(
                 selected_audio_track=selected_audio_track,
                 selected_sub_track=selected_sub_track,
                 subtitle_embed_mode=subtitle_embed_mode,
+                selected_q_idx=selected_q_idx,
+                subtitle_position=subtitle_position,
             )
             target_launch_url = f"http://127.0.0.1:{port}/player?sid={sid}"
             if not stream_url:
-                stream_url = f"http://127.0.0.1:{port}/stream_video?sid={sid}&q_idx=0"
+                stream_url = f"http://127.0.0.1:{port}/stream_video?sid={sid}&q_idx={selected_q_idx}"
             if dub_audio_url and not dub_audio_url.startswith("http://127.0.0.1"):
                 sel_a_idx = 0
                 all_auds = audio_tracks or ([selected_audio_track] if selected_audio_track else [])
@@ -244,6 +248,8 @@ def open_video_preview(
         bridge_port=port,
         selected_sub_track=selected_sub_track,
         subtitle_embed_mode=subtitle_embed_mode,
+        selected_q_idx=selected_q_idx,
+        subtitle_position=subtitle_position,
     )
 
     temp_html = os.path.join(tempfile.gettempdir(), f"_sd_preview_{os.getpid()}_{int(time.time()*1000)}.html")

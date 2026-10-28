@@ -47,7 +47,7 @@ video, iframe { width: 100%; height: 100%; border: none; outline: none; backgrou
 .col-right { text-align: right; }
 .col-note { color: #94a3b8; font-size: 11px; }
 .opt-row.selected .col-note { color: #e0f2fe; }
-.controls-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.controls-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 .ctrl-group { display: flex; flex-direction: column; gap: 2px; }
 .ctrl-group label { font-size: 11px; font-weight: 600; color: #94a3b8; }
 .ctrl-group select { background: #17233c; color: #f8fafc; border: 1px solid #334155; padding: 4px 8px; border-radius: 6px; font-size: 12px; outline: none; cursor: pointer; }
@@ -70,9 +70,9 @@ const bridgeBase = __BRIDGE_BASE__;
 const videoEl = document.getElementById("videoEl"), dubAudioEl = document.getElementById("dubAudioEl");
 const iframeEl = document.getElementById("iframeEl"), toggleBtn = document.getElementById("toggleBtn");
 const audioBadge = document.getElementById("badgeAudio"), subBadge = document.getElementById("badgeSub"), resBadge = document.getElementById("badgeRes");
-const audioSelect = document.getElementById("audioSelect"), subSelect = document.getElementById("subSelect"), modeSelect = document.getElementById("modeSelect"), destInput = document.getElementById("destInput");
+const audioSelect = document.getElementById("audioSelect"), subSelect = document.getElementById("subSelect"), modeSelect = document.getElementById("modeSelect"), posSelect = document.getElementById("posSelect"), destInput = document.getElementById("destInput");
 const muteBtn = document.getElementById("muteBtn"), volSlider = document.getElementById("volSlider");
-let isUsingVideo = hasStream, selected_q_idx = 0, hasDubAudio = Boolean(initialDubAudioUrl);
+let isUsingVideo = hasStream, selected_q_idx = __SELECTED_Q_IDX__, hasDubAudio = Boolean(initialDubAudioUrl);
 let actionSubmitted = false;
 window._userTouchedMode = false;
 
@@ -174,6 +174,43 @@ function onAudioChange() {
     else { const t = audioTracks[a]; setDubAudioTrack(sid ? `${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=${a}` : (t.url || ""), t.label || t.language); }
     syncStateToBridge();
 }
+function applySubtitlePosition(pos) {
+    let pStyle = document.getElementById("cuePosStyle");
+    if (!pStyle) {
+        pStyle = document.createElement("style");
+        pStyle.id = "cuePosStyle";
+        document.head.appendChild(pStyle);
+    }
+    const lineVal = (pos === "top") ? 10 : ((pos === "middle") ? 50 : 88);
+    pStyle.textContent = `::cue { line: ${lineVal}%; }`;
+    if (videoEl && videoEl.textTracks) {
+        for (let i = 0; i < videoEl.textTracks.length; i++) {
+            const tt = videoEl.textTracks[i];
+            if (tt.cues) {
+                for (let j = 0; j < tt.cues.length; j++) {
+                    try { tt.cues[j].snapToLines = false; tt.cues[j].line = lineVal; } catch (e) {}
+                }
+            }
+        }
+    }
+}
+function onPosChange() {
+    if (!posSelect) return;
+    applySubtitlePosition(posSelect.value);
+    syncStateToBridge();
+}
+function browseDestination() {
+    if (!sid || !destInput) return;
+    fetch(`${bridgeBase}/api/browse?sid=${encodeURIComponent(sid)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_dest: destInput.value })
+    }).then(r => r.json()).then(d => {
+        if (d && d.ok && d.dest) {
+            destInput.value = d.dest;
+            syncStateToBridge();
+        }
+    }).catch(e => {});
+}
 function onSubChange() {
     if (!subSelect) return;
     const s = parseInt(subSelect.value);
@@ -190,6 +227,8 @@ function onSubChange() {
         if (!trk) { trk = document.createElement("track"); trk.id = "vttTrack"; trk.kind = "subtitles"; trk.default = true; videoEl.appendChild(trk); }
         trk.label = lbl; trk.srclang = (t.language || "ar").split("-")[0].split("_")[0]; trk.src = vUrl;
         try { trk.track.mode = "showing"; } catch (e) {}
+        trk.addEventListener("load", () => { applySubtitlePosition(posSelect ? posSelect.value : "bottom"); });
+        applySubtitlePosition(posSelect ? posSelect.value : "bottom");
     }
     requestUpdatedFilename();
     syncStateToBridge();
@@ -213,6 +252,7 @@ function syncStateToBridge() {
             a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
             s_idx: subSelect ? parseInt(subSelect.value) : 0,
             sub_mode: modeSelect ? modeSelect.value : "hard_burn",
+            sub_pos: posSelect ? posSelect.value : "bottom",
             dest_path: destInput ? destInput.value.trim() : ""
         })
     }).catch(e => {});
@@ -236,10 +276,12 @@ function doAction(actionType) {
             a_idx: audioSelect ? parseInt(audioSelect.value) : 0,
             s_idx: subSelect ? parseInt(subSelect.value) : 0,
             sub_mode: modeSelect ? modeSelect.value : "hard_burn",
+            sub_pos: posSelect ? posSelect.value : "bottom",
             dest_path: destInput ? destInput.value.trim() : ""
         })
     }).then(r => r.json()).then(() => { setTimeout(() => { window.close(); }, 120); }).catch(() => { window.close(); });
 }
+applySubtitlePosition(__SUB_POS__);
 window.addEventListener("pagehide", () => {
     if (sid && !actionSubmitted) { try { navigator.sendBeacon(`${bridgeBase}/api/action?sid=${encodeURIComponent(sid)}`, JSON.stringify({ action: "cancel" })); } catch (e) {} }
 });
@@ -267,12 +309,17 @@ def generate_preview_html(
     bridge_port: Optional[int] = None,
     platform_name: Optional[str] = None,
     selected_sub_track: Optional[Dict[str, Any]] = None,
-    subtitle_embed_mode: str = "hard_burn"
+    subtitle_embed_mode: str = "hard_burn",
+    selected_q_idx: int = 0,
+    subtitle_position: str = "bottom",
 ) -> str:
     """Generates modern dark-themed HTML5 preview player with synchronized dubbing and controls."""
     safe_title = html.escape(video_title or "Video Preview")
     safe_stream = html.escape(stream_url or "")
-    safe_quality = html.escape(quality_label or ("MP4 Stream" if stream_url else "Web Player"))
+    if options and 0 <= selected_q_idx < len(options):
+        safe_quality = html.escape(getattr(options[selected_q_idx], "resolution_label", "") or "MP4 Stream")
+    else:
+        safe_quality = html.escape(quality_label or ("MP4 Stream" if stream_url else "Web Player"))
 
     platform = platform_name or extract_media_platform(url)
     safe_platform = html.escape(platform)
@@ -347,17 +394,22 @@ def generate_preview_html(
             r_f = str(fps_val) if isinstance(fps_val, (int, float)) and fps_val > 0 else "—"
             r_s = html.escape(format_filesize(getattr(opt, "filesize_approx", 0)))
             r_n = html.escape(getattr(opt, "note", ""))
-            s_cls = "opt-row selected" if idx == 0 else "opt-row"
+            s_cls = "opt-row selected" if idx == selected_q_idx else "opt-row"
             rows.append(f'<tr class="{s_cls}" data-idx="{idx}" onclick="selectQualityRow({idx})"><td class="col-res"><strong>{r_l}</strong></td><td class="col-center">{r_e}</td><td class="col-right">{r_s}</td><td class="col-center">{r_f}</td><td class="col-note">{r_n}</td></tr>')
         a_opts = [f'<option value="{i}"{" selected" if i == sel_a_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Audio #{i}")}</option>' for i, t in enumerate(audio_tracks or [])] or ['<option value="0">Original Audio (Default)</option>']
         s_opts = [f'<option value="{i}"{" selected" if i == sel_s_idx else ""}>{html.escape(t.get("label") or t.get("language") or f"Subtitle #{i}")}</option>' for i, t in enumerate(subtitle_tracks or [])] or ['<option value="0">No Subtitles</option>']
         m_opts = [
-            f'<option value="soft_embed"{" selected" if subtitle_embed_mode == "soft_embed" else ""}>Soft Embed (دمج ناعم داخل الفيديو)</option>',
-            f'<option value="hard_burn"{" selected" if subtitle_embed_mode == "hard_burn" else ""}>Burn into Video (حرق دائم داخل الصورة)</option>',
-            f'<option value="srt_only"{" selected" if subtitle_embed_mode == "srt_only" else ""}>Save External .srt (ملف ترجمة خارجي)</option>',
+            f'<option value="soft_embed"{" selected" if subtitle_embed_mode == "soft_embed" else ""}>Soft Embed (دمج ناعم)</option>',
+            f'<option value="hard_burn"{" selected" if subtitle_embed_mode == "hard_burn" else ""}>Burn into Video (حرق دائم)</option>',
+            f'<option value="srt_only"{" selected" if subtitle_embed_mode == "srt_only" else ""}>Save External .srt (ملف خارجي)</option>',
+        ]
+        p_opts = [
+            f'<option value="bottom"{" selected" if subtitle_position == "bottom" else ""}>Bottom (أسفل الشاشة)</option>',
+            f'<option value="middle"{" selected" if subtitle_position == "middle" else ""}>Middle (وسط الشاشة)</option>',
+            f'<option value="top"{" selected" if subtitle_position == "top" else ""}>Top (أعلى الشاشة)</option>',
         ]
         safe_dst = html.escape(default_dest_path or "")
-        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio Dubbing / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / طريقة الحفظ</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div></div><div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
+        settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>📍 Position / الموضع</label><select id="posSelect" onchange="onPosChange()">{"".join(p_opts)}</select></div></div><div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
 
     js_code = (
         _JS_TEMPLATE
@@ -369,6 +421,8 @@ def generate_preview_html(
         .replace("__SUBTITLE_TRACKS__", json.dumps(subtitle_tracks or []))
         .replace("__EFFECTIVE_AUDIO_LABEL__", json.dumps(eff_audio_lbl))
         .replace("__BRIDGE_BASE__", json.dumps(bridge_base))
+        .replace("__SELECTED_Q_IDX__", json.dumps(selected_q_idx))
+        .replace("__SUB_POS__", json.dumps(subtitle_position or "bottom"))
     )
 
     player_flex = "52 1 0" if options else "1"

@@ -73,59 +73,39 @@ class QualitySelectionModal(tk.Toplevel):
         dpi_scale = max(1.0, dpi / 96.0)
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         dlg_w, dlg_h = min(int(740 * dpi_scale), max(640, int(sw * 0.92))), min(int(620 * dpi_scale), max(520, int(sh * 0.88)))
-
-        is_p_vis = False
         try:
-            is_p_vis = bool(parent and parent.winfo_exists() and parent.winfo_viewable() and parent.state() == "normal")
+            px, py = parent.winfo_x(), parent.winfo_y()
+            pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
+            x, y = max(0, px + (pw - dlg_w) // 2), max(0, py + (ph - dlg_h) // 2)
+            self.transient(parent)
         except Exception:
-            pass
-        if is_p_vis:
-            try:
-                self.transient(parent)
-                px, py = parent.winfo_x(), parent.winfo_y()
-                pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
-                x, y = max(0, px + (pw - dlg_w) // 2), max(0, py + (ph - dlg_h) // 2)
-            except Exception:
-                x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
-        else:
-            try:
-                self.transient("")
-                self.deiconify()
-            except Exception:
-                pass
             x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
         self.minsize(min(640, dlg_w), min(520, dlg_h))
 
         ico_path, png_path = get_resource_path("app_icon.ico"), get_resource_path("app_icon.png")
         if os.path.isfile(ico_path):
-            try:
-                self.iconbitmap(ico_path)
-            except Exception:
-                pass
+            try: self.iconbitmap(ico_path)
+            except Exception: pass
         if os.path.isfile(png_path):
             try:
                 from PIL import ImageTk
                 self._modal_icon_photo = ImageTk.PhotoImage(file=png_path)
                 self.iconphoto(True, self._modal_icon_photo)
-            except Exception:
-                pass
+            except Exception: pass
 
         self._topmost_job = None
         self._idle_job = None
         try:
-            self.lift()
-            self.attributes("-topmost", True)
+            self.lift(); self.attributes("-topmost", True)
             self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
             self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
-        except Exception:
-            pass
+        except Exception: pass
 
         self._build_ui()
         animate_window_open(self, duration_ms=130)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", lambda e: self._on_close())
-        self.bind("<Return>", lambda e: self._on_download())
 
     def _build_ui(self):
         c_bg, c_panel = self.theme["c_bg"], self.theme["c_panel"]
@@ -186,8 +166,23 @@ class QualitySelectionModal(tk.Toplevel):
 
         if self.options:
             first_iid = "opt_0"
+            try:
+                from ...config import get_setting
+                pref_h = int(get_setting("preferred_video_height", 0) or 0)
+                if pref_h == -1:
+                    m_idx = next((i for i, o in enumerate(self.options) if getattr(o, "is_audio_only", False)), None)
+                elif pref_h > 0:
+                    m_idx = next((i for i, o in enumerate(self.options) if not getattr(o, "is_audio_only", False) and getattr(o, "height", 0) == pref_h), None)
+                    if m_idx is None:
+                        cands = [(i, abs(getattr(o, "height", 0) - pref_h)) for i, o in enumerate(self.options) if not getattr(o, "is_audio_only", False) and getattr(o, "height", 0) > 0]
+                        m_idx = min(cands, key=lambda x: x[1])[0] if cands else None
+                else: m_idx = None
+                if m_idx is not None: first_iid = f"opt_{m_idx}"
+            except Exception: pass
             self.tree.selection_set(first_iid)
             self.tree.focus(first_iid)
+            if first_iid in self._row_to_opt:
+                self.selected_option = self._row_to_opt[first_iid]
 
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
         self.tree.bind("<Double-Button-1>", self._on_tree_double_click)
@@ -362,7 +357,7 @@ class QualitySelectionModal(tk.Toplevel):
             self.tree.selection_set(item)
             self.selected_option = self._row_to_opt[item]
             self._on_tree_select(None)
-        self._on_download()
+        self._on_preview_video()
 
     def _on_tree_select(self, event):
         sel = self.tree.selection()
@@ -373,6 +368,12 @@ class QualitySelectionModal(tk.Toplevel):
         if not opt:
             return
         self.selected_option = opt
+        if event is not None and opt:
+            try:
+                from ...config import set_setting
+                val_h = -1 if getattr(opt, "is_audio_only", False) else getattr(opt, "height", 0)
+                set_setting("preferred_video_height", val_h)
+            except Exception: pass
 
         cur_path = self.entry_dest.get().strip()
         target_path = cur_path or self.dest_path
@@ -405,6 +406,11 @@ class QualitySelectionModal(tk.Toplevel):
         if chosen:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, chosen)
+            self.dest_path = chosen
+            try:
+                from ...config import set_setting
+                set_setting("last_download_dir", os.path.dirname(os.path.abspath(chosen)))
+            except Exception: pass
 
     def _attach_selected_tracks(self):
         attach_selected_tracks_to_option(self.selected_option, self.audio_tracks, self.cb_audio, self.subtitle_tracks, self.cb_sub)
@@ -441,6 +447,8 @@ class QualitySelectionModal(tk.Toplevel):
             if 0 <= idx < len(self.audio_tracks):
                 sel_audio = self.audio_tracks[idx]
 
+        q_idx = self.options.index(self.selected_option) if (self.selected_option and self.selected_option in self.options) else 0
+        sub_pos = self.cb_sub.get_selected_pos() if (hasattr(self, "cb_sub") and self.cb_sub and hasattr(self.cb_sub, "get_selected_pos")) else "bottom"
         try:
             from .video_preview_modal import open_video_preview
             open_video_preview(
@@ -463,6 +471,8 @@ class QualitySelectionModal(tk.Toplevel):
                 modal_ref=self,
                 use_bridge=True,
                 subtitle_embed_mode=getattr(self.selected_option, "subtitle_embed_mode", "hard_burn"),
+                selected_q_idx=q_idx,
+                subtitle_position=sub_pos,
             )
         except Exception:
             pass
@@ -492,10 +502,10 @@ class QualitySelectionModal(tk.Toplevel):
             try: self.on_open_in_main(self.selected_option, final_dest)
             except Exception: pass
         else:
-            if self.master and hasattr(self.master, "restore_window"):
-                try: self.master.restore_window()
+            target = self.parent_app or self.master
+            if target and hasattr(target, "restore_window"):
+                try: target.restore_window()
                 except Exception: pass
-            self.on_confirm(self.selected_option, final_dest)
 
     def grab_set(self): pass
     def grab_set_global(self): pass

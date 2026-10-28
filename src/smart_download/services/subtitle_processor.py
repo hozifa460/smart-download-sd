@@ -201,7 +201,8 @@ def embed_subtitle_into_mp4(
 def burn_subtitle_into_video(
     video_path: str, srt_path: str, ffmpeg_path: str,
     on_log: Optional[Callable[[str], None]] = None,
-    cancel_event: Optional[Any] = None
+    cancel_event: Optional[Any] = None,
+    subtitle_position: str = "bottom"
 ) -> bool:
     """Burns subtitles directly onto video frames using a robust 3-candidate FFmpeg filter and transcode chain."""
     if cancel_event and cancel_event.is_set():
@@ -228,13 +229,20 @@ def burn_subtitle_into_video(
 
     escaped_path = burn_srt_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
-    # Candidate 1: subtitles={burn_srt_name}:charenc=UTF-8 with audio transcode AAC
-    # Candidate 2: subtitles={burn_srt_name} with audio transcode AAC (no libiconv dependency)
-    # Candidate 3: subtitles='{escaped_path}' with audio transcode AAC
+    align_styles = {
+        "top": "Alignment=8,MarginV=25,FontSize=20,Outline=1,Shadow=1",
+        "middle": "Alignment=5,MarginV=0,FontSize=20,Outline=1,Shadow=1",
+        "bottom": "Alignment=2,MarginV=25,FontSize=20,Outline=1,Shadow=1",
+    }
+    style_str = align_styles.get(str(subtitle_position or "bottom").strip().lower(), align_styles["bottom"])
+
+    # Candidate 1: subtitles={burn_srt_name}:charenc=UTF-8 with force_style
+    # Candidate 2: subtitles={burn_srt_name} with force_style (no libiconv dependency)
+    # Candidate 3: subtitles='{escaped_path}' with force_style
     candidate_vfs = [
-        f"subtitles={burn_srt_name}:charenc=UTF-8",
-        f"subtitles={burn_srt_name}",
-        f"subtitles='{escaped_path}'",
+        f"subtitles={burn_srt_name}:charenc=UTF-8:force_style='{style_str}'",
+        f"subtitles={burn_srt_name}:force_style='{style_str}'",
+        f"subtitles='{escaped_path}':force_style='{style_str}'",
     ]
 
     p: Optional[subprocess.Popen] = None
@@ -391,10 +399,21 @@ def handle_subtitles_post_download(
                     except Exception:
                         pass
 
+        sub_pos = getattr(stream_info, "subtitle_position", None)
+        if not sub_pos:
+            try:
+                from ..config import get_setting
+                sub_pos = get_setting("subtitle_position", "bottom")
+            except Exception:
+                sub_pos = "bottom"
+
         if mode == "hard_burn":
             if on_log:
                 on_log("[SUBTITLES] Burning subtitles permanently onto video frames...")
-            ok = burn_subtitle_into_video(output_path, srt_path, ffmpeg_bin, on_log=on_log, **sub_kwargs)
+            burn_kwargs = dict(sub_kwargs)
+            if sub_pos and isinstance(sub_pos, str) and sub_pos != "bottom":
+                burn_kwargs["subtitle_position"] = sub_pos
+            ok = burn_subtitle_into_video(output_path, srt_path, ffmpeg_bin, on_log=on_log, **burn_kwargs)
             if ok:
                 _cleanup_srt()
             elif not (cancel_event and cancel_event.is_set()):

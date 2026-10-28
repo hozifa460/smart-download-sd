@@ -579,22 +579,12 @@ class TestQualitySelectionModalGUI(unittest.TestCase):
 class TestInstantFetchingLinkToast(unittest.TestCase):
     """Verifies instant (< 50ms) fetching link toast indicator, dark styling, grab-free architecture, and smooth modal transition."""
 
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
         import tkinter as tk
-        self.root = tk.Tk()
-        self.root.withdraw()
-        # Warm up Windows font cache and Tkinter window subsystem
-        try:
-            _w = FetchingLinkToast(self.root, url="https://example.com/warmup", theme={
-                "c_bg": "#0f172a", "c_panel": "#1e293b", "c_panel_light": "#334155",
-                "c_border": "#475569", "c_accent": "#38bdf8", "c_accent_dark": "#0284c7",
-                "c_success": "#10b981", "c_danger": "#ef4444", "c_text_bright": "#f8fafc",
-                "c_text_muted": "#94a3b8", "c_input_bg": "#0b1220"
-            })
-            _w.close()
-        except Exception:
-            pass
-        self.theme = {
+        cls.root = tk.Tk()
+        cls.root.withdraw()
+        cls.theme = {
             "c_bg": "#0f172a",
             "c_panel": "#1e293b",
             "c_panel_light": "#334155",
@@ -608,9 +598,22 @@ class TestInstantFetchingLinkToast(unittest.TestCase):
             "c_input_bg": "#0b1220"
         }
 
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.root.update_idletasks()
+            cls.root.destroy()
+        except Exception:
+            pass
+
     def tearDown(self):
         try:
-            self.root.destroy()
+            for child in self.root.winfo_children():
+                try:
+                    child.destroy()
+                except Exception:
+                    pass
+            self.root.update_idletasks()
         except Exception:
             pass
 

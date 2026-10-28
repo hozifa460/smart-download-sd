@@ -429,6 +429,7 @@ class VideoFormatOption:
     selected_audio_track: Optional[Dict[str, Any]] = None
     selected_subtitle_track: Optional[Dict[str, Any]] = None
     subtitle_embed_mode: str = "soft_embed"
+    subtitle_position: str = "bottom"
 
 
 def format_filesize(num_bytes: int) -> str:
@@ -471,6 +472,7 @@ class YouTubeStreamInfo:
     subtitle_track: Optional[Dict[str, Any]] = None
     audio_language: Optional[str] = None
     subtitle_embed_mode: str = "soft_embed"
+    subtitle_position: str = "bottom"
     webpage_url: str = ""
 
 

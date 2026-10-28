@@ -9,6 +9,7 @@ except Exception:
     ttk = None  # type: ignore
 
 from smart_download.i18n import tr
+from smart_download.config import get_setting, set_setting
 from smart_download.ui.components.tooltip import ToolTip
 
 
@@ -28,9 +29,11 @@ class ControlsPanelMixin:
         self.lbl_conn = tk.Label(row1, text=tr("lbl_threads"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright)
         self.lbl_conn.pack(side=tk.LEFT)
 
-        self.conn_var = tk.StringVar(value="8")
+        saved_conn = str(get_setting("max_connections", 8))
+        self.conn_var = tk.StringVar(value=saved_conn)
         conn_combo = ttk.Combobox(row1, textvariable=self.conn_var, values=["1", "2", "4", "8", "16", "24", "32"], width=4, state="readonly")
         conn_combo.pack(side=tk.LEFT, padx=(4, 16))
+        conn_combo.bind("<<ComboboxSelected>>", self._on_conn_changed)
 
         # Speed Limiter controls
         self.lbl_limit = tk.Label(row1, text=tr("lbl_speed_limiter"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
@@ -269,6 +272,14 @@ class ControlsPanelMixin:
             command=self._open_browser_integration_dialog
         )
         self.btn_browser.pack(side=tk.RIGHT)
+
+    def _on_conn_changed(self, event=None):
+        """Persists user-selected thread/connection count."""
+        try:
+            val = int(self.conn_var.get())
+            set_setting("max_connections", val)
+        except Exception:
+            pass
 
 
 __all__ = ["ControlsPanelMixin"]

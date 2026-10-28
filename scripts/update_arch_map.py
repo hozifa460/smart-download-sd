@@ -138,6 +138,14 @@ FILE_METADATA: Dict[str, Dict[str, str]] = {
         "responsibility": "Application auto-update manager querying GitHub Releases and launching upgrade installers.",
         "when_to_edit": "Edit when modifying GitHub release querying or update downloading mechanisms."
     },
+    "src/smart_download/services/preview_stream_bridge.py": {
+        "responsibility": "Built-In In-Memory Preview & Control Bridge HTTP server and web API routing.",
+        "when_to_edit": "Edit when modifying in-app preview HTTP bridge or web player controls."
+    },
+    "src/smart_download/services/preview_stream_proxy.py": {
+        "responsibility": "Streaming media proxy and VTT subtitle compiler for real-time video previewing.",
+        "when_to_edit": "Edit when changing upstream byte-range streaming proxy or VTT subtitle generation."
+    },
     "src/smart_download/services/core_patch_updater.py": {
         "responsibility": "OTA hot-patch packager, atomic updater, and dynamic core loader (zero-rebuild workflow).",
         "when_to_edit": "Edit when modifying core patch packaging, plugin extraction, or dev source overriding."

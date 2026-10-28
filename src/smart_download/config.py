@@ -134,7 +134,17 @@ def load_settings() -> Dict[str, Any]:
         "auto_categorize_folders": True,
         "language": "ar",
         "auto_unpack_archives": False,
-        "subtitle_embed_mode": "soft_embed",
+        "max_connections": 8,
+        "speed_limit_preset": "Unlimited",
+        "custom_speed_limit_kbps": 0,
+        "clipboard_sniffer_active": True,
+        "startup_enabled": False,
+        "last_download_dir": os.path.join(os.path.expanduser("~"), "Downloads"),
+        "preferred_video_height": 0,
+        "preferred_audio_lang": "original",
+        "preferred_subtitle_lang": "none",
+        "subtitle_embed_mode": "hard_burn",
+        "subtitle_position": "bottom",
     }
 
     with _settings_lock:

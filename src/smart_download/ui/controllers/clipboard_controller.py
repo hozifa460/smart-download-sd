@@ -13,6 +13,7 @@ except Exception:
     tk = None  # type: ignore
 
 from smart_download.i18n import tr
+from smart_download.config import get_setting, set_setting
 from smart_download.utils import (
     get_clipboard_text,
     is_downloadable_url,
@@ -46,6 +47,7 @@ class ClipboardControllerMixin:
             pass
 
         self._fetch_cancel_event = threading.Event()
+        self._update_sniffer_btn()
         if hasattr(self, "root") and self.root:
             try:
                 self._clipboard_job = self.root.after(self._clipboard_poll_interval, self._check_clipboard_tick)
@@ -518,6 +520,10 @@ class ClipboardControllerMixin:
     def toggle_clipboard_sniffer(self):
         """Toggles automatic clipboard URL monitoring on or off."""
         self._clipboard_sniffer_active = not getattr(self, "_clipboard_sniffer_active", True)
+        try:
+            set_setting("clipboard_sniffer_active", self._clipboard_sniffer_active)
+        except Exception:
+            pass
         self._update_sniffer_btn()
         if self._clipboard_sniffer_active:
             self.log("[CLIPBOARD] Sniffer Active: Monitoring system clipboard for downloadable links.")

@@ -174,6 +174,10 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
             success = disable_startup()
             if success:
                 self._startup_enabled = False
+                try:
+                    set_setting("startup_enabled", False)
+                except Exception:
+                    pass
                 if hasattr(self, "log") and callable(self.log):
                     self.log("[STARTUP] Windows Run on Boot: Disabled.")
             else:
@@ -183,6 +187,10 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
             success = enable_startup(minimized=True)
             if success:
                 self._startup_enabled = True
+                try:
+                    set_setting("startup_enabled", True)
+                except Exception:
+                    pass
                 if hasattr(self, "log") and callable(self.log):
                     self.log("[STARTUP] Windows Run on Boot: Enabled (Silent background mode).")
             else:

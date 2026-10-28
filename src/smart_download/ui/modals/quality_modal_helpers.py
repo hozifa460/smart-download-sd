@@ -26,10 +26,14 @@ def attach_selected_tracks_to_option(
         if 0 <= idx < len(audio_tracks):
             selected_option.selected_audio_track = audio_tracks[idx]
     sub_mode = "hard_burn"
+    sub_pos = "bottom"
     if cb_sub:
         mode_fn = getattr(cb_sub, "get_selected_mode", None)
         sub_mode = mode_fn() if callable(mode_fn) else getattr(cb_sub, "_selected_mode", "hard_burn")
+        pos_fn = getattr(cb_sub, "get_selected_pos", None)
+        sub_pos = pos_fn() if callable(pos_fn) else getattr(cb_sub, "_selected_pos", "bottom")
     selected_option.subtitle_embed_mode = sub_mode or "hard_burn"
+    selected_option.subtitle_position = sub_pos or "bottom"
     if subtitle_tracks and cb_sub:
         idx = cb_sub.current()
         if 0 < idx < len(subtitle_tracks):
