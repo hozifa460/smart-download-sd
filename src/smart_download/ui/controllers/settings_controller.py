@@ -12,7 +12,7 @@ except Exception:
     filedialog = None  # type: ignore
 
 from smart_download.i18n import tr
-from smart_download.config import get_setting, set_setting
+from smart_download.config import get_setting, set_setting, get_base_downloads_dir
 from smart_download.utils import resolve_categorized_path
 from smart_download.services import is_startup_enabled, enable_startup, disable_startup
 
@@ -32,7 +32,7 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
             cur_dest = self.entry_dest.get().strip() if hasattr(self, "entry_dest") else ""
             if cur_dest:
                 fn = os.path.basename(cur_dest)
-                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
                 dest_dir = os.path.dirname(cur_dest)
                 if hasattr(self, "_is_downloads_or_category_subfolder") and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
                     new_dest = resolve_categorized_path(downloads_dir, fn, auto_categorize=self.auto_categorize_folders)

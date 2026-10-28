@@ -1177,6 +1177,12 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             stripped = os.path.dirname(video_sub)
             self.assertEqual(stripped, custom_dir)
 
+            # Test resolve_final_dest uses get_base_downloads_dir
+            from smart_download.ui.modals.quality_modal_helpers import resolve_final_dest
+            with patch("smart_download.ui.modals.quality_modal_helpers.get_base_downloads_dir", return_value=custom_dir):
+                dest_res = resolve_final_dest(None, "", "my_video", None, None, None)
+                self.assertTrue(dest_res.startswith(custom_dir))
+
     def test_preview_video_target_respects_selected_quality(self):
         """Verifies _resolve_video_target respects target_h of selected option."""
         from smart_download.services.preview_stream_bridge import PreviewBridgeRequestHandler, PreviewSession
@@ -1219,6 +1225,11 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         session2.selected_audio_track = {"track_id": "ar", "url": "https://example.com/dub.m4a"}
         url2, _ = handler._resolve_video_target(session2, 2)
         self.assertEqual(url2, "https://example.com/dash_1080.mp4")
+
+        # When q_idx = 2 and dubbing is NOT active, opt.video_url (1080p) is also streamed because no prog format matches 1080p
+        session2.selected_audio_track = None
+        url2_nodub, _ = handler._resolve_video_target(session2, 2)
+        self.assertEqual(url2_nodub, "https://example.com/dash_1080.mp4")
 
     def test_startup_enabled_sync_on_startup(self):
         """Verifies startup_enabled synchronizes registry when True in settings."""

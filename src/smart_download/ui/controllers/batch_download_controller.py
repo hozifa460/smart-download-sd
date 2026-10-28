@@ -5,6 +5,7 @@ import os
 import threading
 from typing import Dict, Any, List
 
+from smart_download.config import get_base_downloads_dir
 from smart_download.utils.url_utils import derive_download_filename
 from smart_download.utils.file_ops import resolve_categorized_path
 from ..modals.candidates_modal import MultipleCandidatesModal
@@ -29,7 +30,7 @@ class BatchDownloadControllerMixin:
                 cand = selected[0]
                 dl_url = cand["url"]
                 fn = cand.get("filename") or derive_download_filename(dl_url)
-                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
                 auto_cat = getattr(self, "auto_categorize_folders", True)
                 dest = resolve_categorized_path(downloads_dir, fn, auto_categorize=auto_cat)
                 if hasattr(self, "_show_download_confirmation_dialog"):
@@ -57,7 +58,7 @@ class BatchDownloadControllerMixin:
         """Queues a list of candidate downloads, starting the first one if idle."""
         if not items:
             return
-        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
         auto_cat = getattr(self, "auto_categorize_folders", True)
         try:
             max_conn = int(self.conn_var.get())

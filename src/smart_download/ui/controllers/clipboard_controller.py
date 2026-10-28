@@ -412,8 +412,8 @@ class ClipboardControllerMixin:
             def _proceed_start(info: Dict[str, Any]):
                 resolved_url = info.get("url") or url
                 resolved_fn = info.get("filename") or derive_download_filename(resolved_url)
-                dest_dir = os.path.dirname(final_dest) if final_dest else os.path.join(os.path.expanduser("~"), "Downloads")
-                downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+                downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
+                dest_dir = os.path.dirname(final_dest) if final_dest else downloads_dir
                 if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
                     act_dest = resolve_categorized_path(downloads_dir, resolved_fn, auto_categorize=True)
                 else:

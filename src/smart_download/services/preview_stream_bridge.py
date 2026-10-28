@@ -249,6 +249,17 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             and str(f.get("ext") or "").lower() == "mp4"
         ]
 
+        matching_prog = [f for f in prog_formats if int(f.get("height") or 0) == target_h] if prog_formats else []
+        if matching_prog and not dub_active:
+            chosen = matching_prog[0]
+            headers = dict(chosen.get("http_headers") or {})
+            if "Referer" not in headers and session.url:
+                headers["Referer"] = session.url
+            return str(chosen.get("url") or ""), headers
+
+        if opt and getattr(opt, "video_url", None) and (dub_active or not matching_prog):
+            return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
+
         if prog_formats and not dub_active:
             chosen = min(prog_formats, key=lambda f: abs(int(f.get("height") or 0) - target_h))
             headers = dict(chosen.get("http_headers") or {})
@@ -258,13 +269,6 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if opt and getattr(opt, "video_url", None):
             return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
-
-        if prog_formats:
-            chosen = min(prog_formats, key=lambda f: abs(int(f.get("height") or 0) - target_h))
-            headers = dict(chosen.get("http_headers") or {})
-            if "Referer" not in headers and session.url:
-                headers["Referer"] = session.url
-            return str(chosen.get("url") or ""), headers
 
         headers = dict(session.info_dict.get("http_headers") or {})
         if "Referer" not in headers and session.url:

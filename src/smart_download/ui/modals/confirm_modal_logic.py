@@ -11,13 +11,12 @@ from typing import Optional, Callable, Dict, Any, Tuple
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+from ...config import get_base_downloads_dir, set_setting
 from ...locales.i18n import tr
 from ...utils.url_utils import parse_speed_limit, derive_download_filename
 from ...utils.file_ops import (
-    get_file_category_and_icon,
-    open_downloaded_file,
-    open_containing_folder,
-    resolve_categorized_path,
+    CATEGORY_SUBFOLDERS, get_file_category_and_icon,
+    open_downloaded_file, open_containing_folder, resolve_categorized_path,
 )
 from ...core.engine import TurboDownloadEngine
 from ...core.history import DownloadHistoryManager
@@ -261,25 +260,24 @@ class ConfirmModalLogicMixin:
 
     def _on_browse(self):
         cur = self.entry_dest.get().strip()
-        init_dir = os.path.dirname(cur) if cur else os.path.join(os.path.expanduser("~"), "Downloads")
+        base_dl = getattr(self.parent_app, "_get_base_downloads_dir", get_base_downloads_dir)()
+        init_dir = os.path.dirname(cur) if cur else base_dl
         init_file = os.path.basename(cur) if cur else (self.file_name or "download.bin")
-        if not os.path.isdir(init_dir):
-            init_dir = os.path.join(os.path.expanduser("~"), "Downloads")
-        chosen = filedialog.asksaveasfilename(
-            parent=self,
-            title="Select Destination",
-            initialdir=init_dir,
-            initialfile=init_file
-        )
+        if not os.path.isdir(init_dir): init_dir = base_dl
+        chosen = filedialog.asksaveasfilename(parent=self, title="Select Destination", initialdir=init_dir, initialfile=init_file)
         if chosen:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, chosen)
             fn = os.path.basename(chosen)
-            if hasattr(self, "lbl_filename_val"):
-                self.lbl_filename_val.configure(text=fn)
+            if hasattr(self, "lbl_filename_val"): self.lbl_filename_val.configure(text=fn)
             cat, icon = get_file_category_and_icon(fn)
-            if hasattr(self, "lbl_category_val"):
-                self.lbl_category_val.configure(text=f"{icon}  {cat}")
+            if hasattr(self, "lbl_category_val"): self.lbl_category_val.configure(text=f"{icon}  {cat}")
+            try:
+                cd = os.path.dirname(os.path.abspath(chosen))
+                if getattr(self.parent_app, "auto_categorize_folders", True) and os.path.basename(cd).lower() in {s.lower() for s in CATEGORY_SUBFOLDERS.values()}:
+                    cd = os.path.dirname(cd)
+                set_setting("last_download_dir", cd)
+            except Exception: pass
 
     def _call_on_confirm(self, dest: str, max_conn: int = 8, speed_limit: float = 0.0):
         if not self.on_confirm:

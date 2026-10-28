@@ -190,11 +190,10 @@ class MediaOptionsBarMixin:
         if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos:
             self.cb_main_sub_pos.current(self._main_sub_pos_codes.index(pos) if pos in self._main_sub_pos_codes else 0)
 
-        sub_state = "readonly" if sub_idx > 0 else "disabled"
-        if hasattr(self, "cb_main_sub_mode") and self.cb_main_sub_mode:
-            self.cb_main_sub_mode.configure(state=sub_state)
-        if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos:
-            self.cb_main_sub_pos.configure(state=sub_state)
+        mode_st = "readonly" if len(self._main_subtitle_tracks) > 1 else "disabled"
+        if hasattr(self, "cb_main_sub_mode") and self.cb_main_sub_mode: self.cb_main_sub_mode.configure(state=mode_st)
+        pos_st = "readonly" if sub_idx > 0 else "disabled"
+        if hasattr(self, "cb_main_sub_pos") and self.cb_main_sub_pos: self.cb_main_sub_pos.configure(state=pos_st)
 
     def hide_main_media_bar(self):
         """Hides the Media Settings Bar frame when switching to non-media URLs."""
@@ -240,9 +239,9 @@ class MediaOptionsBarMixin:
     def _on_main_sub_changed(self, event=None):
         """Enables or disables subtitle mode combobox based on selected subtitle."""
         idx = self.cb_main_sub.current()
-        sub_state = "readonly" if idx > 0 else "disabled"
-        self.cb_main_sub_mode.configure(state=sub_state)
-        self.cb_main_sub_pos.configure(state=sub_state)
+        has_s = len(getattr(self, "_main_subtitle_tracks", [])) > 1
+        self.cb_main_sub_mode.configure(state="readonly" if has_s else "disabled")
+        self.cb_main_sub_pos.configure(state="readonly" if idx > 0 else "disabled")
         if event is not None:
             if idx > 0 and idx < len(self._main_subtitle_tracks):
                 lang = self._main_subtitle_tracks[idx].get("language") or "none"
@@ -438,9 +437,8 @@ class MediaOptionsBarMixin:
                 for i, s in enumerate(subs):
                     if (sel_s and (s == sel_s or s.get("sub_id") == sel_s.get("sub_id"))) or (not sel_s and i == 0):
                         self.cb_main_sub.current(i)
-                        st = "readonly" if i > 0 else "disabled"
-                        if hasattr(self, "cb_main_sub_mode"): self.cb_main_sub_mode.configure(state=st)
-                        if hasattr(self, "cb_main_sub_pos"): self.cb_main_sub_pos.configure(state=st)
+                        if hasattr(self, "cb_main_sub_mode"): self.cb_main_sub_mode.configure(state="readonly" if len(subs) > 1 else "disabled")
+                        if hasattr(self, "cb_main_sub_pos"): self.cb_main_sub_pos.configure(state="readonly" if i > 0 else "disabled")
                         break
             sm = getattr(opt, "subtitle_embed_mode", None)
             if sm and hasattr(self, "cb_main_sub_mode") and hasattr(self, "_main_sub_mode_codes") and sm in self._main_sub_mode_codes:

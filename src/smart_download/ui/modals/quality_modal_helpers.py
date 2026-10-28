@@ -6,6 +6,7 @@ import os
 import tkinter as tk
 from typing import Optional, Dict, Any, List
 
+from ...config import get_base_downloads_dir
 from ...locales.i18n import tr
 from ...utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
 from ...services.youtube_models import extract_media_platform, sanitize_filename
@@ -70,7 +71,7 @@ def resolve_final_dest(
             ext = getattr(selected_option, "ext", "mp4") if selected_option else "mp4"
             final_dest = f"{base}.{ext}"
         else:
-            downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+            downloads_dir = getattr(parent_app, "_get_base_downloads_dir", get_base_downloads_dir)()
             clean_title = sanitize_filename(video_title)
             ext = getattr(selected_option, "ext", "mp4") if selected_option else "mp4"
             final_dest = os.path.join(downloads_dir, f"{clean_title}.{ext}")

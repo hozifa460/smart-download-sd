@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 from typing import Optional, Callable, Dict, Any, List
 
-from ...config import get_resource_path
+from ...config import get_resource_path, get_base_downloads_dir
 from ...locales.i18n import tr
 from ...utils.file_ops import (
     CATEGORY_SUBFOLDERS,
@@ -402,7 +402,7 @@ class QualitySelectionModal(tk.Toplevel):
 
     def _on_browse(self):
         cur = self.entry_dest.get().strip()
-        init_dir = os.path.dirname(cur) if cur else (getattr(self.parent_app, "_get_base_downloads_dir", lambda: os.path.expanduser("~"))())
+        init_dir = os.path.dirname(cur) if cur else (getattr(self.parent_app, "_get_base_downloads_dir", get_base_downloads_dir)())
         init_file = os.path.basename(cur) if cur else "download.mp4"
         chosen = filedialog.asksaveasfilename(parent=self, title="Save Video As", initialdir=init_dir, initialfile=init_file)
         if chosen:
