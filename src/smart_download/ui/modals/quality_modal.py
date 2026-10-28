@@ -21,6 +21,7 @@ from .quality_modal_helpers import (
     attach_selected_tracks_to_option,
     resolve_final_dest,
     build_preview_header_banner,
+    resolve_preferred_option_index,
 )
 
 
@@ -60,7 +61,8 @@ class QualitySelectionModal(tk.Toplevel):
         self.raw_info = raw_info or {}
         self.cb_audio = None
         self.cb_sub = None
-        self.selected_option: Optional[VideoFormatOption] = self.options[0] if self.options else None
+        init_idx = resolve_preferred_option_index(self.options)
+        self.selected_option: Optional[VideoFormatOption] = self.options[init_idx] if (self.options and 0 <= init_idx < len(self.options)) else (self.options[0] if self.options else None)
         self._confirmed = False
 
         self.title(tr("modal_quality_title", "Select Video Quality — Smart Download"))
@@ -165,22 +167,12 @@ class QualitySelectionModal(tk.Toplevel):
             self.tree.insert("", tk.END, iid=iid, values=vals)
 
         if self.options:
-            first_iid = "opt_0"
-            try:
-                from ...config import get_setting
-                pref_h = int(get_setting("preferred_video_height", 0) or 0)
-                if pref_h == -1:
-                    m_idx = next((i for i, o in enumerate(self.options) if getattr(o, "is_audio_only", False)), None)
-                elif pref_h > 0:
-                    m_idx = next((i for i, o in enumerate(self.options) if not getattr(o, "is_audio_only", False) and getattr(o, "height", 0) == pref_h), None)
-                    if m_idx is None:
-                        cands = [(i, abs(getattr(o, "height", 0) - pref_h)) for i, o in enumerate(self.options) if not getattr(o, "is_audio_only", False) and getattr(o, "height", 0) > 0]
-                        m_idx = min(cands, key=lambda x: x[1])[0] if cands else None
-                else: m_idx = None
-                if m_idx is not None: first_iid = f"opt_{m_idx}"
-            except Exception: pass
+            init_idx = resolve_preferred_option_index(self.options)
+            first_iid = f"opt_{init_idx}"
             self.tree.selection_set(first_iid)
             self.tree.focus(first_iid)
+            self.tree.see(first_iid)
+            self.after_idle(lambda: self.tree.see(first_iid) if self.winfo_exists() else None)
             if first_iid in self._row_to_opt:
                 self.selected_option = self._row_to_opt[first_iid]
 
@@ -235,6 +227,8 @@ class QualitySelectionModal(tk.Toplevel):
             command=self._on_browse
         )
         btn_browse.pack(side=tk.RIGHT)
+        if getattr(self, "options", None) and first_iid != "opt_0":
+            self._on_tree_select(None)
 
         # Bottom Buttons
         btn_row = tk.Frame(body, bg=c_bg)

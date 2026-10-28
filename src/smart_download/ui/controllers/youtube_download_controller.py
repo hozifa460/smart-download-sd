@@ -27,6 +27,7 @@ from smart_download.services.youtube_service import (
 from smart_download.services.youtube_tracks import extract_audio_tracks, extract_subtitle_tracks
 from ..modals.quality_modal import QualitySelectionModal
 from ..modals.confirm_modal import DownloadConfirmationModal
+from ..modals.quality_modal_helpers import resolve_preferred_option_index
 
 
 class YouTubeDownloadControllerMixin:
@@ -117,13 +118,16 @@ class YouTubeDownloadControllerMixin:
                 except Exception:
                     pass
 
-                initial_ext = options[0].ext or "mp4"
+                init_idx = resolve_preferred_option_index(options)
+                init_opt = options[init_idx] if (options and 0 <= init_idx < len(options)) else (options[0] if options else None)
+                initial_ext = getattr(init_opt, "ext", "mp4") if init_opt else "mp4"
+                initial_lbl = getattr(init_opt, "resolution_label", "") if init_opt else ""
                 initial_fn = f"{clean_title}.{initial_ext}"
                 if getattr(self, "auto_categorize_folders", True) and hasattr(self, "_is_downloads_or_category_subfolder") and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
                     initial_dest = resolve_categorized_path(downloads_dir, initial_fn, auto_categorize=True)
                 else:
                     initial_dest = os.path.join(dest_dir, initial_fn)
-                initial_dest = apply_media_filename_tags(initial_dest, quality_label=options[0].resolution_label, is_sub_burned=False, ext=initial_ext)
+                initial_dest = apply_media_filename_tags(initial_dest, quality_label=initial_lbl, is_sub_burned=False, ext=initial_ext)
 
 
                 def _show_modal():
@@ -253,7 +257,7 @@ class YouTubeDownloadControllerMixin:
                             "options": options,
                             "audio_tracks": audio_tracks,
                             "subtitle_tracks": subtitle_tracks,
-                            "selected_option": options[0] if options else None,
+                            "selected_option": init_opt,
                             "resolver": resolver,
                             "final_dest": initial_dest
                         }

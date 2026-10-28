@@ -33,6 +33,7 @@ from smart_download.services.youtube_tracks import (
 )
 from ..modals.quality_modal import QualitySelectionModal
 from ..modals.confirm_modal import DownloadConfirmationModal
+from ..modals.quality_modal_helpers import resolve_preferred_option_index
 
 
 class MediaOptionsBarMixin:
@@ -119,7 +120,13 @@ class MediaOptionsBarMixin:
         self._main_audio_tracks = list(audio_tracks or [])
         self._main_subtitle_tracks = list(subtitle_tracks or [])
         self._last_yt_info = info
-        sel_opt = selected_opt or selected_option or (self._main_media_options[0] if self._main_media_options else None)
+        explicit_opt = selected_opt or selected_option
+        if explicit_opt and explicit_opt in self._main_media_options:
+            sel_idx = self._main_media_options.index(explicit_opt)
+            sel_opt = explicit_opt
+        else:
+            sel_idx = resolve_preferred_option_index(self._main_media_options)
+            sel_opt = self._main_media_options[sel_idx] if (self._main_media_options and 0 <= sel_idx < len(self._main_media_options)) else None
 
         media_url = url or (self.entry_url.get().strip() if hasattr(self, "entry_url") else "")
         final_dest = dest or (self.entry_dest.get().strip() if hasattr(self, "entry_dest") else "")
@@ -140,21 +147,15 @@ class MediaOptionsBarMixin:
         self.media_options_frame.pack(fill=tk.X, pady=(4, 2))
 
         # 1. Populate Quality Combobox
-        q_vals, pref_h, sel_idx, matched_pref = [], get_setting("preferred_video_height", 0), 0, False
-        for i, opt in enumerate(self._main_media_options):
+        q_vals = []
+        for opt in self._main_media_options:
             fs = getattr(opt, "filesize_approx", 0) or getattr(opt, "filesize", 0)
             sz = format_filesize(fs) if fs else "~"
             res_lbl = getattr(opt, "resolution_label", "") or getattr(opt, "resolution_name", "Video")
             ext = getattr(opt, "ext", "mp4").upper()
             q_vals.append(f"{res_lbl} ({ext}) — {sz}")
-            h = getattr(opt, "height", 0) or 0
-            if not matched_pref and pref_h and h == pref_h:
-                sel_idx = i
-                matched_pref = True
         self.cb_main_quality.configure(values=q_vals)
-        if sel_opt and sel_opt in self._main_media_options:
-            sel_idx = self._main_media_options.index(sel_opt)
-        if q_vals:
+        if q_vals and 0 <= sel_idx < len(q_vals):
             self.cb_main_quality.current(sel_idx)
 
         # 2. Populate Audio Combobox
@@ -353,7 +354,8 @@ class MediaOptionsBarMixin:
         raw_title, duration = info.get("title") or "Video", int(info.get("duration") or 0)
         theme_dict = self._theme_dict() if hasattr(self, "_theme_dict") else {}
         clean_title = sanitize_filename(raw_title)
-        first_opt = options[0] if options else None
+        cached_opt = ctx.get("selected_option")
+        first_opt = cached_opt if (cached_opt and cached_opt in options) else (options[resolve_preferred_option_index(options)] if options else None)
         first_ext = first_opt.ext if first_opt else "mp4"
         first_lbl = first_opt.resolution_label if first_opt else ""
 

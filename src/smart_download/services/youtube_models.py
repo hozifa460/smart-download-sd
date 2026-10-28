@@ -478,3 +478,16 @@ class YouTubeStreamInfo:
 
 # Clean alias
 MediaStreamInfo = YouTubeStreamInfo
+
+
+def resolve_preferred_option_index(options: List[Any]) -> int:
+    """Helper resolving preferred format index using user settings."""
+    try:
+        from ..ui.modals.quality_modal_helpers import resolve_preferred_option_index as _res
+        return _res(options)
+    except Exception:
+        try:
+            from smart_download.ui.modals.quality_modal_helpers import resolve_preferred_option_index as _res
+            return _res(options)
+        except Exception:
+            return 0

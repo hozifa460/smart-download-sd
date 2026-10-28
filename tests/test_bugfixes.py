@@ -1241,17 +1241,19 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         url_a1, _ = handler._resolve_video_target(session2, 2, a_idx=1)
         self.assertEqual(url_a1, "https://example.com/dash_1080.mp4")
 
+        # When opt has BOTH video_url and audio_url, DASH 1080p is streamed directly even without dubbing and even when prog_formats exists
+        opt_1080.audio_url = "https://example.com/orig_audio.m4a"
+        opt_1080.audio_headers = {"Orig": "1"}
+        url_dash_with_audio, _ = handler._resolve_video_target(session2, 2, a_idx=0)
+        self.assertEqual(url_dash_with_audio, "https://example.com/dash_1080.mp4")
+        a_dash_url, a_dash_hdr = handler._resolve_audio_target(session2, 0, q_idx=2)
+        self.assertEqual(a_dash_url, "https://example.com/orig_audio.m4a")
+        self.assertEqual(a_dash_hdr.get("Orig"), "1")
+
         # When prog_formats is empty, DASH 1080p is streamed directly
         session_empty = PreviewSession(sid="s_emp", url="https://example.com/video", video_title="Video", options=[opt_1080], info_dict={"formats": []}, audio_tracks=[], subtitle_tracks=[])
         url_empty, _ = handler._resolve_video_target(session_empty, 0)
         self.assertEqual(url_empty, "https://example.com/dash_1080.mp4")
-
-        # Fallback audio when prog_formats is empty and DASH has separate audio_url
-        opt_1080.audio_url = "https://example.com/orig_audio.m4a"
-        opt_1080.audio_headers = {"Orig": "1"}
-        a_url, a_hdr = handler._resolve_audio_target(session_empty, 0, q_idx=0)
-        self.assertEqual(a_url, "https://example.com/orig_audio.m4a")
-        self.assertEqual(a_hdr.get("Orig"), "1")
 
     def test_startup_enabled_sync_on_startup(self):
         """Verifies startup_enabled synchronizes registry when True in settings."""
@@ -1274,6 +1276,94 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
                     panel._update_startup_btn()
                     mock_enable.assert_called_once_with(minimized=True)
                     self.assertTrue(panel._startup_enabled)
+
+    def test_resolve_preferred_option_index(self):
+        """Verifies resolve_preferred_option_index honors user settings for audio-only, exact match, and closest match."""
+        from smart_download.ui.modals.quality_modal_helpers import resolve_preferred_option_index
+        from smart_download.services.youtube_models import VideoFormatOption
+
+        opt_1080 = VideoFormatOption(format_id="1", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=1000)
+        opt_720 = VideoFormatOption(format_id="2", resolution_label="720p", height=720, ext="mp4", filesize_approx=1000)
+        opt_360 = VideoFormatOption(format_id="3", resolution_label="360p", height=360, ext="mp4", filesize_approx=1000)
+        opt_audio = VideoFormatOption(format_id="4", resolution_label="Audio", height=0, ext="m4a", filesize_approx=1000, is_audio_only=True)
+        options = [opt_1080, opt_720, opt_360, opt_audio]
+
+        # Empty options
+        self.assertEqual(resolve_preferred_option_index([]), 0)
+
+        # pref_h == -1 (Audio only)
+        with patch("smart_download.config.get_setting", return_value=-1):
+            self.assertEqual(resolve_preferred_option_index(options), 3)
+
+        # pref_h == 720 (Exact match)
+        with patch("smart_download.config.get_setting", return_value=720):
+            self.assertEqual(resolve_preferred_option_index(options), 1)
+
+        # pref_h == 480 (Closest non-audio match: |360-480|=120 vs |720-480|=240 => 360p)
+        with patch("smart_download.config.get_setting", return_value=480):
+            self.assertEqual(resolve_preferred_option_index(options), 2)
+
+        # pref_h == 0 (Default highest quality)
+        with patch("smart_download.config.get_setting", return_value=0):
+            self.assertEqual(resolve_preferred_option_index(options), 0)
+
+    def test_preview_html_autoscroll_and_separate_audio(self):
+        """Verifies Preview HTML contains autoscroll and optNeedsSeparateAudio array."""
+        from smart_download.ui.modals.preview_html_builder import generate_preview_html
+        from smart_download.services.youtube_models import VideoFormatOption
+
+        opt_prog = VideoFormatOption(format_id="18", resolution_label="360p", height=360, ext="mp4", filesize_approx=1000, is_progressive=True, video_url="http://x/prog.mp4")
+        opt_dash = VideoFormatOption(format_id="137", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=1000, is_progressive=False, video_url="http://x/1080.mp4", audio_url="http://x/aud.m4a")
+
+        html_out = generate_preview_html(
+            url="https://www.youtube.com/watch?v=scroll_test",
+            video_title="Scroll Test",
+            stream_url="http://127.0.0.1:9876/stream_video?sid=xyz&q_idx=1",
+            sid="test_sid",
+            bridge_port=9876,
+            options=[opt_prog, opt_dash],
+            selected_q_idx=1,
+        )
+        self.assertIn("initRow.scrollIntoView", html_out)
+        self.assertIn("const optNeedsSeparateAudio = [false, true];", html_out)
+
+    def test_quality_modal_preferred_height_dest_update(self):
+        """Verifies QualitySelectionModal auto-selects preferred height and updates destination tag."""
+        import tkinter as tk
+        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+        from smart_download.services.youtube_models import VideoFormatOption
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            opt_1080 = VideoFormatOption(format_id="1", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=50000000)
+            opt_360 = VideoFormatOption(format_id="2", resolution_label="360p", height=360, ext="mp4", filesize_approx=10000000)
+            options = [opt_1080, opt_360]
+
+            theme = {
+                "c_bg": "#1e293b", "c_panel": "#0f172a", "c_panel_light": "#334155",
+                "c_border": "#475569", "c_accent": "#38bdf8", "c_accent_dark": "#0284c7",
+                "c_success": "#10b981", "c_text_bright": "#f8fafc", "c_text_muted": "#94a3b8", "c_input_bg": "#0f172a"
+            }
+
+            with patch("smart_download.config.get_setting", return_value=360):
+                modal = QualitySelectionModal(
+                    parent=root,
+                    video_title="Test Video",
+                    duration=100,
+                    options=options,
+                    default_dest_path="C:/Downloads/Test [1080p].mp4",
+                    theme=theme,
+                    on_confirm=lambda o, d: None
+                )
+                self.assertEqual(modal.selected_option.height, 360)
+                self.assertEqual(modal.tree.selection(), ("opt_1",))
+                self.assertIn("[360p]", modal.entry_dest.get())
+                self.assertNotIn("[1080p]", modal.entry_dest.get())
+                modal.destroy()
+        finally:
+            try: root.destroy()
+            except Exception: pass
 
 
 if __name__ == "__main__":

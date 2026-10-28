@@ -67,6 +67,7 @@ _JS_TEMPLATE = """
 const hasStream = __HAS_STREAM__, embedUrl = __EMBED_SRC__, initialDubAudioUrl = __DUB_URL__;
 const sid = __SID__, audioTracks = __AUDIO_TRACKS__, subtitleTracks = __SUBTITLE_TRACKS__;
 const bridgeBase = __BRIDGE_BASE__;
+const optNeedsSeparateAudio = __OPT_NEEDS_AUDIO__;
 const videoEl = document.getElementById("videoEl"), dubAudioEl = document.getElementById("dubAudioEl");
 const iframeEl = document.getElementById("iframeEl"), toggleBtn = document.getElementById("toggleBtn");
 const audioBadge = document.getElementById("badgeAudio"), subBadge = document.getElementById("badgeSub"), resBadge = document.getElementById("badgeRes");
@@ -149,15 +150,25 @@ if (muteBtn && volSlider) {
 function selectQualityRow(idx) {
     selected_q_idx = idx; document.querySelectorAll(".opt-row").forEach(r => r.classList.remove("selected"));
     const row = document.querySelector(`.opt-row[data-idx="${idx}"]`);
-    if (row) row.classList.add("selected");
+    if (row) {
+        row.classList.add("selected");
+        if (row.scrollIntoView) {
+            setTimeout(() => row.scrollIntoView({ block: "center", behavior: "instant" }), 50);
+        }
+    }
     const resCell = row ? row.querySelector(".col-res strong") : null;
     if (resCell && resBadge) resBadge.textContent = "🎞️ " + resCell.textContent;
     if (sid) {
         const savedTime = videoEl ? videoEl.currentTime : 0;
         const curA = audioSelect ? parseInt(audioSelect.value) : 0;
         videoEl.src = `${bridgeBase}/stream_video?sid=${encodeURIComponent(sid)}&q_idx=${idx}&a_idx=${curA}`;
-        if (initialDubAudioUrl && curA <= 0) {
-            setDubAudioTrack(`${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=0&q_idx=${idx}`, "Original Audio");
+        if (curA <= 0) {
+            const needsAud = Boolean(optNeedsSeparateAudio && optNeedsSeparateAudio[idx]);
+            if (needsAud) {
+                setDubAudioTrack(`${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=0&q_idx=${idx}`, "Original Audio");
+            } else {
+                setDubAudioTrack(null, "Original Audio");
+            }
         }
         if (savedTime > 0) {
             videoEl.addEventListener("loadedmetadata", () => {
@@ -175,8 +186,9 @@ function onAudioChange() {
     if (!audioSelect) return;
     const a = parseInt(audioSelect.value);
     if (a <= 0 || a >= audioTracks.length) {
-        if (initialDubAudioUrl) {
-            setDubAudioTrack(sid ? `${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=0&q_idx=${selected_q_idx}` : initialDubAudioUrl, "Original Audio");
+        const needsAud = Boolean(optNeedsSeparateAudio && optNeedsSeparateAudio[selected_q_idx]);
+        if (needsAud) {
+            setDubAudioTrack(sid ? `${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=0&q_idx=${selected_q_idx}` : (initialDubAudioUrl || ""), "Original Audio");
         } else {
             setDubAudioTrack(null, "Original Audio");
         }
@@ -306,6 +318,10 @@ function doAction(actionType) {
     }).then(r => r.json()).then(() => { setTimeout(() => { window.close(); }, 120); }).catch(() => { window.close(); });
 }
 applySubtitlePosition(__SUB_POS__);
+const initRow = document.querySelector(`.opt-row[data-idx="${selected_q_idx}"]`);
+if (initRow && initRow.scrollIntoView) {
+    setTimeout(() => initRow.scrollIntoView({ block: "center", behavior: "instant" }), 50);
+}
 window.addEventListener("pagehide", () => {
     if (sid && !actionSubmitted) { try { navigator.sendBeacon(`${bridgeBase}/api/action?sid=${encodeURIComponent(sid)}`, JSON.stringify({ action: "cancel" })); } catch (e) {} }
 });
@@ -434,6 +450,10 @@ def generate_preview_html(
         safe_dst = html.escape(default_dest_path or "")
         settings_html = f"""<div class="settings-panel"><div class="settings-header"><span class="settings-title">⚡ Download Quality &amp; Controls</span><span class="settings-count">{len(options)} Formats Detected</span></div><div class="table-container"><table class="format-table"><thead><tr><th>Resolution / Quality</th><th class="col-center">Format</th><th class="col-right">Est. Size</th><th class="col-center">FPS</th><th>Stream Details</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="controls-row"><div class="ctrl-group"><label>🔊 Audio / الدبلجة</label><select id="audioSelect" onchange="onAudioChange()">{"".join(a_opts)}</select></div><div class="ctrl-group"><label>💬 Subtitles / الترجمة</label><select id="subSelect" onchange="onSubChange()">{"".join(s_opts)}</select></div><div class="ctrl-group"><label>⚙️ Mode / الطريقة</label><select id="modeSelect" onchange="onModeChange()">{"".join(m_opts)}</select></div><div class="ctrl-group"><label>📍 Position / الموضع</label><select id="posSelect" onchange="onPosChange()">{"".join(p_opts)}</select></div></div><div class="dest-card"><label>📁 Save As / مسار الحفظ:</label><input type="text" id="destInput" value="{safe_dst}" /><button type="button" class="btn" style="padding:4px 8px;font-size:11px;" onclick="browseDestination()">📁 Browse...</button></div><div class="action-bar"><button class="btn btn-download" onclick="doAction('download')">⚡ Download Selected Quality</button><button class="btn btn-secondary" onclick="doAction('open_in_main')">🖥️ Open in Main Window</button><button class="btn btn-cancel" onclick="doAction('cancel')">✕ Cancel</button></div></div>"""
 
+    opt_needs_audio = [
+        bool(not getattr(o, "is_progressive", False) and not getattr(o, "is_audio_only", False) and getattr(o, "audio_url", None))
+        for o in (options or [])
+    ]
     js_code = (
         _JS_TEMPLATE
         .replace("__HAS_STREAM__", "true" if stream_url else "false")
@@ -445,6 +465,7 @@ def generate_preview_html(
         .replace("__EFFECTIVE_AUDIO_LABEL__", json.dumps(eff_audio_lbl))
         .replace("__BRIDGE_BASE__", json.dumps(bridge_base))
         .replace("__SELECTED_Q_IDX__", json.dumps(selected_q_idx))
+        .replace("__OPT_NEEDS_AUDIO__", json.dumps(opt_needs_audio))
         .replace("__SUB_POS__", json.dumps(subtitle_position or "bottom"))
     )
 

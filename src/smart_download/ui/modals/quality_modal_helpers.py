@@ -161,3 +161,50 @@ def build_preview_header_banner(
     btn_preview.pack(side=tk.RIGHT, padx=(8, 0))
 
     return banner, btn_preview
+
+
+def resolve_preferred_option_index(options: List[Any]) -> int:
+    """
+    Resolves the option index matching the user's preferred video height setting.
+    - If preferred_video_height == -1, returns index of first audio-only option (or 0).
+    - If preferred_video_height > 0, returns index of exact height match or closest non-audio-only height match.
+    - Otherwise returns 0.
+    """
+    if not options:
+        return 0
+    try:
+        from ...config import get_setting
+        pref_h = int(get_setting("preferred_video_height", 0) or 0)
+    except Exception:
+        try:
+            from smart_download.config import get_setting
+            pref_h = int(get_setting("preferred_video_height", 0) or 0)
+        except Exception:
+            pref_h = 0
+
+    if pref_h == -1:
+        for i, opt in enumerate(options):
+            if getattr(opt, "is_audio_only", False):
+                return i
+        return 0
+
+    if pref_h > 0:
+        exact_idx = None
+        closest_idx = None
+        closest_diff = float("inf")
+        for i, opt in enumerate(options):
+            if getattr(opt, "is_audio_only", False):
+                continue
+            h = getattr(opt, "height", 0) or 0
+            if h == pref_h:
+                return i
+            if h > 0:
+                diff = abs(h - pref_h)
+                if diff < closest_diff:
+                    closest_diff = diff
+                    closest_idx = i
+        if closest_idx is not None:
+            return closest_idx
+        return 0
+
+    return 0

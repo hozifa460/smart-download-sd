@@ -228,9 +228,15 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         formats = session.info_dict.get("formats") or []
         prog_formats = [f for f in formats if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none" and str(f.get("ext") or "").lower() == "mp4"]
 
+        # 1. Progressive video with muxed audio
         if opt and getattr(opt, "is_progressive", False) and getattr(opt, "video_url", None):
             return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
 
+        # 2. DASH video format with both video_url and audio_url (or active dubbed audio)
+        if opt and getattr(opt, "video_url", None) and (dub_active or getattr(opt, "audio_url", None)):
+            return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
+
+        # Fallback to prog_formats if opt has no video_url or is non-progressive without audio_url when not dub_active
         target_h = int(getattr(opt, "height", 0) or 720) if opt else 720
         if prog_formats and not dub_active:
             chosen = min(prog_formats, key=lambda f: abs(int(f.get("height") or 0) - target_h))
@@ -251,9 +257,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         if not track or not track.get("url") or track.get("track_id") == "original":
             idx = q_idx if (q_idx is not None and 0 <= q_idx < len(session.options)) else (session.selected_q_idx if 0 <= session.selected_q_idx < len(session.options) else 0)
             opt = session.options[idx] if session.options else None
-            formats = session.info_dict.get("formats") or []
-            prog_formats = [f for f in formats if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none" and str(f.get("ext") or "").lower() == "mp4"]
-            if not prog_formats and opt and not getattr(opt, "is_progressive", False):
+            if opt and not getattr(opt, "is_progressive", False):
                 cand_url = getattr(opt, "audio_url", None) or (track.get("url") if track else "")
                 if cand_url:
                     headers = dict(getattr(opt, "audio_headers", {}) or {})
