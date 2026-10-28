@@ -154,7 +154,11 @@ function selectQualityRow(idx) {
     if (resCell && resBadge) resBadge.textContent = "🎞️ " + resCell.textContent;
     if (sid) {
         const savedTime = videoEl ? videoEl.currentTime : 0;
-        videoEl.src = `${bridgeBase}/stream_video?sid=${encodeURIComponent(sid)}&q_idx=${idx}`;
+        const curA = audioSelect ? parseInt(audioSelect.value) : 0;
+        videoEl.src = `${bridgeBase}/stream_video?sid=${encodeURIComponent(sid)}&q_idx=${idx}&a_idx=${curA}`;
+        if (initialDubAudioUrl && curA <= 0) {
+            setDubAudioTrack(`${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=0&q_idx=${idx}`, "Original Audio");
+        }
         if (savedTime > 0) {
             videoEl.addEventListener("loadedmetadata", () => {
                 try { videoEl.currentTime = savedTime; } catch (e) {}
@@ -170,9 +174,29 @@ function selectQualityRow(idx) {
 function onAudioChange() {
     if (!audioSelect) return;
     const a = parseInt(audioSelect.value);
-    if (a <= 0 || a >= audioTracks.length) setDubAudioTrack(null, "Original Audio");
-    else { const t = audioTracks[a]; setDubAudioTrack(sid ? `${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=${a}` : (t.url || ""), t.label || t.language); }
+    if (a <= 0 || a >= audioTracks.length) {
+        if (initialDubAudioUrl) {
+            setDubAudioTrack(sid ? `${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=0&q_idx=${selected_q_idx}` : initialDubAudioUrl, "Original Audio");
+        } else {
+            setDubAudioTrack(null, "Original Audio");
+        }
+    } else {
+        const t = audioTracks[a];
+        setDubAudioTrack(sid ? `${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=${a}&q_idx=${selected_q_idx}` : (t.url || ""), t.label || t.language);
+    }
     syncStateToBridge();
+    if (sid && videoEl) {
+        const savedTime = videoEl.currentTime || 0;
+        videoEl.src = `${bridgeBase}/stream_video?sid=${encodeURIComponent(sid)}&q_idx=${selected_q_idx}&a_idx=${a}`;
+        if (savedTime > 0) {
+            videoEl.addEventListener("loadedmetadata", () => {
+                try { videoEl.currentTime = savedTime; } catch (e) {}
+                videoEl.play().catch(e => {});
+            }, { once: true });
+        } else {
+            videoEl.play().catch(e => {});
+        }
+    }
 }
 function applySubtitlePosition(pos) {
     let pStyle = document.getElementById("cuePosStyle");

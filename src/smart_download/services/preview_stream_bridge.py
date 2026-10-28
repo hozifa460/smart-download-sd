@@ -148,17 +148,15 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/stream_video":
-            q_idx = int(params.get("q_idx", ["0"])[0]) if params.get("q_idx") else 0
-            target_url, target_headers = self._resolve_video_target(session, q_idx)
+            q_idx, a_idx = int(params.get("q_idx", ["0"])[0]) if params.get("q_idx") else 0, (int(params.get("a_idx", ["0"])[0]) if params.get("a_idx") else None)
+            target_url, target_headers = self._resolve_video_target(session, q_idx, a_idx=a_idx)
             stream_upstream_media(self, target_url, target_headers, is_head=True)
         elif parsed.path == "/stream_audio":
-            a_idx = int(params.get("a_idx", ["0"])[0]) if params.get("a_idx") else 0
-            target_url, target_headers = self._resolve_audio_target(session, a_idx)
+            a_idx, q_idx = int(params.get("a_idx", ["0"])[0]) if params.get("a_idx") else 0, (int(params.get("q_idx", ["0"])[0]) if params.get("q_idx") else None)
+            target_url, target_headers = self._resolve_audio_target(session, a_idx, q_idx=q_idx)
             stream_upstream_media(self, target_url, target_headers, is_head=True)
         else:
-            self.send_response(200)
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
+            self.send_response(200); self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
 
     def do_GET(self):
         """Dispatches GET requests for player HTML, video stream, audio stream, or subtitles."""
@@ -168,36 +166,31 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         session = get_preview_session(sid)
 
         if not session:
-            self.send_response(404)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.end_headers()
+            self.send_response(404); self.send_header("Content-Type", "text/plain; charset=utf-8"); self.end_headers()
             self.wfile.write(b"404 Session Not Found or Expired")
             return
 
         if parsed.path == "/player":
             self._handle_player(session)
         elif parsed.path == "/stream_video":
-            q_idx = int(params.get("q_idx", ["0"])[0]) if params.get("q_idx") else 0
-            target_url, target_headers = self._resolve_video_target(session, q_idx)
+            q_idx, a_idx = int(params.get("q_idx", ["0"])[0]) if params.get("q_idx") else 0, (int(params.get("a_idx", ["0"])[0]) if params.get("a_idx") else None)
+            target_url, target_headers = self._resolve_video_target(session, q_idx, a_idx=a_idx)
             stream_upstream_media(self, target_url, target_headers, is_head=False)
         elif parsed.path == "/stream_audio":
-            a_idx = int(params.get("a_idx", ["0"])[0]) if params.get("a_idx") else 0
-            target_url, target_headers = self._resolve_audio_target(session, a_idx)
+            a_idx, q_idx = int(params.get("a_idx", ["0"])[0]) if params.get("a_idx") else 0, (int(params.get("q_idx", ["0"])[0]) if params.get("q_idx") else None)
+            target_url, target_headers = self._resolve_audio_target(session, a_idx, q_idx=q_idx)
             stream_upstream_media(self, target_url, target_headers, is_head=False)
         elif parsed.path == "/subtitle.vtt":
             s_idx = int(params.get("s_idx", ["0"])[0]) if params.get("s_idx") else 0
             self._handle_subtitle(session, s_idx)
         else:
-            self.send_response(404)
-            self.end_headers()
+            self.send_response(404); self.end_headers()
 
     def _send_json(self, data: Dict[str, Any], code: int = 200) -> None:
         """Sends JSON HTTP response with CORS headers."""
         payload = json.dumps(data).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
+        self.send_response(code); self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*"); self.end_headers()
         self.wfile.write(payload)
 
     def do_POST(self):
@@ -207,84 +200,71 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         sid = params.get("sid", [""])[0]
         session = get_preview_session(sid)
         if not session:
-            self.send_response(404)
-            self.end_headers()
+            self.send_response(404); self.end_headers()
             return
 
         content_len = int(self.headers.get("Content-Length", 0))
         raw_body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
-        try:
-            body = json.loads(raw_body)
-        except Exception:
-            body = {}
+        try: body = json.loads(raw_body)
+        except Exception: body = {}
 
-        if parsed.path == "/api/update_filename":
-            self._handle_api_update_filename(session, body)
-        elif parsed.path == "/api/action":
-            self._handle_api_action(session, body)
-        elif parsed.path == "/api/sync_state":
-            self._handle_api_sync_state(session, body)
-        elif parsed.path == "/api/browse":
-            self._handle_api_browse(session, body, params)
-        else:
-            self.send_response(404)
-            self.end_headers()
+        if parsed.path == "/api/update_filename": self._handle_api_update_filename(session, body)
+        elif parsed.path == "/api/action": self._handle_api_action(session, body)
+        elif parsed.path == "/api/sync_state": self._handle_api_sync_state(session, body)
+        elif parsed.path == "/api/browse": self._handle_api_browse(session, body, params)
+        else: self.send_response(404); self.end_headers()
 
-    def _resolve_video_target(self, session: PreviewSession, q_idx: int) -> tuple[str, Dict[str, str]]:
+    def _resolve_video_target(self, session: PreviewSession, q_idx: int, a_idx: Optional[int] = None) -> tuple[str, Dict[str, str]]:
         """Finds the best progressive playable stream URL and forwarding HTTP headers."""
         opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
         if opt and getattr(opt, "is_audio_only", False) and getattr(opt, "audio_url", None):
             return str(opt.audio_url), dict(getattr(opt, "audio_headers", {}) or {})
 
+        dub_active = (a_idx > 0) if a_idx is not None else bool(session.selected_audio_track and session.selected_audio_track.get("track_id") not in (None, "original") and session.selected_audio_track.get("url"))
+        if a_idx is not None and session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
+            cur_aud = session.audio_tracks[a_idx]
+            dub_active = bool(cur_aud and cur_aud.get("track_id") not in (None, "original") and cur_aud.get("url"))
+
+        formats = session.info_dict.get("formats") or []
+        prog_formats = [f for f in formats if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none" and str(f.get("ext") or "").lower() == "mp4"]
+
         if opt and getattr(opt, "is_progressive", False) and getattr(opt, "video_url", None):
             return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
 
         target_h = int(getattr(opt, "height", 0) or 720) if opt else 720
-        dub_active = bool(session.selected_audio_track and session.selected_audio_track.get("track_id") not in (None, "original") and session.selected_audio_track.get("url"))
-
-        formats = session.info_dict.get("formats") or []
-        prog_formats = [
-            f for f in formats
-            if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none"
-            and str(f.get("ext") or "").lower() == "mp4"
-        ]
-
         if prog_formats and not dub_active:
             chosen = min(prog_formats, key=lambda f: abs(int(f.get("height") or 0) - target_h))
             headers = dict(chosen.get("http_headers") or {})
-            if "Referer" not in headers and session.url:
-                headers["Referer"] = session.url
+            if "Referer" not in headers and session.url: headers["Referer"] = session.url
             return str(chosen.get("url") or ""), headers
 
         if opt and getattr(opt, "video_url", None):
             return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
 
         headers = dict(session.info_dict.get("http_headers") or {})
-        if "Referer" not in headers and session.url:
-            headers["Referer"] = session.url
+        if "Referer" not in headers and session.url: headers["Referer"] = session.url
         return session.url, headers
 
-    def _resolve_audio_target(self, session: PreviewSession, a_idx: int) -> tuple[str, Dict[str, str]]:
+    def _resolve_audio_target(self, session: PreviewSession, a_idx: int, q_idx: Optional[int] = None) -> tuple[str, Dict[str, str]]:
         """Finds the dedicated audio stream URL and headers for dubbed or fallback audio playback."""
         track = session.audio_tracks[a_idx] if 0 <= a_idx < len(session.audio_tracks) else None
         if not track or not track.get("url") or track.get("track_id") == "original":
-            idx = session.selected_q_idx if 0 <= session.selected_q_idx < len(session.options) else 0
+            idx = q_idx if (q_idx is not None and 0 <= q_idx < len(session.options)) else (session.selected_q_idx if 0 <= session.selected_q_idx < len(session.options) else 0)
             opt = session.options[idx] if session.options else None
             formats = session.info_dict.get("formats") or []
             prog_formats = [f for f in formats if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none" and str(f.get("ext") or "").lower() == "mp4"]
-            if not prog_formats and opt and not getattr(opt, "is_progressive", False) and getattr(opt, "audio_url", None):
-                headers = dict(getattr(opt, "audio_headers", {}) or {})
-                if not headers:
-                    headers = dict(session.info_dict.get("http_headers") or {})
-                if "Referer" not in headers and session.url:
-                    headers["Referer"] = session.url
-                return str(opt.audio_url), headers
+            if not prog_formats and opt and not getattr(opt, "is_progressive", False):
+                cand_url = getattr(opt, "audio_url", None) or (track.get("url") if track else "")
+                if cand_url:
+                    headers = dict(getattr(opt, "audio_headers", {}) or {})
+                    if not headers and track: headers = dict(track.get("http_headers") or {})
+                    if not headers: headers = dict(session.info_dict.get("http_headers") or {})
+                    if "Referer" not in headers and session.url: headers["Referer"] = session.url
+                    return str(cand_url), headers
             return "", {}
         headers = dict(track.get("http_headers") or {})
-        if not headers:
-            headers = dict(session.info_dict.get("http_headers") or {})
-        if "Referer" not in headers and session.url:
-            headers["Referer"] = session.url
+        if not headers: headers = dict(session.info_dict.get("http_headers") or {})
+        if "Referer" not in headers and session.url: headers["Referer"] = session.url
         return str(track.get("url") or ""), headers
 
     def _handle_player(self, session: PreviewSession) -> None:
@@ -296,12 +276,16 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         stream_proxy_url = f"/stream_video?sid={session.sid}&q_idx={idx}"
         initial_dub_url = None
         if session.selected_audio_track and session.selected_audio_track.get("track_id") not in (None, "original"):
-            a_idx = session.audio_tracks.index(session.selected_audio_track) if (session.audio_tracks and session.selected_audio_track in session.audio_tracks) else 0
-            initial_dub_url = f"/stream_audio?sid={session.sid}&a_idx={a_idx}"
+            a_idx = 0
+            if session.audio_tracks:
+                for i, trk in enumerate(session.audio_tracks):
+                    if trk == session.selected_audio_track or (trk.get("track_id") and trk.get("track_id") == session.selected_audio_track.get("track_id")):
+                        a_idx = i; break
+            initial_dub_url = f"/stream_audio?sid={session.sid}&a_idx={a_idx}&q_idx={idx}"
         else:
-            fallback_audio, _ = self._resolve_audio_target(session, 0)
+            fallback_audio, _ = self._resolve_audio_target(session, 0, q_idx=idx)
             if fallback_audio:
-                initial_dub_url = f"/stream_audio?sid={session.sid}&a_idx=0"
+                initial_dub_url = f"/stream_audio?sid={session.sid}&a_idx=0&q_idx={idx}"
         html_code = generate_preview_html(
             url=session.url, video_title=session.video_title, stream_url=stream_proxy_url,
             quality_label=q_label, options=session.options, audio_tracks=session.audio_tracks,
