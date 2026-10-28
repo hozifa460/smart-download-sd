@@ -1082,6 +1082,8 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         self.assertIn("${bridgeBase}/api/update_filename?sid=", html_out)
         self.assertIn('modeSelect.value = "hard_burn"', html_out)
         self.assertIn("window._userTouchedMode = true", html_out)
+        self.assertIn('<option value="0" selected>None</option>', html_out)
+        self.assertIn("💬 No Subtitles", html_out)
 
     def test_youtube_format_builder_dubbed_audio_merging(self):
         """Verifies build_stream_info copies option and forces is_progressive=False for dubbed audio."""
@@ -1226,10 +1228,22 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         url2, _ = handler._resolve_video_target(session2, 2)
         self.assertEqual(url2, "https://example.com/dash_1080.mp4")
 
-        # When q_idx = 2 and dubbing is NOT active, opt.video_url (1080p) is also streamed because no prog format matches 1080p
+        # When q_idx = 2 and dubbing is NOT active, it picks closest progressive format (720p) with sound!
         session2.selected_audio_track = None
         url2_nodub, _ = handler._resolve_video_target(session2, 2)
-        self.assertEqual(url2_nodub, "https://example.com/dash_1080.mp4")
+        self.assertEqual(url2_nodub, "https://example.com/prog_720.mp4")
+
+        # When prog_formats is empty, DASH 1080p is streamed directly
+        session_empty = PreviewSession(sid="s_emp", url="https://example.com/video", video_title="Video", options=[opt_1080], info_dict={"formats": []}, audio_tracks=[], subtitle_tracks=[])
+        url_empty, _ = handler._resolve_video_target(session_empty, 0)
+        self.assertEqual(url_empty, "https://example.com/dash_1080.mp4")
+
+        # Fallback audio when prog_formats is empty and DASH has separate audio_url
+        opt_1080.audio_url = "https://example.com/orig_audio.m4a"
+        opt_1080.audio_headers = {"Orig": "1"}
+        a_url, a_hdr = handler._resolve_audio_target(session_empty, 0)
+        self.assertEqual(a_url, "https://example.com/orig_audio.m4a")
+        self.assertEqual(a_hdr.get("Orig"), "1")
 
     def test_startup_enabled_sync_on_startup(self):
         """Verifies startup_enabled synchronizes registry when True in settings."""

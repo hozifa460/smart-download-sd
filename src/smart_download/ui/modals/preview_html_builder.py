@@ -334,9 +334,11 @@ def generate_preview_html(
 
     eff_dub = dub_audio_url
     eff_audio_lbl = audio_label
-    if not eff_dub and selected_audio_track and selected_audio_track.get("track_id") != "original":
-        eff_dub = selected_audio_track.get("url")
-        eff_audio_lbl = selected_audio_track.get("label") or selected_audio_track.get("language")
+    if selected_audio_track and selected_audio_track.get("track_id") != "original":
+        if not eff_dub:
+            eff_dub = selected_audio_track.get("url")
+        if not eff_audio_lbl:
+            eff_audio_lbl = selected_audio_track.get("label") or selected_audio_track.get("language")
     if not eff_audio_lbl:
         eff_audio_lbl = "Original Audio"
     safe_audio_label = html.escape(eff_audio_lbl)
@@ -348,9 +350,6 @@ def generate_preview_html(
             if trk == selected_sub_track or (trk.get("sub_id") and trk.get("sub_id") == selected_sub_track.get("sub_id")):
                 sel_s_idx = idx
                 break
-    if subtitle_embed_mode == "hard_burn" and sel_s_idx <= 0 and subtitle_tracks and len(subtitle_tracks) > 1:
-        ar_idx = next((i for i, s in enumerate(subtitle_tracks) if i > 0 and str(s.get("language", "")).lower().startswith("ar")), None)
-        sel_s_idx = ar_idx if ar_idx is not None else 1
 
     safe_sub_label = html.escape(sub_label or "Subtitles")
     safe_sub_lang = html.escape((sub_lang or "ar").split("-")[0].split("_")[0])

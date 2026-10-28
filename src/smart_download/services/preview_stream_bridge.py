@@ -249,17 +249,6 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
             and str(f.get("ext") or "").lower() == "mp4"
         ]
 
-        matching_prog = [f for f in prog_formats if int(f.get("height") or 0) == target_h] if prog_formats else []
-        if matching_prog and not dub_active:
-            chosen = matching_prog[0]
-            headers = dict(chosen.get("http_headers") or {})
-            if "Referer" not in headers and session.url:
-                headers["Referer"] = session.url
-            return str(chosen.get("url") or ""), headers
-
-        if opt and getattr(opt, "video_url", None) and (dub_active or not matching_prog):
-            return str(opt.video_url), dict(getattr(opt, "video_headers", {}) or {})
-
         if prog_formats and not dub_active:
             chosen = min(prog_formats, key=lambda f: abs(int(f.get("height") or 0) - target_h))
             headers = dict(chosen.get("http_headers") or {})
@@ -276,9 +265,20 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         return session.url, headers
 
     def _resolve_audio_target(self, session: PreviewSession, a_idx: int) -> tuple[str, Dict[str, str]]:
-        """Finds the dedicated audio stream URL and headers for dubbed audio playback."""
+        """Finds the dedicated audio stream URL and headers for dubbed or fallback audio playback."""
         track = session.audio_tracks[a_idx] if 0 <= a_idx < len(session.audio_tracks) else None
         if not track or not track.get("url") or track.get("track_id") == "original":
+            idx = session.selected_q_idx if 0 <= session.selected_q_idx < len(session.options) else 0
+            opt = session.options[idx] if session.options else None
+            formats = session.info_dict.get("formats") or []
+            prog_formats = [f for f in formats if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none" and str(f.get("ext") or "").lower() == "mp4"]
+            if not prog_formats and opt and not getattr(opt, "is_progressive", False) and getattr(opt, "audio_url", None):
+                headers = dict(getattr(opt, "audio_headers", {}) or {})
+                if not headers:
+                    headers = dict(session.info_dict.get("http_headers") or {})
+                if "Referer" not in headers and session.url:
+                    headers["Referer"] = session.url
+                return str(opt.audio_url), headers
             return "", {}
         headers = dict(track.get("http_headers") or {})
         if not headers:
@@ -294,22 +294,21 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         opt = session.options[idx] if session.options else None
         q_label = getattr(opt, "resolution_label", "MP4 Stream") if opt else "MP4 Stream"
         stream_proxy_url = f"/stream_video?sid={session.sid}&q_idx={idx}"
+        initial_dub_url = None
+        if session.selected_audio_track and session.selected_audio_track.get("track_id") not in (None, "original"):
+            a_idx = session.audio_tracks.index(session.selected_audio_track) if (session.audio_tracks and session.selected_audio_track in session.audio_tracks) else 0
+            initial_dub_url = f"/stream_audio?sid={session.sid}&a_idx={a_idx}"
+        else:
+            fallback_audio, _ = self._resolve_audio_target(session, 0)
+            if fallback_audio:
+                initial_dub_url = f"/stream_audio?sid={session.sid}&a_idx=0"
         html_code = generate_preview_html(
-            url=session.url,
-            video_title=session.video_title,
-            stream_url=stream_proxy_url,
-            quality_label=q_label,
-            options=session.options,
-            audio_tracks=session.audio_tracks,
-            subtitle_tracks=session.subtitle_tracks,
-            default_dest_path=session.default_dest_path,
-            sid=session.sid,
-            bridge_port=_BRIDGE_PORT,
-            selected_audio_track=session.selected_audio_track,
-            selected_sub_track=session.selected_sub_track,
-            subtitle_embed_mode=session.subtitle_embed_mode,
-            selected_q_idx=idx,
-            subtitle_position=session.subtitle_position,
+            url=session.url, video_title=session.video_title, stream_url=stream_proxy_url,
+            quality_label=q_label, options=session.options, audio_tracks=session.audio_tracks,
+            subtitle_tracks=session.subtitle_tracks, default_dest_path=session.default_dest_path,
+            sid=session.sid, bridge_port=_BRIDGE_PORT, selected_audio_track=session.selected_audio_track,
+            selected_sub_track=session.selected_sub_track, subtitle_embed_mode=session.subtitle_embed_mode,
+            selected_q_idx=idx, subtitle_position=session.subtitle_position, dub_audio_url=initial_dub_url,
         )
         data = html_code.encode("utf-8")
         self.send_response(200)
@@ -480,15 +479,12 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
 
         if session.options and 0 <= q_idx < len(session.options):
             opt = session.options[q_idx]
-            opt.selected_audio_track = session.selected_audio_track
-            opt.selected_subtitle_track = session.selected_sub_track
-            opt.subtitle_embed_mode = session.subtitle_embed_mode
-            opt.subtitle_position = session.subtitle_position
+            opt.selected_audio_track, opt.selected_subtitle_track = session.selected_audio_track, session.selected_sub_track
+            opt.subtitle_embed_mode, opt.subtitle_position = session.subtitle_embed_mode, session.subtitle_position
 
         try:
             from ..config import set_setting
-            set_setting("subtitle_embed_mode", sub_mode)
-            set_setting("subtitle_position", sub_pos)
+            set_setting("subtitle_embed_mode", sub_mode); set_setting("subtitle_position", sub_pos)
             if session.options and 0 <= q_idx < len(session.options):
                 opt = session.options[q_idx]
                 set_setting("preferred_video_height", -1 if getattr(opt, "is_audio_only", False) else getattr(opt, "height", 0))
