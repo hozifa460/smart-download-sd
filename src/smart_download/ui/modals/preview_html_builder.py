@@ -134,7 +134,16 @@ if (videoEl && dubAudioEl) {
     videoEl.addEventListener("waiting", () => { if (hasDubAudio) dubAudioEl.pause(); });
     videoEl.addEventListener("playing", () => { if (hasDubAudio) { if (Math.abs(dubAudioEl.currentTime - videoEl.currentTime) > 0.28) dubAudioEl.currentTime = videoEl.currentTime; dubAudioEl.play().catch(e => {}); } });
     videoEl.addEventListener("ratechange", () => { if (hasDubAudio) dubAudioEl.playbackRate = videoEl.playbackRate; });
-    videoEl.addEventListener("timeupdate", () => { if (hasDubAudio && !videoEl.paused) { if (Math.abs(dubAudioEl.currentTime - videoEl.currentTime) > 0.28) dubAudioEl.currentTime = videoEl.currentTime; } });
+    videoEl.addEventListener("timeupdate", () => {
+        if (hasDubAudio && !videoEl.paused) {
+            if (Math.abs(dubAudioEl.currentTime - videoEl.currentTime) > 0.28) {
+                try { dubAudioEl.currentTime = videoEl.currentTime; } catch (e) {}
+            }
+            if (dubAudioEl.paused && dubAudioEl.readyState >= 2) {
+                dubAudioEl.play().catch(e => {});
+            }
+        }
+    });
     dubAudioEl.addEventListener("error", (e) => { hasDubAudio = false; videoEl.muted = false; if (audioBadge) { audioBadge.textContent = "🔊 Original Audio"; audioBadge.className = "badge badge-dim"; } });
 }
 
@@ -183,9 +192,11 @@ function selectQualityRow(idx) {
                 try { videoEl.currentTime = savedTime; } catch (e) {}
                 if (hasDubAudio && dubAudioEl) { try { dubAudioEl.currentTime = savedTime; } catch (e) {} }
                 videoEl.play().catch(e => {});
+                if (hasDubAudio && dubAudioEl) { dubAudioEl.play().catch(e => {}); }
             }, { once: true });
         } else {
             videoEl.play().catch(e => {});
+            if (hasDubAudio && dubAudioEl) { dubAudioEl.play().catch(e => {}); }
         }
         requestUpdatedFilename();
         syncStateToBridge();
@@ -214,9 +225,11 @@ function onAudioChange() {
                 try { videoEl.currentTime = savedTime; } catch (e) {}
                 if (hasDubAudio && dubAudioEl) { try { dubAudioEl.currentTime = savedTime; } catch (e) {} }
                 videoEl.play().catch(e => {});
+                if (hasDubAudio && dubAudioEl) { dubAudioEl.play().catch(e => {}); }
             }, { once: true });
         } else {
             videoEl.play().catch(e => {});
+            if (hasDubAudio && dubAudioEl) { dubAudioEl.play().catch(e => {}); }
         }
     }
 }

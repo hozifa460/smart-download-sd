@@ -414,6 +414,7 @@ class MediaOptionsBarMixin:
         raw_title = info.get("title") or ctx.get("title") or "Video Preview"
         opts = getattr(self, "_main_media_options", ctx.get("options", []))
         auds = getattr(self, "_main_audio_tracks", ctx.get("audio_tracks", []))
+        subs = getattr(self, "_main_subtitle_tracks", ctx.get("subtitle_tracks", []))
         if hasattr(self, "cb_main_quality") and opts and 0 <= self.cb_main_quality.current() < len(opts):
             q_idx = self.cb_main_quality.current()
         elif ctx.get("selected_option") and ctx.get("selected_option") in opts:

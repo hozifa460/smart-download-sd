@@ -1402,6 +1402,51 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
         self.assertEqual(u, "http://x/aud.m4a")
         self.assertEqual(h.get("A"), "1")
 
+    def test_open_main_media_preview_subs_defined(self):
+        """Verifies _open_main_media_preview calls open_video_preview with subtitle_tracks without raising NameError."""
+        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
+        bar = MediaOptionsBarMixin()
+        bar.cb_main_sub = MagicMock()
+        bar.cb_main_sub.current.return_value = 0
+        subs = [{"sub_id": "en", "label": "English"}]
+        bar._main_subtitle_tracks = subs
+
+        with patch("smart_download.ui.modals.video_preview_modal.open_video_preview") as mock_open:
+            bar._open_main_media_preview()
+            mock_open.assert_called_once()
+            _, kwargs = mock_open.call_args
+            self.assertEqual(kwargs.get("subtitle_tracks"), subs)
+            self.assertEqual(kwargs.get("selected_sub_track"), subs[0])
+
+    def test_preview_html_dub_audio_resume_logic(self):
+        """Verifies dubAudioEl resume logic on timeupdate and during quality/audio changes."""
+        from smart_download.ui.modals.preview_html_builder import generate_preview_html
+        from smart_download.services.youtube_models import VideoFormatOption
+
+        opt1 = VideoFormatOption(
+            format_id="137",
+            resolution_label="1080p",
+            height=1080,
+            ext="mp4",
+            filesize_approx=1000000,
+            video_url="https://example.com/v1080.mp4",
+            audio_url="https://example.com/a.m4a"
+        )
+        audio_track = {"track_id": "ar", "language": "ar", "label": "العربية", "url": "https://example.com/ar.m4a"}
+
+        html_out = generate_preview_html(
+            url="https://example.com/watch?v=123",
+            video_title="Dub Test",
+            stream_url="https://example.com/v1080.mp4",
+            selected_audio_track=audio_track,
+            options=[opt1],
+            audio_tracks=[{"track_id": "original", "label": "Original Audio"}, audio_track],
+            subtitle_tracks=[{"sub_id": "none", "label": "No Subtitles"}]
+        )
+
+        self.assertIn("dubAudioEl.paused && dubAudioEl.readyState >= 2", html_out)
+        self.assertIn("dubAudioEl.play().catch(e => {})", html_out)
+
 
 if __name__ == "__main__":
     unittest.main()
