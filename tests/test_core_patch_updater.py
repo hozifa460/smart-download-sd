@@ -334,6 +334,57 @@ class TestCoreHotPatchAndZeroRebuildWorkflow(unittest.TestCase):
                 sys.modules.update(orig_modules)
 
 
+    def test_init_core_loader_strictly_newer_requirement_frozen(self):
+        """Verifies that frozen SmartDownload.exe only activates plugin if strictly newer than APP_VERSION."""
+        orig_sys_path = list(sys.path)
+        orig_meta_path = list(sys.meta_path)
+        orig_modules = {k: v for k, v in sys.modules.items() if k == "smart_download" or k.startswith("smart_download.")}
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            plugin_root = os.path.join(tmp_dir, "core_plugin")
+            pkg_dir = os.path.join(plugin_root, "smart_download")
+            os.makedirs(pkg_dir, exist_ok=True)
+            with open(os.path.join(pkg_dir, "__init__.py"), "w", encoding="utf-8") as f:
+                f.write('"""plugin init"""\n')
+            with open(os.path.join(pkg_dir, "config.py"), "w", encoding="utf-8") as f:
+                f.write(f'APP_VERSION = "{APP_VERSION}"\n')
+            ver_file = os.path.join(plugin_root, "core_version.json")
+            with open(ver_file, "w", encoding="utf-8") as f:
+                json.dump({"version": APP_VERSION}, f)
+
+            try:
+                # 1. Same version + frozen + force=False -> MUST NOT activate (returns None)
+                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
+                     patch("sys.frozen", True, create=True):
+                    mode = init_core_loader(force=False)
+                    self.assertIsNone(mode)
+
+                # 2. Same version + force=True -> Activates (for tests)
+                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root):
+                    mode = init_core_loader(force=True)
+                    self.assertEqual(mode, "plugin")
+
+                # Clean up imported modules from previous test
+                for k in list(sys.modules.keys()):
+                    if k == "smart_download" or k.startswith("smart_download."):
+                        sys.modules.pop(k, None)
+                sys.modules.update(orig_modules)
+
+                # 3. Strictly newer version + frozen + force=False -> MUST activate ("plugin")
+                with open(ver_file, "w", encoding="utf-8") as f:
+                    json.dump({"version": "99.0.0"}, f)
+                with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=plugin_root), \
+                     patch("sys.frozen", True, create=True):
+                    mode = init_core_loader(force=False)
+                    self.assertEqual(mode, "plugin")
+            finally:
+                sys.path[:] = orig_sys_path
+                sys.meta_path[:] = orig_meta_path
+                for k in list(sys.modules.keys()):
+                    if k == "smart_download" or k.startswith("smart_download."):
+                        sys.modules.pop(k, None)
+                sys.modules.update(orig_modules)
+
     def test_services_package_namespace_reexports(self):
         import smart_download.services as sds
         self.assertTrue(hasattr(sds, "CoreHotPatchUpdater"))

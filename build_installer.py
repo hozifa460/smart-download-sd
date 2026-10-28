@@ -130,15 +130,27 @@ def clean_stale_dist_artifacts():
             pass
 
 
+def purge_stale_core_plugin():
+    """Removes any stale %APPDATA%\\SmartDownload\\core_plugin directory."""
+    try:
+        try:
+            from smart_download.services.core_patch_updater import get_core_plugin_dir
+            plugin_dir = get_core_plugin_dir()
+        except Exception:
+            appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+            plugin_dir = os.path.join(appdata, "SmartDownload", "core_plugin")
+        if plugin_dir and os.path.isdir(plugin_dir):
+            shutil.rmtree(plugin_dir, ignore_errors=True)
+            print(f"[*] Removed stale core_plugin directory: {plugin_dir}")
+    except Exception as e:
+        print(f"[-] Warning: Failed to remove core_plugin directory: {e}")
+
+
 def build_app(rebuild: bool = False):
     """Compiles dist/SmartDownload.exe using PyInstaller."""
     clean_stale_shadow_modules()
+    purge_stale_core_plugin()
     exe_path = os.path.join(DIST_DIR, "SmartDownload.exe")
-    if not rebuild and os.path.isfile(exe_path):
-        clean_stale_dist_artifacts()
-        verify_exe_startup(exe_path)
-        print(f"[+] SmartDownload.exe already exists at {exe_path} ({os.path.getsize(exe_path):,} bytes)")
-        return exe_path
 
     print("[*] Building SmartDownload.exe via PyInstaller...")
     spec_path = os.path.join(BASE_DIR, "SmartDownload.spec")
@@ -264,35 +276,29 @@ def main():
     print("[*] SMART DOWNLOAD (SD) - BUILD PIPELINE")
     print("=" * 70)
 
-    if args.rebuild_all:
-        try:
-            from smart_download.installer import terminate_running_app
-            terminate_running_app()
-        except Exception as e:
-            print(f"[*] Warning terminating running app: {e}")
+    try:
+        from smart_download.installer import terminate_running_app
+        terminate_running_app()
+    except Exception as e:
+        print(f"[*] Warning terminating running app: {e}")
 
     if not args.installer_only:
+        purge_stale_core_plugin()
         build_app(rebuild=args.rebuild_all)
 
     prepare_payload()
     setup_exe = build_installer(rebuild=args.rebuild_all)
 
-    if args.rebuild_all:
-        print("[*] Packaging and applying core patch...")
+    if not args.installer_only:
         try:
-            from smart_download.services.core_patch_updater import build_core_patch_zip, CoreHotPatchUpdater
-            from smart_download.installer import get_default_install_dir, install_application
-
-            patch_zip = os.path.join(DIST_DIR, "SmartDownload-CorePatch.zip")
-            build_core_patch_zip(patch_zip)
-            CoreHotPatchUpdater().apply_core_patch(patch_zip)
-            print(f"[+] Applied core patch from {patch_zip}")
-
+            from smart_download.installer import get_default_install_dir, install_application, terminate_running_app
             default_dir = get_default_install_dir()
             if os.path.exists(default_dir):
-                print(f"[*] Installing application to default directory: {default_dir}")
-                try: terminate_running_app()
-                except Exception: pass
+                print(f"[*] Updating installed application in default directory: {default_dir}")
+                try:
+                    terminate_running_app()
+                except Exception:
+                    pass
                 install_application(
                     target_dir=default_dir,
                     register_browser=True,
@@ -300,9 +306,21 @@ def main():
                     create_start_menu=True,
                     register_startup=True
                 )
-                print(f"[+] Installed application to {default_dir}")
+                print(f"[+] Updated installed application in {default_dir}")
         except Exception as e:
-            print(f"[-] Error applying core patch or installing to default directory: {e}")
+            print(f"[-] Error updating installed application in default directory: {e}")
+
+    if args.rebuild_all:
+        print("[*] Packaging and applying core patch...")
+        try:
+            from smart_download.services.core_patch_updater import build_core_patch_zip, CoreHotPatchUpdater
+
+            patch_zip = os.path.join(DIST_DIR, "SmartDownload-CorePatch.zip")
+            build_core_patch_zip(patch_zip)
+            CoreHotPatchUpdater().apply_core_patch(patch_zip)
+            print(f"[+] Applied core patch from {patch_zip}")
+        except Exception as e:
+            print(f"[-] Error applying core patch: {e}")
 
     print("\n" + "=" * 70)
     print("[+] BUILD COMPLETE")

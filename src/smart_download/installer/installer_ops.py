@@ -231,6 +231,18 @@ def install_application(
     _notify(0.30, "Extracting application binaries and resources...")
     sources = find_payload_sources()
 
+    # Purge stale core_plugin so fresh install is never overridden by older plugin
+    try:
+        try:
+            from ..services.core_patch_updater import get_core_plugin_dir
+        except Exception:
+            from smart_download.services.core_patch_updater import get_core_plugin_dir
+        stale_plugin_dir = get_core_plugin_dir()
+        if stale_plugin_dir and os.path.isdir(stale_plugin_dir):
+            shutil.rmtree(stale_plugin_dir, ignore_errors=True)
+    except Exception:
+        pass
+
     # 1. Copy SmartDownload.exe
     exe_dest = os.path.join(target_dir, "SmartDownload.exe")
     if "SmartDownload.exe" in sources:

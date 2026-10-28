@@ -617,6 +617,40 @@ class TestStandaloneExeBuild(unittest.TestCase):
         clean_stale_shadow_modules()
         self.assertFalse(os.path.isfile(dummy_pyc), "Dummy shadow pyc was not removed by clean_stale_shadow_modules")
 
+    def test_install_application_purges_stale_core_plugin(self):
+        """Verifies that install_application purges %APPDATA%\\SmartDownload\\core_plugin."""
+        from smart_download.installer import install_application
+        from smart_download.services.core_patch_updater import get_core_plugin_dir
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dummy_plugin = os.path.join(tmp_dir, "core_plugin")
+            os.makedirs(dummy_plugin, exist_ok=True)
+            dummy_file = os.path.join(dummy_plugin, "stale.txt")
+            with open(dummy_file, "w") as f:
+                f.write("stale")
+
+            target_install = os.path.join(tmp_dir, "install_target")
+            with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin):
+                install_application(
+                    target_dir=target_install,
+                    register_browser=False,
+                    create_desktop=False,
+                    create_start_menu=False,
+                    register_startup=False,
+                )
+            self.assertFalse(os.path.exists(dummy_plugin), "stale core_plugin directory was not purged during installation")
+
+    def test_purge_stale_core_plugin_in_builder(self):
+        """Verifies that purge_stale_core_plugin in build_installer removes the core_plugin directory."""
+        from build_installer import purge_stale_core_plugin
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dummy_plugin = os.path.join(tmp_dir, "core_plugin")
+            os.makedirs(dummy_plugin, exist_ok=True)
+            with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin):
+                purge_stale_core_plugin()
+            self.assertFalse(os.path.exists(dummy_plugin), "purge_stale_core_plugin failed to remove directory")
+
 
 if __name__ == "__main__":
     unittest.main()
+

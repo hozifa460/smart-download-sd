@@ -496,7 +496,7 @@ def init_core_loader(force: bool = False) -> Optional[str]:
         updater = CoreHotPatchUpdater(plugin_dir=plugin_dir)
         if updater.is_plugin_valid():
             patch_ver = updater.get_plugin_version()
-            if patch_ver and is_version_ge(patch_ver, APP_VERSION):
+            if patch_ver and (is_newer_version(patch_ver, APP_VERSION) or (force and is_version_ge(patch_ver, APP_VERSION))):
                 if updater.activate_plugin(force=True):
                     return "plugin"
 
