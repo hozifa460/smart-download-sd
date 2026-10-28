@@ -1444,8 +1444,27 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             subtitle_tracks=[{"sub_id": "none", "label": "No Subtitles"}]
         )
 
-        self.assertIn("dubAudioEl.paused && dubAudioEl.readyState >= 2", html_out)
-        self.assertIn("dubAudioEl.play().catch(e => {})", html_out)
+        self.assertIn("videoEl.addEventListener(\"timeupdate\", () => {", html_out)
+        self.assertIn("if (dubAudioEl.paused && dubAudioEl.readyState >= 2) {", html_out)
+        self.assertIn("dubAudioEl.play().catch(e => {});", html_out)
+        # Exactly 4 resume calls: 2 in selectQualityRow (loadedmetadata + immediate) and 2 in onAudioChange (loadedmetadata + immediate)
+        self.assertEqual(html_out.count("if (hasDubAudio && dubAudioEl) { dubAudioEl.play().catch(e => {}); }"), 4)
+
+    def test_open_main_media_preview_subs_from_context(self):
+        """Verifies _open_main_media_preview falls back to ctx['subtitle_tracks'] when _main_subtitle_tracks is not set on self."""
+        from smart_download.ui.panels.media_options_bar import MediaOptionsBarMixin
+        bar = MediaOptionsBarMixin()
+        bar.cb_main_sub = MagicMock()
+        bar.cb_main_sub.current.return_value = 0
+        subs = [{"sub_id": "ar", "label": "Arabic"}]
+        bar._pending_media_context = {"subtitle_tracks": subs}
+
+        with patch("smart_download.ui.modals.video_preview_modal.open_video_preview") as mock_open:
+            bar._open_main_media_preview()
+            mock_open.assert_called_once()
+            _, kwargs = mock_open.call_args
+            self.assertEqual(kwargs.get("subtitle_tracks"), subs)
+            self.assertEqual(kwargs.get("selected_sub_track"), subs[0])
 
 
 if __name__ == "__main__":
