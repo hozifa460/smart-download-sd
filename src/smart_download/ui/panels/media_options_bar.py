@@ -414,8 +414,12 @@ class MediaOptionsBarMixin:
         raw_title = info.get("title") or ctx.get("title") or "Video Preview"
         opts = getattr(self, "_main_media_options", ctx.get("options", []))
         auds = getattr(self, "_main_audio_tracks", ctx.get("audio_tracks", []))
-        subs = getattr(self, "_main_subtitle_tracks", ctx.get("subtitle_tracks", []))
-        q_idx = self.cb_main_quality.current() if (hasattr(self, "cb_main_quality") and opts and 0 <= self.cb_main_quality.current() < len(opts)) else 0
+        if hasattr(self, "cb_main_quality") and opts and 0 <= self.cb_main_quality.current() < len(opts):
+            q_idx = self.cb_main_quality.current()
+        elif ctx.get("selected_option") and ctx.get("selected_option") in opts:
+            q_idx = opts.index(ctx["selected_option"])
+        else:
+            q_idx = resolve_preferred_option_index(opts)
         sel_opt = opts[q_idx] if (opts and 0 <= q_idx < len(opts)) else None
         sel_aud = auds[self.cb_main_audio.current()] if hasattr(self, "cb_main_audio") and auds and 0 <= self.cb_main_audio.current() < len(auds) else None
         sel_sub = subs[self.cb_main_sub.current()] if hasattr(self, "cb_main_sub") and subs and 0 <= self.cb_main_sub.current() < len(subs) else None
@@ -497,7 +501,8 @@ class MediaOptionsBarMixin:
             if 0 <= q_idx < len(options):
                 selected_opt = options[q_idx]
         if selected_opt is None and options:
-            selected_opt = options[0]
+            pref_i = resolve_preferred_option_index(options)
+            selected_opt = options[pref_i] if 0 <= pref_i < len(options) else options[0]
 
         if selected_opt:
             if hasattr(self, "cb_main_audio") and audio_tracks and 0 <= self.cb_main_audio.current() < len(audio_tracks):

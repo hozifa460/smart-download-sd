@@ -207,7 +207,11 @@ def open_video_preview(
                         if trk == selected_audio_track or (trk.get("track_id") and trk.get("track_id") == selected_audio_track.get("track_id")):
                             sel_a_idx = idx
                             break
-                dub_audio_url = f"http://127.0.0.1:{port}/stream_audio?sid={sid}&a_idx={sel_a_idx if sel_a_idx > 0 else 1}"
+                dub_audio_url = f"http://127.0.0.1:{port}/stream_audio?sid={sid}&a_idx={sel_a_idx if sel_a_idx > 0 else 1}&q_idx={selected_q_idx}"
+            elif not dub_audio_url and options and 0 <= selected_q_idx < len(options):
+                cur_opt = options[selected_q_idx]
+                if not getattr(cur_opt, "is_progressive", False) and not getattr(cur_opt, "is_audio_only", False) and getattr(cur_opt, "audio_url", None):
+                    dub_audio_url = f"http://127.0.0.1:{port}/stream_audio?sid={sid}&a_idx=0&q_idx={selected_q_idx}"
         except Exception as exc:
             if on_log:
                 on_log(f"[PREVIEW] Note: Local bridge setup skipped: {exc}")

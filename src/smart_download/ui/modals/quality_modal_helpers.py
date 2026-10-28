@@ -174,13 +174,19 @@ def resolve_preferred_option_index(options: List[Any]) -> int:
         return 0
     try:
         from ...config import get_setting
-        pref_h = int(get_setting("preferred_video_height", 0) or 0)
+        raw_val = get_setting("preferred_video_height", 0)
     except Exception:
         try:
             from smart_download.config import get_setting
-            pref_h = int(get_setting("preferred_video_height", 0) or 0)
+            raw_val = get_setting("preferred_video_height", 0)
         except Exception:
-            pref_h = 0
+            raw_val = 0
+    try:
+        if isinstance(raw_val, str):
+            raw_val = raw_val.lower().replace("p", "").strip()
+        pref_h = int(raw_val or 0)
+    except Exception:
+        pref_h = 0
 
     if pref_h == -1:
         for i, opt in enumerate(options):

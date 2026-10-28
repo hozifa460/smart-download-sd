@@ -106,13 +106,21 @@ function setDubAudioTrack(url, label) {
         if (dubAudioEl.readyState >= 1) syncTime();
         else dubAudioEl.addEventListener("loadedmetadata", syncTime, { once: true });
         videoEl.muted = true;
-        if (audioBadge) { audioBadge.textContent = "🔊 " + (label || "Dubbed Audio"); audioBadge.className = "badge badge-audio"; }
+        const isOrig = (label === "Original Audio");
+        if (audioBadge) {
+            audioBadge.textContent = "🔊 " + (label || "Dubbed Audio");
+            audioBadge.className = isOrig ? "badge badge-dim" : "badge badge-audio";
+        }
     } else {
         hasDubAudio = false; dubAudioEl.pause(); dubAudioEl.removeAttribute("src"); videoEl.muted = false;
         if (audioBadge) { audioBadge.textContent = "🔊 Original Audio"; audioBadge.className = "badge badge-dim"; }
     }
 }
-if (initialDubAudioUrl) setDubAudioTrack(initialDubAudioUrl, __EFFECTIVE_AUDIO_LABEL__);
+if (initialDubAudioUrl) {
+    setDubAudioTrack(initialDubAudioUrl, __EFFECTIVE_AUDIO_LABEL__);
+} else if (sid && optNeedsSeparateAudio && optNeedsSeparateAudio[selected_q_idx]) {
+    setDubAudioTrack(`${bridgeBase}/stream_audio?sid=${encodeURIComponent(sid)}&a_idx=0&q_idx=${selected_q_idx}`, "Original Audio");
+}
 
 if (videoEl && dubAudioEl) {
     videoEl.addEventListener("volumechange", () => {
@@ -173,6 +181,7 @@ function selectQualityRow(idx) {
         if (savedTime > 0) {
             videoEl.addEventListener("loadedmetadata", () => {
                 try { videoEl.currentTime = savedTime; } catch (e) {}
+                if (hasDubAudio && dubAudioEl) { try { dubAudioEl.currentTime = savedTime; } catch (e) {} }
                 videoEl.play().catch(e => {});
             }, { once: true });
         } else {
@@ -203,6 +212,7 @@ function onAudioChange() {
         if (savedTime > 0) {
             videoEl.addEventListener("loadedmetadata", () => {
                 try { videoEl.currentTime = savedTime; } catch (e) {}
+                if (hasDubAudio && dubAudioEl) { try { dubAudioEl.currentTime = savedTime; } catch (e) {} }
                 videoEl.play().catch(e => {});
             }, { once: true });
         } else {
@@ -412,8 +422,8 @@ def generate_preview_html(
         sub_badge = f'<span id="badgeSub" class="badge badge-sub">💬 {safe_sub_label}</span>'
     else:
         sub_badge = '<span id="badgeSub" class="badge badge-dim">💬 No Subtitles</span>'
-
-    audio_badge = f'<span id="badgeAudio" class="badge badge-audio">🔊 {safe_audio_label}</span>' if eff_dub else f'<span id="badgeAudio" class="badge badge-dim">🔊 {safe_audio_label}</span>'
+    is_dub_audio = bool(eff_dub and safe_audio_label != "Original Audio")
+    audio_badge = f'<span id="badgeAudio" class="badge {"badge-audio" if is_dub_audio else "badge-dim"}">🔊 {safe_audio_label}</span>'
 
     plat_low = platform.lower()
     plat_cls = "plat-generic"

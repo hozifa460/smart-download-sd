@@ -1361,9 +1361,46 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
                 self.assertIn("[360p]", modal.entry_dest.get())
                 self.assertNotIn("[1080p]", modal.entry_dest.get())
                 modal.destroy()
+
+            # Verify opt_0 also formats untagged destination path
+            with patch("smart_download.config.get_setting", return_value=1080):
+                modal0 = QualitySelectionModal(
+                    parent=root,
+                    video_title="Test Video",
+                    duration=100,
+                    options=options,
+                    default_dest_path="C:/Downloads/TestVideo [360p].mp4",
+                    theme=theme,
+                    on_confirm=lambda o, d: None
+                )
+                self.assertEqual(modal0.selected_option.height, 1080)
+                self.assertIn("[1080p]", modal0.entry_dest.get())
+                modal0.destroy()
         finally:
             try: root.destroy()
             except Exception: pass
+
+    def test_resolve_preferred_option_index_string_and_audio_only(self):
+        """Verifies resolve_preferred_option_index handles string '720p' and audio-only target in preview bridge."""
+        from smart_download.ui.modals.quality_modal_helpers import resolve_preferred_option_index
+        from smart_download.services.youtube_models import VideoFormatOption
+        from smart_download.services.preview_stream_bridge import PreviewSession, PreviewBridgeRequestHandler
+
+        opt_1080 = VideoFormatOption(format_id="1", resolution_label="1080p", height=1080, ext="mp4", filesize_approx=1000)
+        opt_720 = VideoFormatOption(format_id="2", resolution_label="720p", height=720, ext="mp4", filesize_approx=1000)
+        opt_audio = VideoFormatOption(format_id="4", resolution_label="Audio", height=0, ext="m4a", filesize_approx=1000, is_audio_only=True, video_url="http://x/aud.m4a", video_headers={"A": "1"})
+        options = [opt_1080, opt_720, opt_audio]
+
+        # String "720p"
+        with patch("smart_download.config.get_setting", return_value="720p"):
+            self.assertEqual(resolve_preferred_option_index(options), 1)
+
+        # Audio-only resolution in bridge
+        handler = PreviewBridgeRequestHandler.__new__(PreviewBridgeRequestHandler)
+        session = PreviewSession(sid="s_aud", url="http://x/aud", video_title="Aud", options=[opt_audio], info_dict={}, audio_tracks=[], subtitle_tracks=[])
+        u, h = handler._resolve_video_target(session, 0)
+        self.assertEqual(u, "http://x/aud.m4a")
+        self.assertEqual(h.get("A"), "1")
 
 
 if __name__ == "__main__":

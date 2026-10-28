@@ -227,7 +227,7 @@ class QualitySelectionModal(tk.Toplevel):
             command=self._on_browse
         )
         btn_browse.pack(side=tk.RIGHT)
-        if getattr(self, "options", None) and first_iid != "opt_0":
+        if getattr(self, "options", None) and (first_iid != "opt_0" or (self.selected_option and f"[{self.selected_option.resolution_label}]" not in self.dest_path and "[" in self.dest_path)):
             self._on_tree_select(None)
 
         # Bottom Buttons

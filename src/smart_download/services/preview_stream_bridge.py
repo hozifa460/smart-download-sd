@@ -215,10 +215,12 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
         else: self.send_response(404); self.end_headers()
 
     def _resolve_video_target(self, session: PreviewSession, q_idx: int, a_idx: Optional[int] = None) -> tuple[str, Dict[str, str]]:
-        """Finds the best progressive playable stream URL and forwarding HTTP headers."""
         opt = session.options[q_idx] if 0 <= q_idx < len(session.options) else (session.options[0] if session.options else None)
-        if opt and getattr(opt, "is_audio_only", False) and getattr(opt, "audio_url", None):
-            return str(opt.audio_url), dict(getattr(opt, "audio_headers", {}) or {})
+        if opt and getattr(opt, "is_audio_only", False):
+            aud_u = getattr(opt, "audio_url", None) or getattr(opt, "video_url", None)
+            if aud_u:
+                aud_h = getattr(opt, "audio_headers", None) or getattr(opt, "video_headers", None) or {}
+                return str(aud_u), dict(aud_h or {})
 
         dub_active = (a_idx > 0) if a_idx is not None else bool(session.selected_audio_track and session.selected_audio_track.get("track_id") not in (None, "original") and session.selected_audio_track.get("url"))
         if a_idx is not None and session.audio_tracks and 0 <= a_idx < len(session.audio_tracks):
@@ -491,6 +493,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                 if hasattr(m, "tree") and m.tree:
                     m.tree.selection_set(iid)
                     m.tree.focus(iid)
+                    m.tree.see(iid)
                 if hasattr(m, "options") and 0 <= q_idx < len(m.options):
                     m.selected_option = m.options[q_idx]
                     m.selected_option.selected_audio_track = session.selected_audio_track
