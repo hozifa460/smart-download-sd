@@ -294,12 +294,11 @@ class ControlsPanelMixin:
         )
         self.btn_quality_main.pack(side=tk.LEFT)
 
-        # Quick Toggles & Integration Row (Row 2)
-        row_toggles = tk.Frame(card, bg=self.c_panel)
-        row_toggles.pack(fill=tk.X, pady=(4, 2))
+        # Quick Toggles & Integration Row (Row 2) - Kept in-memory for tests/controllers, unmapped from UI
+        self.row_toggles = tk.Frame(card, bg=self.c_panel)
 
         self.btn_clipboard_sniffer = tk.Button(
-            row_toggles,
+            self.row_toggles,
             text=tr("btn_sniffer_active", "● Sniffer: Active"),
             font=("Segoe UI", 8, "bold"),
             bg="#0f292a",
@@ -319,7 +318,7 @@ class ControlsPanelMixin:
         ToolTip(self.btn_clipboard_sniffer, "tip_sniffer")
 
         self.btn_auto_cat = tk.Button(
-            row_toggles,
+            self.row_toggles,
             text=tr("btn_auto_cat_on", "❖ Auto-Sort: ON") if getattr(self, "auto_categorize_folders", True) else tr("btn_auto_cat_off", "❖ Auto-Sort: OFF"),
             font=("Segoe UI", 8, "bold"),
             relief="flat",
@@ -340,7 +339,7 @@ class ControlsPanelMixin:
             self._update_auto_cat_btn()
 
         self.btn_cookies = tk.Button(
-            row_toggles,
+            self.row_toggles,
             text=self._get_cookies_btn_text() if hasattr(self, "_get_cookies_btn_text") else "◆ Cookies: Auto",
             font=("Segoe UI", 8, "bold"),
             relief="flat",
@@ -360,7 +359,7 @@ class ControlsPanelMixin:
             self._update_cookies_btn()
 
         self.btn_startup = tk.Button(
-            row_toggles,
+            self.row_toggles,
             text=tr("btn_startup_off", "⚡ Boot: OFF"),
             font=("Segoe UI", 8, "bold"),
             relief="flat",
@@ -381,7 +380,7 @@ class ControlsPanelMixin:
             self._update_startup_btn()
 
         self.btn_browser = tk.Button(
-            row_toggles,
+            self.row_toggles,
             text=tr("btn_browser", "⚙ Browser Integration"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,

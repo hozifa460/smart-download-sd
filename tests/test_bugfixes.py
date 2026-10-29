@@ -2925,6 +2925,44 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
             try: root.destroy()
             except Exception: pass
 
+    def test_controls_panel_row_toggles_unmapped_and_settings_btn_packed(self):
+        """Verifies row_toggles is unmapped from main window while btn_settings in title bar opens SettingsModal."""
+        import tkinter as tk
+        from smart_download.ui.main_window import ModernFramelessGUI
+        from smart_download.ui.modals.settings_modal import SettingsModal
+
+        root = tk.Tk()
+        root.withdraw()
+        gui = ModernFramelessGUI(root, start_hidden=True)
+        try:
+            # 1. row_toggles is instantiated in memory but unmapped (not packed)
+            self.assertTrue(hasattr(gui, "row_toggles"))
+            self.assertEqual(gui.row_toggles.winfo_manager(), "")
+
+            # Child toggle buttons exist in memory for controllers
+            self.assertTrue(gui.btn_clipboard_sniffer.winfo_exists())
+            self.assertTrue(gui.btn_auto_cat.winfo_exists())
+            self.assertTrue(gui.btn_cookies.winfo_exists())
+            self.assertTrue(gui.btn_startup.winfo_exists())
+            self.assertTrue(gui.btn_browser.winfo_exists())
+
+            # 2. btn_settings in title bar is packed
+            self.assertTrue(hasattr(gui, "btn_settings"))
+            self.assertEqual(gui.btn_settings.winfo_manager(), "pack")
+
+            # 3. open_settings_dialog opens SettingsModal
+            gui.open_settings_dialog()
+            self.assertIsNotNone(gui._settings_modal)
+            self.assertIsInstance(gui._settings_modal, SettingsModal)
+            self.assertTrue(gui._settings_modal.winfo_exists())
+            gui._settings_modal.destroy()
+        finally:
+            gui.exit_completely()
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     unittest.main()
