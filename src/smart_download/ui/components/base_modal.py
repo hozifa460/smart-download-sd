@@ -103,7 +103,7 @@ class SafeModalDialog(_BaseToplevel):
                 py = parent.winfo_y()
                 pw = parent.winfo_width() or dlg_w
                 ph = parent.winfo_height() or dlg_h
-                x = max(0, px + (pw - dlg_w) // 2)
+                x = px + (pw - dlg_w) // 2
                 y = max(0, py + (ph - dlg_h) // 2)
             except Exception:
                 x = max(0, (sw - dlg_w) // 2)
@@ -137,11 +137,12 @@ class SafeModalDialog(_BaseToplevel):
                 pass
 
         # Elevate and focus
+        self._topmost_after_id = None
         try:
             self.lift()
             self.attributes("-topmost", True)
             self.focus_force()
-            self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
+            self._topmost_after_id = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
         except Exception:
             pass
 
@@ -277,7 +278,9 @@ class SafeModalDialog(_BaseToplevel):
     def _on_drag_motion(self, event):
         x = event.x_root - getattr(self, "_drag_offset_x", 0)
         y = event.y_root - getattr(self, "_drag_offset_y", 0)
-        self.geometry(f"+{x}+{y}")
+        pos_x = f"+{x}" if x >= 0 else f"{x}"
+        pos_y = f"+{y}" if y >= 0 else f"{y}"
+        self.geometry(f"{pos_x}{pos_y}")
 
     def grab_set(self):
         """No-op: Eliminates Win32 input capture and message pump locking."""
@@ -288,6 +291,12 @@ class SafeModalDialog(_BaseToplevel):
         pass
 
     def destroy(self):
+        if hasattr(self, "_topmost_after_id") and self._topmost_after_id:
+            try:
+                self.after_cancel(self._topmost_after_id)
+            except Exception:
+                pass
+            self._topmost_after_id = None
         if hasattr(self, "_modal_title_photo") and self._modal_title_photo:
             _detach_photo_tk(self._modal_title_photo)
             self._modal_title_photo = None

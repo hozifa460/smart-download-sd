@@ -43,11 +43,8 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
     """
 
     def __init__(
-        self,
-        on_log: Optional[Callable[[str], None]] = None,
-        socket_timeout: int = 12,
-        auto_update_on_failure: bool = True,
-        cookies_from_browser: Optional[str] = "auto",
+        self, on_log: Optional[Callable[[str], None]] = None, socket_timeout: int = 12,
+        auto_update_on_failure: bool = True, cookies_from_browser: Optional[str] = "auto",
         cookies_file: Optional[str] = None
     ):
         self.on_log = on_log
@@ -85,7 +82,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 api_url,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/json"}
             )
-            with urllib.request.urlopen(req, timeout=12) as resp:
+            with urllib.request.urlopen(req, timeout=12, context=get_permissive_ssl_context()) as resp:
                 res = json.loads(resp.read().decode("utf-8", errors="replace"))
 
             if not isinstance(res, dict) or res.get("code") != 0 or not isinstance(res.get("data"), dict):
@@ -93,7 +90,8 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
 
             d = res["data"]
             media_id = str(d.get("id") or extract_media_id(url) or "tiktok_video")
-            title = str(d.get("title") or f"TikTok_Video_{media_id}").strip()[:180]
+            raw_title = re.sub(r"[\ufffd\s]+", " ", str(d.get("title") or "")).strip()
+            title = (raw_title or f"TikTok_Video_{media_id}")[:180]
             duration = int(d.get("duration") or 0)
             thumbnail = d.get("origin_cover") or d.get("cover") or ""
             formats: List[Dict[str, Any]] = []
@@ -300,7 +298,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         if tikwm_info and tikwm_info.get("formats"):
             return tikwm_info
 
-        return html_info
+        return None
 
     def extract_format_options(self, url: str) -> Tuple[Dict[str, Any], List[VideoFormatOption]]:
         """Extracts raw metadata and structured VideoFormatOption choices."""
@@ -445,7 +443,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         options = self.build_format_options(info)
         if not options and platform == "TikTok":
             self.log(f"[{tag}] No downloadable format options produced by yt-dlp. Retrying direct extraction...")
-            tt_direct = self._extract_tiktok_direct(url)
+            tt_direct = self._extract_tiktok_direct(url) or self._extract_tiktok_via_tikwm(url)
             if tt_direct and tt_direct.get("formats"):
                 info = tt_direct
                 options = self.build_format_options(info)

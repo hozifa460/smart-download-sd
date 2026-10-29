@@ -2087,6 +2087,35 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
         self.assertEqual(calls["pct"], 225)
         self.assertEqual(calls["status"], 300)
 
+    def test_tree_history_proportional_column_scaling_maximized(self):
+        """Verifies _on_tree_history_configure scales columns proportionally at width=1880."""
+        from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
+
+        class DummyHistoryPanel(ChunksPanelMixin):
+            def __init__(self):
+                self.tree_history = MagicMock()
+
+        panel = DummyHistoryPanel()
+        event = MagicMock()
+        event.width = 1880
+
+        panel._on_tree_history_configure(event)
+
+        # Expected column widths:
+        # category: int(1880 * 0.10) = 188
+        # filename: int(1880 * 0.25) = 470
+        # size: int(1880 * 0.10) = 188
+        # status: int(1880 * 0.10) = 188
+        # date: int(1880 * 0.15) = 282
+        # path: int(1880 * 0.30) = 564
+        calls = {call[0][0]: call[1]["width"] for call in panel.tree_history.column.call_args_list}
+        self.assertEqual(calls["category"], 188)
+        self.assertEqual(calls["filename"], 470)
+        self.assertEqual(calls["size"], 188)
+        self.assertEqual(calls["status"], 188)
+        self.assertEqual(calls["date"], 282)
+        self.assertEqual(calls["path"], 564)
+
     def test_safe_modal_dialog_frameless_and_bmp_symbols(self):
         """Verifies SafeModalDialog sets overrideredirect(True) and uses BMP symbols."""
         import tkinter as tk
@@ -2102,15 +2131,77 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
                     message="Test message",
                     dialog_type=dtype,
                 )
-                # Verify overrideredirect(True)
                 self.assertTrue(dlg.overrideredirect())
-                # Verify drag handlers
                 self.assertTrue(hasattr(dlg, "_on_drag_press"))
                 self.assertTrue(hasattr(dlg, "_on_drag_motion"))
                 dlg.destroy()
         finally:
             try: root.destroy()
             except Exception: pass
+
+    def test_safe_modal_dialog_cancels_after_job_on_destroy(self):
+        """Verifies SafeModalDialog tracks and cancels _topmost_after_id on destroy without Tcl background errors."""
+        import tkinter as tk
+        from smart_download.ui.components.base_modal import SafeModalDialog
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            dlg = SafeModalDialog(
+                parent=root,
+                title="Test Dialog",
+                message="Cancel test",
+                dialog_type="info",
+            )
+            self.assertIsNotNone(dlg._topmost_after_id)
+            dlg.destroy()
+            self.assertIsNone(dlg._topmost_after_id)
+            # Process pending events to ensure no dangling after callback throws Tcl error
+            root.update_idletasks()
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+    def test_extract_tiktok_direct_returns_none_when_both_fail(self):
+        """Verifies _extract_tiktok_direct returns None when HTML scraping and TikWM both fail."""
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        with patch("urllib.request.build_opener", side_effect=Exception("Network error")):
+            with patch.object(resolver, "_extract_tiktok_via_tikwm", return_value=None):
+                res = resolver._extract_tiktok_direct("https://www.tiktok.com/@user/video/12345")
+                self.assertIsNone(res)
+
+    def test_extract_tiktok_via_tikwm_handles_relative_urls_and_fallback_title(self):
+        """Verifies _extract_tiktok_via_tikwm resolves relative URLs and cleans up replacement-character titles."""
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        mock_payload = {
+            "code": 0,
+            "msg": "success",
+            "data": {
+                "id": "999888777",
+                "title": "\ufffd \ufffd #tag",
+                "duration": 15,
+                "origin_cover": "/cover.jpg",
+                "hdplay": "/play/hd.mp4",
+                "hd_size": 12000000,
+                "play": "/play/sd.mp4",
+                "size": 6000000,
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_payload).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            info = resolver._extract_tiktok_via_tikwm("https://vt.tiktok.com/ZSgG75rWv/")
+            self.assertIsNotNone(info)
+            self.assertEqual(info["id"], "999888777")
+            self.assertEqual(info["title"], "#tag")
+            self.assertEqual(info["formats"][0]["url"], "https://www.tikwm.com/play/hd.mp4")
+            self.assertEqual(info["formats"][1]["url"], "https://www.tikwm.com/play/sd.mp4")
 
 
 if __name__ == "__main__":

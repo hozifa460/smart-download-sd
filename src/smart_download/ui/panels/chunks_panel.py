@@ -495,6 +495,8 @@ class ChunksPanelMixin(MetricsPanelMixin):
             self.tree_chunks.column("downloaded", width=max(90, int(w * 0.15)))
             self.tree_chunks.column("pct", width=max(80, int(w * 0.12)))
             self.tree_chunks.column("status", width=max(100, int(w * 0.16)))
+        else:
+            self._last_chunks_configured_w = None
 
     def _on_tree_history_configure(self, event):
         """Proportionally distributes tree_history table width across columns when enlarged or maximized."""
@@ -509,6 +511,8 @@ class ChunksPanelMixin(MetricsPanelMixin):
             self.tree_history.column("status", width=max(80, int(w * 0.10)))
             self.tree_history.column("date", width=max(120, int(w * 0.15)))
             self.tree_history.column("path", width=max(220, int(w * 0.30)))
+        else:
+            self._last_history_configured_w = None
 
 
 __all__ = ["ChunksPanelMixin", "MetricsPanelMixin"]
