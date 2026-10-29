@@ -1,6 +1,8 @@
 """
 MultipleCandidatesModal: Interactive selection dialog when page sniffer extracts multiple download links.
 """
+from __future__ import annotations
+
 import os
 import sys
 try:

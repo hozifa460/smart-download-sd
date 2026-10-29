@@ -38,8 +38,8 @@ class TestVisualDefectsFix(unittest.TestCase):
             nb_conf = gui.style.configure("TNotebook")
             self.assertEqual(nb_conf.get("background"), gui.c_bg)
             self.assertEqual(nb_conf.get("bordercolor"), gui.c_border)
-            self.assertEqual(nb_conf.get("lightcolor"), gui.c_bg)
-            self.assertEqual(nb_conf.get("darkcolor"), gui.c_bg)
+            self.assertEqual(nb_conf.get("lightcolor"), gui.c_border)
+            self.assertEqual(nb_conf.get("darkcolor"), gui.c_border)
             self.assertEqual(nb_conf.get("borderwidth"), 0)
 
             # Check TNotebook.Tab
@@ -75,8 +75,8 @@ class TestVisualDefectsFix(unittest.TestCase):
             cl_conf = gui.style.configure("TNotebook.client")
             self.assertEqual(cl_conf.get("background"), gui.c_panel)
             self.assertEqual(cl_conf.get("bordercolor"), gui.c_border)
-            self.assertEqual(cl_conf.get("lightcolor"), gui.c_panel)
-            self.assertEqual(cl_conf.get("darkcolor"), gui.c_panel)
+            self.assertEqual(cl_conf.get("lightcolor"), gui.c_border)
+            self.assertEqual(cl_conf.get("darkcolor"), gui.c_border)
 
             cl_base = gui.style.configure("Notebook.client")
             self.assertEqual(cl_base.get("background"), gui.c_panel)
@@ -88,11 +88,20 @@ class TestVisualDefectsFix(unittest.TestCase):
             tv_custom_layout = gui.style.layout("Custom.Treeview")
             self.assertEqual(tv_custom_layout, [("Custom.Treeview.treearea", {"sticky": "nswe"})])
 
-            # Check notebook tab frame 1px border
-            tab0 = gui.root.nametowidget(gui.notebook.tabs()[0])
-            self.assertEqual(tab0.cget("highlightthickness"), 1)
-            self.assertEqual(tab0.cget("highlightbackground"), gui.c_border)
-            self.assertEqual(tab0.cget("bd"), 0)
+            # Check notebook tab frame 1px border and highlightcolor
+            for tab_id in gui.notebook.tabs():
+                tab_w = gui.root.nametowidget(tab_id)
+                self.assertEqual(tab_w.cget("highlightthickness"), 1)
+                self.assertEqual(tab_w.cget("highlightbackground"), gui.c_border)
+                self.assertEqual(tab_w.cget("highlightcolor"), gui.c_border)
+                self.assertEqual(tab_w.cget("bd"), 0)
+
+            # Check TNotebook layout and border colors
+            self.assertEqual(gui.style.layout("TNotebook"), [("Notebook.client", {"sticky": "nswe"})])
+            self.assertEqual(gui.style.layout("Custom.TNotebook"), [("Notebook.client", {"sticky": "nswe"})])
+            nb_conf = gui.style.configure("TNotebook")
+            self.assertEqual(nb_conf.get("lightcolor"), gui.c_border)
+            self.assertEqual(nb_conf.get("darkcolor"), gui.c_border)
 
             # Check inputs panel label widths (Part 1 fix)
             self.assertEqual(gui.lbl_url.cget("width"), 14)
@@ -267,6 +276,7 @@ class TestVisualDefectsFix(unittest.TestCase):
             "-c",
             "import sys; sys.modules['tkinter'] = None; import turbo_downloader; "
             "from smart_download.utils import tk_helpers; from smart_download.ui.panels import controls_panel; "
+            "from smart_download.ui import modals; from smart_download.ui import main_window; "
             "assert controls_panel._BaseButton is object; assert tk_helpers._ORIG_MISC_DESTROY is None; "
             "print('HEADLESS_OK')"
         ]

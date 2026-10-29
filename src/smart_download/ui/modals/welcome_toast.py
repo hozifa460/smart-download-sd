@@ -1,6 +1,8 @@
 """
 StartupWelcomeToast: Sleek, frameless, dark-themed floating welcome toast displayed upon startup.
 """
+from __future__ import annotations
+
 import os
 import sys
 import ctypes

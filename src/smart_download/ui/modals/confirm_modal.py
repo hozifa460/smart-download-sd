@@ -1,6 +1,8 @@
 """
 DownloadConfirmationModal: Download metadata inspection, category routing, and pre-start confirmation modal.
 """
+from __future__ import annotations
+
 import os
 import sys
 import threading

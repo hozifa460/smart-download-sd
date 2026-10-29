@@ -4,6 +4,8 @@ Provides hardware-accelerated chromeless native preview with live WebVTT subtitl
 synchronized live audio dubbing, progressive MP4 direct stream playback,
 and seamless web/embed fallback.
 """
+from __future__ import annotations
+
 import os
 import re
 import sys

@@ -1,6 +1,8 @@
 """
 RefreshLinkModal: Interactive dialog to renew expired temporary download URLs while preserving chunks.
 """
+from __future__ import annotations
+
 import os
 import sys
 import threading

@@ -2,6 +2,8 @@
 Helper functions and banner builder for QualitySelectionModal (quality_modal_helpers.py).
 Provides track attachment, destination path resolution, and embedded preview banner creation.
 """
+from __future__ import annotations
+
 import os
 try:
     import tkinter as tk

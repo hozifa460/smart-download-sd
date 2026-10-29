@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .toasts import FetchingLinkToast, StartupWelcomeToast
 from .quality_modal import QualitySelectionModal
 from .confirm_modal import (

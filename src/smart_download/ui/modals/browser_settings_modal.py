@@ -1,7 +1,6 @@
-"""
-BrowserSettingsModalMixin: Browser WebExtension setup dialog, native messaging
-host registration, and intercepted download dispatching.
-"""
+"""BrowserSettingsModalMixin: Browser WebExtension setup dialog and host registration."""
+from __future__ import annotations
+
 import os
 import sys
 import json

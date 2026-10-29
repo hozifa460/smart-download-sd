@@ -96,12 +96,13 @@ class ThemeControllerMixin:
 
             # Notebook tabs
             for nb_name in ("TNotebook", "Custom.TNotebook"):
+                self.style.layout(nb_name, [("Notebook.client", {"sticky": "nswe"})])
                 self.style.configure(
                     nb_name,
                     background=self.c_bg,
                     bordercolor=self.c_border,
-                    lightcolor=self.c_bg,
-                    darkcolor=self.c_bg,
+                    lightcolor=self.c_border,
+                    darkcolor=self.c_border,
                     tabmargins=[0, 2, 0, 0],
                     borderwidth=0,
                 )
@@ -110,8 +111,8 @@ class ThemeControllerMixin:
                     cl_name,
                     background=self.c_panel,
                     bordercolor=self.c_border,
-                    lightcolor=self.c_panel,
-                    darkcolor=self.c_panel,
+                    lightcolor=self.c_border,
+                    darkcolor=self.c_border,
                 )
             for tab_name in ("TNotebook.Tab", "Custom.TNotebook.Tab"):
                 self.style.configure(

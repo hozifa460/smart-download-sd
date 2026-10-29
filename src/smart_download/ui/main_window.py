@@ -1,6 +1,8 @@
 """
 ModernFramelessGUI: Complete Dark-themed, frameless, dynamic chunking download manager GUI.
 """
+from __future__ import annotations
+
 import sys
 import os
 import time

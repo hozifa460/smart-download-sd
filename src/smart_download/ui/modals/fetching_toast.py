@@ -1,6 +1,8 @@
 """
 FetchingLinkToast: Sleek, frameless toast notification for fetching/analyzing links.
 """
+from __future__ import annotations
+
 import os
 import sys
 import urllib.parse

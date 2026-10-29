@@ -1,6 +1,8 @@
 """
 ConfirmModalLogicMixin: Background probing, link refreshing, and mini-engine download handlers.
 """
+from __future__ import annotations
+
 import os
 import sys
 import time

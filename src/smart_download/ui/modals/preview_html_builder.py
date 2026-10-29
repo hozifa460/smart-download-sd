@@ -3,6 +3,8 @@ Unified VidMate-Style HTML5 Preview & Download Settings Builder (preview_html_bu
 Generates modern dark-themed HTML5 preview player with synchronized live audio dubbing,
 WebVTT subtitle tracks, and interactive format/quality/dubbing/subtitle controls.
 """
+from __future__ import annotations
+
 import html
 import json
 from typing import Dict, List, Optional, Any

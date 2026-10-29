@@ -1,6 +1,8 @@
 """
 AppUpdateModal: Dialog presenting GitHub Release updates with live download progress and installer launch.
 """
+from __future__ import annotations
+
 import os
 import sys
 import threading

@@ -1,7 +1,6 @@
-"""
-QualitySelectionModal: Interactive video/audio resolution and stream format picker.
-Includes compact embedded preview banner and support for unified VidMate-style preview.
-"""
+"""QualitySelectionModal: Interactive video/audio resolution and stream format picker."""
+from __future__ import annotations
+
 import os
 import sys
 try:
