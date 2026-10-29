@@ -366,6 +366,7 @@ class ModernFramelessGUI(
         # Main Outer Border Frame
         main_border = tk.Frame(self.root, bg=self.c_border, padx=1, pady=1)
         main_border.pack(fill=tk.BOTH, expand=True)
+        self.main_border = main_border
 
         self.container = tk.Frame(main_border, bg=self.c_bg)
         self.container.pack(fill=tk.BOTH, expand=True)
@@ -391,6 +392,10 @@ class ModernFramelessGUI(
 
         # 6. Tabbed View (Chunk Table & Activity Log)
         self._build_tabs_card(content)
+
+        # Ensure resize grips remain above container frames
+        if hasattr(self, "_lift_resize_grips"):
+            self._lift_resize_grips()
 
 
 def main():

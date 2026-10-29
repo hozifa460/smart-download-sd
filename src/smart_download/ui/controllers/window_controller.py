@@ -12,6 +12,7 @@ except Exception:
 from smart_download.i18n import LocalizationManager, tr
 from smart_download.config import get_resource_path, APP_VERSION
 from smart_download.ui.components.tooltip import ToolTip
+from smart_download.utils.dpi import get_windows_work_area
 from smart_download.services import (
     IS_WINDOWS,
     GWL_STYLE,
@@ -44,6 +45,13 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         x = max(0, (sw - self.width) // 2)
         y = max(0, (sh - self.height) // 2)
         self.root.geometry(f"{self.width}x{self.height}+{x}+{y}")
+        self._is_maximized = False
+        self._normal_geometry = f"{self.width}x{self.height}+{x}+{y}"
+        self._min_width = max(820, int(820 * getattr(self, "dpi_scale", 1.0)))
+        self._min_height = max(620, int(620 * getattr(self, "dpi_scale", 1.0)))
+        self._resize_state = {}
+        self._resize_grips = []
+        self._setup_resizing()
 
         # Set Window Icons
         ico_path = get_resource_path("app_icon.ico")
@@ -79,39 +87,16 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 # Set native taskbar and alt-tab icon via Win32 SendMessageW
                 if os.path.isfile(ico_path):
                     try:
-                        IMAGE_ICON = 1
-                        LR_LOADFROMFILE = 0x00000010
-                        WM_SETICON = 0x0080
-                        ICON_SMALL = 0
-                        ICON_BIG = 1
-
                         ctypes.windll.user32.LoadImageW.restype = ctypes.c_void_p
-                        ctypes.windll.user32.LoadImageW.argtypes = [
-                            ctypes.c_void_p,
-                            ctypes.c_wchar_p,
-                            ctypes.c_uint,
-                            ctypes.c_int,
-                            ctypes.c_int,
-                            ctypes.c_uint
-                        ]
-                        ctypes.windll.user32.SendMessageW.argtypes = [
-                            ctypes.c_void_p,
-                            ctypes.c_uint,
-                            ctypes.c_void_p,
-                            ctypes.c_void_p
-                        ]
-
-                        sm_cx = ctypes.windll.user32.GetSystemMetrics(49) or 16
-                        sm_cy = ctypes.windll.user32.GetSystemMetrics(50) or 16
-                        hicon_sm = ctypes.windll.user32.LoadImageW(None, ico_path, IMAGE_ICON, sm_cx, sm_cy, LR_LOADFROMFILE)
+                        ctypes.windll.user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+                        sm_cx, sm_cy = ctypes.windll.user32.GetSystemMetrics(49) or 16, ctypes.windll.user32.GetSystemMetrics(50) or 16
+                        hicon_sm = ctypes.windll.user32.LoadImageW(None, ico_path, 1, sm_cx, sm_cy, 0x10)
                         if hicon_sm:
-                            ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_sm)
-
-                        lg_cx = ctypes.windll.user32.GetSystemMetrics(11) or 32
-                        lg_cy = ctypes.windll.user32.GetSystemMetrics(12) or 32
-                        hicon_lg = ctypes.windll.user32.LoadImageW(None, ico_path, IMAGE_ICON, lg_cx, lg_cy, LR_LOADFROMFILE)
+                            ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, hicon_sm)
+                        lg_cx, lg_cy = ctypes.windll.user32.GetSystemMetrics(11) or 32, ctypes.windll.user32.GetSystemMetrics(12) or 32
+                        hicon_lg = ctypes.windll.user32.LoadImageW(None, ico_path, 1, lg_cx, lg_cy, 0x10)
                         if hicon_lg:
-                            ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_lg)
+                            ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon_lg)
                     except Exception:
                         pass
 
@@ -220,7 +205,12 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         self.subtitle_lbl.bind("<ButtonPress-1>", self._on_title_press)
         self.subtitle_lbl.bind("<B1-Motion>", self._on_title_drag)
 
-        # Window Control Buttons (Minimize & Close)
+        # Double-click title bar to toggle maximize / restore
+        title_bar.bind("<Double-Button-1>", self.toggle_maximize)
+        self.title_lbl.bind("<Double-Button-1>", self.toggle_maximize)
+        self.subtitle_lbl.bind("<Double-Button-1>", self.toggle_maximize)
+
+        # Window Control Buttons (Close, Maximize/Restore, Minimize)
         btn_close = tk.Label(
             title_bar,
             text="✕",
@@ -233,6 +223,19 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         btn_close.bind("<Enter>", lambda e: btn_close.configure(bg=self.c_danger, fg="white"))
         btn_close.bind("<Leave>", lambda e: btn_close.configure(bg=self.c_panel, fg=self.c_text_muted))
         btn_close.bind("<Button-1>", lambda e: self._on_close())
+
+        self.btn_max = tk.Label(
+            title_bar,
+            text="□",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.c_panel,
+            fg=self.c_text_muted,
+            width=4
+        )
+        self.btn_max.pack(side=tk.RIGHT, fill=tk.Y)
+        self.btn_max.bind("<Enter>", lambda e: self.btn_max.configure(bg=self.c_panel_light, fg="white"))
+        self.btn_max.bind("<Leave>", lambda e: self.btn_max.configure(bg=self.c_panel, fg=self.c_text_muted))
+        self.btn_max.bind("<Button-1>", self.toggle_maximize)
 
         btn_min = tk.Label(
             title_bar,
@@ -304,9 +307,186 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         self._drag_offset_y = event.y_root - self.root.winfo_y()
 
     def _on_title_drag(self, event):
+        if getattr(self, "_is_maximized", False):
+            cur_w = max(1, self.root.winfo_width())
+            click_x_rel = event.x_root - self.root.winfo_x()
+            ratio = max(0.0, min(1.0, click_x_rel / cur_w))
+            self.toggle_maximize()
+            restored_w = self.root.winfo_width()
+            self._drag_offset_x = int(restored_w * ratio)
+            self._drag_offset_y = max(10, min(30, getattr(event, "y", 20)))
+
         x = event.x_root - self._drag_offset_x
         y = event.y_root - self._drag_offset_y
         self.root.geometry(f"+{x}+{y}")
+
+    def toggle_maximize(self, event=None):
+        """Toggles between maximized work area and restored normal window geometry."""
+        if not getattr(self, "_is_maximized", False):
+            try:
+                self._normal_geometry = self.root.geometry()
+            except Exception:
+                pass
+            wa = get_windows_work_area() if IS_WINDOWS else None
+            if wa:
+                work_x, work_y = wa[0], wa[1]
+                work_w, work_h = wa[2] - wa[0], wa[3] - wa[1]
+            else:
+                work_x, work_y = 0, 0
+                try:
+                    sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+                except Exception:
+                    sw, sh = 1920, 1080
+                work_w, work_h = sw, max(getattr(self, "_min_height", 620), sh - 40)
+
+            try:
+                self.root.geometry(f"{work_w}x{work_h}+{work_x}+{work_y}")
+            except Exception:
+                pass
+            self._is_maximized = True
+            if hasattr(self, "btn_max") and self.btn_max:
+                try:
+                    self.btn_max.configure(text="❐")
+                except Exception:
+                    pass
+            self._hide_resize_grips()
+        else:
+            norm_geo = getattr(self, "_normal_geometry", None)
+            if norm_geo:
+                try:
+                    self.root.geometry(norm_geo)
+                except Exception:
+                    pass
+            self._is_maximized = False
+            if hasattr(self, "btn_max") and self.btn_max:
+                try:
+                    self.btn_max.configure(text="□")
+                except Exception:
+                    pass
+            self._show_resize_grips()
+
+    def _setup_resizing(self):
+        """Initializes 8 edge & corner resize grips on the frameless root window."""
+        if not hasattr(self, "root") or not self.root or tk is None:
+            return
+        try:
+            self._resize_grips = []
+            grip_configs = [
+                ("nw", "size_nw_se", {"x": 0, "y": 0, "width": 8, "height": 8}),
+                ("ne", "size_ne_sw", {"relx": 1.0, "x": -8, "y": 0, "width": 8, "height": 8}),
+                ("sw", "size_ne_sw", {"x": 0, "rely": 1.0, "y": -8, "width": 8, "height": 8}),
+                ("se", "size_nw_se", {"relx": 1.0, "x": -10, "rely": 1.0, "y": -10, "width": 10, "height": 10}),
+                ("n",  "size_ns",    {"x": 8, "y": 0, "relwidth": 1.0, "width": -16, "height": 5}),
+                ("s",  "size_ns",    {"x": 8, "rely": 1.0, "y": -5, "relwidth": 1.0, "width": -16, "height": 5}),
+                ("w",  "size_we",    {"x": 0, "y": 8, "width": 5, "relheight": 1.0, "height": -16}),
+                ("e",  "size_we",    {"relx": 1.0, "x": -5, "y": 8, "width": 5, "relheight": 1.0, "height": -16}),
+            ]
+            border_color = getattr(self, "c_border", "#2a2d32")
+            for mode, cursor_name, place_kwargs in grip_configs:
+                grip = tk.Frame(self.root, bg=border_color, cursor=cursor_name)
+                grip.bind("<ButtonPress-1>", lambda e, m=mode: self._on_resize_press(e, m))
+                grip.bind("<B1-Motion>", self._on_resize_drag)
+                grip.bind("<ButtonRelease-1>", self._on_resize_release)
+                grip.place(**place_kwargs)
+                grip.lift()
+                self._resize_grips.append((grip, place_kwargs))
+        except Exception:
+            pass
+
+    def _lift_resize_grips(self):
+        """Ensures all 8 resize grips stay above all container frames."""
+        for grip, _ in getattr(self, "_resize_grips", []):
+            try:
+                grip.lift()
+            except Exception:
+                pass
+
+    def _hide_resize_grips(self):
+        """Temporarily hides resize grips when maximized."""
+        for grip, _ in getattr(self, "_resize_grips", []):
+            try:
+                grip.place_forget()
+            except Exception:
+                pass
+
+    def _show_resize_grips(self):
+        """Restores resize grips when unmaximized."""
+        for grip, place_kwargs in getattr(self, "_resize_grips", []):
+            try:
+                grip.place(**place_kwargs)
+                grip.lift()
+            except Exception:
+                pass
+
+    def _on_resize_press(self, event, mode: str):
+        if getattr(self, "_is_maximized", False):
+            return "break"
+        try:
+            self._resize_state = {
+                "mode": mode,
+                "x_root": event.x_root,
+                "y_root": event.y_root,
+                "win_x": self.root.winfo_x(),
+                "win_y": self.root.winfo_y(),
+                "win_w": self.root.winfo_width(),
+                "win_h": self.root.winfo_height(),
+            }
+        except Exception:
+            pass
+        return "break"
+
+    def _on_resize_drag(self, event):
+        if getattr(self, "_is_maximized", False):
+            return "break"
+        mode = getattr(self, "_resize_state", {}).get("mode")
+        if not mode:
+            return "break"
+
+        try:
+            dx = event.x_root - self._resize_state["x_root"]
+            dy = event.y_root - self._resize_state["y_root"]
+            w = self._resize_state["win_w"]
+            h = self._resize_state["win_h"]
+            x = self._resize_state["win_x"]
+            y = self._resize_state["win_y"]
+            min_w = getattr(self, "_min_width", 820)
+            min_h = getattr(self, "_min_height", 620)
+
+            if "e" in mode:
+                w = max(min_w, w + dx)
+            if "s" in mode:
+                h = max(min_h, h + dy)
+            if "w" in mode:
+                new_w = max(min_w, w - dx)
+                x = x + (w - new_w)
+                w = new_w
+            if "n" in mode:
+                new_h = max(min_h, h - dy)
+                y = y + (h - new_h)
+                h = new_h
+
+            self.root.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            pass
+        return "break"
+
+    def _on_resize_release(self, event):
+        if hasattr(self, "_resize_state"):
+            self._resize_state.clear()
+        return "break"
+
+    def _detect_resize_edge(self, x: int, y: int, width: int, height: int, threshold: int = 6) -> str:
+        """Determines the resize edge direction ('n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se') for coordinate (x, y)."""
+        edge = ""
+        if y <= threshold:
+            edge += "n"
+        elif y >= height - threshold:
+            edge += "s"
+        if x <= threshold:
+            edge += "w"
+        elif x >= width - threshold:
+            edge += "e"
+        return edge
 
     def _on_minimize(self):
         """Minimize frameless window smoothly without TclError."""

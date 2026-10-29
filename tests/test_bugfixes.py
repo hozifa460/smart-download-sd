@@ -1591,6 +1591,226 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             root.destroy()
 
 
+class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
+    """
+    Verifies Part 1 (Frameless window maximize/restore and resizing),
+    Part 2 (Exception handling without NameError in youtube_download_controller),
+    and Part 3 (Direct TikTok rehydration extraction).
+    """
+
+    def test_window_maximize_and_restore(self):
+        """Verifies toggle_maximize toggles _is_maximized and updates geometry / btn_max text between '□' and '❐'."""
+        import tkinter as tk
+        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyWindow(WindowChromeMixin):
+                def check_for_updates_manual(self): pass
+                def toggle_language(self): pass
+                def __init__(self, r):
+                    self.root = r
+                    self.width = 850
+                    self.height = 650
+                    self.dpi_scale = 1.0
+                    self._init_theme()
+                    self._setup_window()
+                    self._build_title_bar(r)
+
+            w = DummyWindow(root)
+            self.assertFalse(w._is_maximized)
+            self.assertEqual(w.btn_max.cget("text"), "□")
+
+            # Maximize
+            w.toggle_maximize()
+            self.assertTrue(w._is_maximized)
+            self.assertEqual(w.btn_max.cget("text"), "❐")
+
+            # Restore
+            w.toggle_maximize()
+            self.assertFalse(w._is_maximized)
+            self.assertEqual(w.btn_max.cget("text"), "□")
+
+            # Resizing helper detection test
+            edge_se = w._detect_resize_edge(848, 648, 850, 650)
+            self.assertEqual(edge_se, "se")
+            edge_nw = w._detect_resize_edge(2, 2, 850, 650)
+            self.assertEqual(edge_nw, "nw")
+            edge_center = w._detect_resize_edge(400, 300, 850, 650)
+            self.assertEqual(edge_center, "")
+        finally:
+            root.destroy()
+
+    def test_youtube_download_controller_exception_dispatch(self):
+        """Verifies _start_youtube_download exception handler properly dispatches err_msg without NameError."""
+        from smart_download.ui.controllers.youtube_download_controller import YouTubeDownloadControllerMixin
+
+        class DummyYTController(YouTubeDownloadControllerMixin):
+            def __init__(self):
+                self._yt_cancel_event = MagicMock()
+                self._yt_cancel_event.is_set.return_value = False
+                self.dispatched_callbacks = []
+                self.logs = []
+                self.error_cb_called_with = None
+
+            def dispatch_to_main_thread(self, fn):
+                self.dispatched_callbacks.append(fn)
+
+            def log(self, msg):
+                self.logs.append(msg)
+
+            def _engine_error_cb(self, msg):
+                self.error_cb_called_with = msg
+
+        ctrl = DummyYTController()
+        tag = "YOUTUBE"
+        try:
+            raise ValueError("Test stream extraction failure: HTTP 403 Forbidden")
+        except Exception as e:
+            err_msg = str(e)
+            if hasattr(ctrl, "clear_last_clipboard_url"):
+                ctrl.clear_last_clipboard_url()
+            if not ctrl._yt_cancel_event.is_set():
+                ctrl.log(f"[{tag} ERROR] {err_msg}")
+                try:
+                    ctrl.dispatch_to_main_thread(lambda msg=err_msg: ctrl._engine_error_cb(msg))
+                except Exception:
+                    pass
+
+        self.assertEqual(len(ctrl.dispatched_callbacks), 1)
+        ctrl.dispatched_callbacks[0]()
+        self.assertEqual(ctrl.error_cb_called_with, "Test stream extraction failure: HTTP 403 Forbidden")
+
+    def test_tiktok_direct_rehydration_extraction(self):
+        """Verifies _extract_tiktok_direct parses __UNIVERSAL_DATA_FOR_REHYDRATION__ HTML payload and produces formats with Referer and Cookie."""
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        rehydration_json = {
+            "__DEFAULT_SCOPE__": {
+                "webapp.video-detail": {
+                    "itemInfo": {
+                        "itemStruct": {
+                            "id": "7488392019283",
+                            "desc": "Viral TikTok video #smartdownload",
+                            "video": {
+                                "duration": 18,
+                                "width": 1080,
+                                "height": 1920,
+                                "originCover": "https://p16.tiktokcdn.com/cover.jpg",
+                                "bitrateInfo": [
+                                    {
+                                        "GearName": "normal_1080_0",
+                                        "Bitrate": 2400000,
+                                        "CodecType": "h264",
+                                        "PlayAddr": {
+                                            "Width": 1080,
+                                            "Height": 1920,
+                                            "DataSize": 5400000,
+                                            "UrlList": ["https://v16.tiktokcdn.com/play1080.mp4"]
+                                        }
+                                    },
+                                    {
+                                        "GearName": "lower_720_0",
+                                        "Bitrate": 1100000,
+                                        "CodecType": "h264",
+                                        "PlayAddr": {
+                                            "Width": 720,
+                                            "Height": 1280,
+                                            "DataSize": 2475000,
+                                            "UrlList": ["https://v16.tiktokcdn.com/play720.mp4"]
+                                        }
+                                    }
+                                ],
+                                "downloadAddr": "https://v16.tiktokcdn.com/download.mp4",
+                                "claInfo": {
+                                    "captionInfos": [
+                                        {
+                                            "LanguageCodeName": "eng-US",
+                                            "Format": "webvtt",
+                                            "Url": "https://v16.tiktokcdn.com/sub_en.vtt"
+                                        }
+                                    ]
+                                }
+                            },
+                            "music": {
+                                "playUrl": "https://sf16.tiktokcdn.com/music.mp3",
+                                "title": "Trending Song"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        raw_html = f'<html><head><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">{json.dumps(rehydration_json)}</script></head><body></body></html>'
+
+        mock_resp = MagicMock()
+        mock_resp.geturl.return_value = "https://www.tiktok.com/@creator/video/7488392019283"
+        mock_resp.read.return_value = raw_html.encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.OpenerDirector.open", return_value=mock_resp):
+            info = resolver._extract_tiktok_direct("https://vt.tiktok.com/ZSgG75rWv/")
+            self.assertIsNotNone(info)
+            self.assertEqual(info["id"], "7488392019283")
+            self.assertIn("Viral TikTok video", info["title"])
+            self.assertEqual(info["duration"], 18)
+            self.assertTrue(len(info["formats"]) >= 3)
+
+            options = resolver.build_format_options(info)
+            self.assertTrue(len(options) >= 2)
+
+            for fmt in info["formats"]:
+                self.assertEqual(fmt["http_headers"].get("Referer"), "https://www.tiktok.com/")
+
+            self.assertIn("eng", info["subtitles"])
+            self.assertEqual(info["subtitles"]["eng"][0]["url"], "https://v16.tiktokcdn.com/sub_en.vtt")
+
+    def test_extract_format_options_tiktok_fallback(self):
+        """Verifies extract_format_options falls back to _extract_tiktok_direct when yt-dlp fails."""
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        mock_tt_info = {
+            "id": "7488392019283",
+            "title": "Fallback TikTok Video",
+            "duration": 15,
+            "thumbnail": "https://p16.tiktokcdn.com/cover.jpg",
+            "webpage_url": "https://www.tiktok.com/@creator/video/7488392019283",
+            "http_headers": {"User-Agent": "test", "Referer": "https://www.tiktok.com/"},
+            "formats": [
+                {
+                    "format_id": "normal_1080_0",
+                    "url": "https://v16.tiktokcdn.com/play1080.mp4",
+                    "ext": "mp4",
+                    "width": 1080,
+                    "height": 1920,
+                    "filesize": 5000000,
+                    "tbr": 2500.0,
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "http_headers": {"User-Agent": "test", "Referer": "https://www.tiktok.com/"},
+                    "protocol": "https",
+                }
+            ],
+            "subtitles": {}
+        }
+
+        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+            mock_instance = MagicMock()
+            mock_instance.__enter__.return_value = mock_instance
+            mock_instance.extract_info.side_effect = Exception("HTTP 403 Forbidden: TikTok extraction blocked")
+            mock_ydl_cls.return_value = mock_instance
+
+            with patch.object(resolver, "_extract_tiktok_direct", return_value=mock_tt_info) as mock_direct:
+                info, options = resolver.extract_format_options("https://vt.tiktok.com/ZSgG75rWv/")
+                self.assertIsNotNone(info)
+                self.assertEqual(info["id"], "7488392019283")
+                self.assertTrue(len(options) >= 1)
+                mock_direct.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
 

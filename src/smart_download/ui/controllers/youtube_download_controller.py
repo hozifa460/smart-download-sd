@@ -293,12 +293,13 @@ class YouTubeDownloadControllerMixin:
                     pass
 
             except Exception as e:
+                err_msg = str(e)
                 if hasattr(self, "clear_last_clipboard_url"):
                     self.clear_last_clipboard_url()
                 if not self._yt_cancel_event.is_set():
-                    self.log(f"[{tag} ERROR] {e}")
+                    self.log(f"[{tag} ERROR] {err_msg}")
                     try:
-                        self.dispatch_to_main_thread(lambda: self._engine_error_cb(str(e)))
+                        self.dispatch_to_main_thread(lambda msg=err_msg: self._engine_error_cb(msg))
                     except Exception:
                         pass
             finally:
