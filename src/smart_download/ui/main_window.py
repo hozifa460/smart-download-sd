@@ -367,6 +367,8 @@ class ModernFramelessGUI(
         main_border = tk.Frame(self.root, bg=self.c_border, padx=1, pady=1)
         main_border.pack(fill=tk.BOTH, expand=True)
         self.main_border = main_border
+        if hasattr(self, "_setup_border_resizing"):
+            self._setup_border_resizing(main_border)
 
         self.container = tk.Frame(main_border, bg=self.c_bg)
         self.container.pack(fill=tk.BOTH, expand=True)

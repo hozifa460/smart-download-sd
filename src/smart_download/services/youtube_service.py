@@ -1,16 +1,7 @@
 """
-========================================================================================
-🎥 YOUTUBE & STREAMING RESOLVER MODULE — Smart Download (SD)
-========================================================================================
-Modular resolver layer for YouTube and streaming media:
-1. Regex-based pattern matching for YouTube URLs (watch, shorts, embed, live, youtu.be).
-2. Direct stream extraction via yt-dlp (with fallback to progressive or separate streams).
-3. Audio/Video separation detection and stream resolution.
-4. Lossless FFmpeg audio+video container merging (-c copy).
-5. Robust error handling, sanitized filenames, and graceful guidance if yt-dlp is missing.
-========================================================================================
+YouTube & universal streaming resolver: yt-dlp metadata extraction,
+fallback TikTok direct rehydration, progressive format detection, and FFmpeg stream merging.
 """
-
 import os
 import re
 import sys
@@ -76,24 +67,15 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         self.cookies_file = cookies_file
 
     def _build_ydl_opts(self, browser: Optional[str] = None, cookiefile: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Builds standard yt-dlp extraction options dictionary, augmenting with cookiefile
-        or cookiesfrombrowser if specified.
-        """
+        """Builds standard yt-dlp extraction options dictionary."""
         opts: Dict[str, Any] = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "nocheckcertificate": True,
-            "noplaylist": True,
-            "extract_flat": False,
+            "quiet": True, "no_warnings": True, "skip_download": True,
+            "nocheckcertificate": True, "noplaylist": True, "extract_flat": False,
             "socket_timeout": min(self.socket_timeout, 8),
-            "youtube_include_dash_manifest": True,
-            "youtube_include_hls_manifest": False,
+            "youtube_include_dash_manifest": True, "youtube_include_hls_manifest": False,
             "check_formats": False,
         }
-        if cookiefile and os.path.isfile(cookiefile):
-            opts["cookiefile"] = cookiefile
+        if cookiefile and os.path.isfile(cookiefile): opts["cookiefile"] = cookiefile
         if browser and browser.lower() not in ("none", "auto", "off", ""):
             opts["cookiesfrombrowser"] = (browser.lower(),)
         return opts
@@ -122,15 +104,25 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             })
             with opener.open(req, timeout=12) as resp:
                 final_url = resp.geturl()
-                html = resp.read().decode("utf-8", errors="replace")
+                raw = resp.read()
+                enc = (resp.headers.get("Content-Encoding") or "").lower()
+                if "gzip" in enc or raw[:2] == b"\x1f\x8b":
+                    import gzip
+                    try: raw = gzip.decompress(raw)
+                    except Exception: pass
+                elif "deflate" in enc:
+                    import zlib
+                    try: raw = zlib.decompress(raw)
+                    except Exception: pass
+                html = raw.decode("utf-8", errors="replace")
 
             data = None
-            m = re.search(r'<script\s+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', html, re.DOTALL)
+            m = re.search(r'<script[^>]*\bid="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', html, re.DOTALL)
             if m:
                 try: data = json.loads(m.group(1).strip())
                 except Exception: pass
             if not data:
-                m2 = re.search(r'<script\s+id="SIGI_STATE"[^>]*>(.*?)</script>', html, re.DOTALL)
+                m2 = re.search(r'<script[^>]*\bid="(?:SIGI_STATE|sigi-persisted-data)"[^>]*>(.*?)</script>', html, re.DOTALL)
                 if m2:
                     try: data = json.loads(m2.group(1).strip())
                     except Exception: pass
@@ -141,9 +133,20 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             vdetail = scope.get("webapp.video-detail", {})
             item = vdetail.get("itemInfo", {}).get("itemStruct") or vdetail.get("itemStruct")
             if not item and "ItemModule" in data:
-                item_mod = data["ItemModule"]
-                if isinstance(item_mod, dict) and item_mod:
-                    item = next(iter(item_mod.values()), None)
+                im = data["ItemModule"]
+                if isinstance(im, dict) and im:
+                    item = next(iter(im.values()), None)
+            if not isinstance(item, dict):
+                def _find_item(obj, d=0):
+                    if d > 8 or not isinstance(obj, dict): return None
+                    if "itemStruct" in obj and isinstance(obj["itemStruct"], dict): return obj["itemStruct"]
+                    if "video" in obj and "id" in obj and isinstance(obj.get("video"), dict): return obj
+                    for v in obj.values():
+                        if isinstance(v, dict):
+                            r = _find_item(v, d + 1)
+                            if r: return r
+                    return None
+                item = _find_item(data)
             if not isinstance(item, dict):
                 return None
 
@@ -205,7 +208,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 })
 
             subtitles: Dict[str, List[Dict[str, Any]]] = {}
-            caps = (video.get("claInfo") or {}).get("captionInfos") or video.get("subtitleInfos") or []
+            caps = (video.get("claInfo") or {}).get("captionInfos") or video.get("subtitleInfos") or (item.get("claInfo") or {}).get("captionInfos") or item.get("subtitleInfos") or []
             for cap in caps:
                 if isinstance(cap, dict) and cap.get("Url"):
                     lang_raw = str(cap.get("LanguageCodeName") or cap.get("language") or "und").strip()
@@ -295,9 +298,6 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                     except Exception as cookie_err:
                         self.log(f"[{tag}] Cookies from '{b}' failed: {cookie_err}")
 
-            if not info and platform == "TikTok":
-                info = self._extract_tiktok_direct(url)
-
             if not info:
                 is_ydl_mocked = bool(getattr(yt_dlp.YoutubeDL, "_mock_name", None))
                 is_updater_mocked = bool(getattr(YtDlpAutoUpdater, "_mock_name", None) or getattr(YtDlpAutoUpdater.update, "_mock_name", None))
@@ -311,21 +311,12 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                             with refreshed_yt_dlp.YoutubeDL(ydl_opts) as ydl2:
                                 info = ydl2.extract_info(url, download=False)
                                 ydl = ydl2
-                        else:
-                            raise e
                     except Exception:
-                        if platform == "TikTok":
-                            info = self._extract_tiktok_direct(url)
-                        if not info:
-                            raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
-                else:
-                    if platform == "TikTok":
-                        info = self._extract_tiktok_direct(url)
-                    if not info:
-                        raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
-
-        if not info and platform == "TikTok":
-            info = self._extract_tiktok_direct(url)
+                        pass
+            if not info and platform == "TikTok":
+                info = self._extract_tiktok_direct(url)
+            if not info:
+                raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
 
         if not info:
             raise RuntimeError("yt-dlp returned empty metadata for the provided URL.")
@@ -386,6 +377,12 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 headers["Cookie"] = cookie_val
 
         options = self.build_format_options(info)
+        if not options and platform == "TikTok":
+            self.log(f"[{tag}] No downloadable format options produced by yt-dlp. Retrying direct rehydration extraction...")
+            tt_direct = self._extract_tiktok_direct(url)
+            if tt_direct and tt_direct.get("formats"):
+                info = tt_direct
+                options = self.build_format_options(info)
         return info, options
 
     def resolve(self, url: str, format_id: Optional[str] = None) -> YouTubeStreamInfo:

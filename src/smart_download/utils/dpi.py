@@ -45,7 +45,7 @@ def enable_high_dpi_awareness():
             pass
 
 
-def get_windows_work_area() -> Optional[Tuple[int, int, int, int]]:
+def get_windows_work_area(hwnd: Optional[int] = None) -> Optional[Tuple[int, int, int, int]]:
     """Returns (left, top, right, bottom) coordinates of the Windows work area (excluding taskbars)."""
     if sys.platform != "win32":
         return None
@@ -57,6 +57,22 @@ def get_windows_work_area() -> Optional[Tuple[int, int, int, int]]:
                 ("right", ctypes.c_long),
                 ("bottom", ctypes.c_long)
             ]
+        if hwnd:
+            try:
+                class MONITORINFO(ctypes.Structure):
+                    _fields_ = [
+                        ("cbSize", ctypes.c_ulong),
+                        ("rcMonitor", RECT),
+                        ("rcWork", RECT),
+                        ("dwFlags", ctypes.c_ulong),
+                    ]
+                mi = MONITORINFO()
+                mi.cbSize = ctypes.sizeof(MONITORINFO)
+                hmon = ctypes.windll.user32.MonitorFromWindow(ctypes.c_void_p(hwnd), 2)
+                if hmon and ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+                    return int(mi.rcWork.left), int(mi.rcWork.top), int(mi.rcWork.right), int(mi.rcWork.bottom)
+            except Exception:
+                pass
         rect = RECT()
         SPI_GETWORKAREA = 0x0030
         if ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0):

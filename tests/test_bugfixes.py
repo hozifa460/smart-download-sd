@@ -1639,8 +1639,118 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
             self.assertEqual(edge_nw, "nw")
             edge_center = w._detect_resize_edge(400, 300, 850, 650)
             self.assertEqual(edge_center, "")
+
+            # Test cursor mapping
+            self.assertEqual(w._cursor_for_edge("se"), "size_nw_se")
+            self.assertEqual(w._cursor_for_edge("nw"), "size_nw_se")
+            self.assertEqual(w._cursor_for_edge("ne"), "size_ne_sw")
+            self.assertEqual(w._cursor_for_edge("sw"), "size_ne_sw")
+            self.assertEqual(w._cursor_for_edge("w"), "size_we")
+            self.assertEqual(w._cursor_for_edge("e"), "size_we")
+            self.assertEqual(w._cursor_for_edge("n"), "size_ns")
+            self.assertEqual(w._cursor_for_edge("s"), "size_ns")
+            self.assertEqual(w._cursor_for_edge(""), "")
         finally:
             root.destroy()
+
+    def test_window_drag_unmaximize_and_resize_release(self):
+        """Verifies title dragging while maximized smoothly unmaximizes without jumping, and resize release persists normal geometry."""
+        import tkinter as tk
+        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyWindow(WindowChromeMixin):
+                def check_for_updates_manual(self): pass
+                def toggle_language(self): pass
+                def __init__(self, r):
+                    self.root = r
+                    self.width = 850
+                    self.height = 650
+                    self.dpi_scale = 1.0
+                    self._init_theme()
+                    self._setup_window()
+                    self._build_title_bar(r)
+
+            w = DummyWindow(root)
+            w._is_maximized = True
+            w._normal_geometry = "850x650+100+100"
+            w.root.geometry("1920x1040+0+0")
+            w.btn_max.configure(text="❐")
+
+            # Mouse press at x_root=1600 (near right side, ratio ~ 0.833), y_root=20
+            press_evt = MagicMock()
+            press_evt.x_root = 1600
+            press_evt.y_root = 20
+            w._on_title_press(press_evt)
+
+            # Drag event
+            drag_evt = MagicMock()
+            drag_evt.x_root = 1610
+            drag_evt.y_root = 25
+            drag_evt.y = 20
+            w._on_title_drag(drag_evt)
+
+            # Window must now be unmaximized, btn_max updated to '□', and geometry restored to 850x650
+            self.assertFalse(w._is_maximized)
+            self.assertEqual(w.btn_max.cget("text"), "□")
+            geo = w.root.geometry()
+            self.assertTrue(geo.startswith("850x650+"), f"Expected 850x650 restored size, got {geo}")
+
+            # Verify resize press, drag, release updates _normal_geometry
+            r_press = MagicMock()
+            r_press.x_root, r_press.y_root = 100, 100
+            w._on_resize_press(r_press, "se")
+            r_drag = MagicMock()
+            r_drag.x_root, r_drag.y_root = 150, 150
+            w._on_resize_drag(r_drag)
+            w._on_resize_release(MagicMock())
+            self.assertTrue(w._normal_geometry.startswith("900x700+"), f"Expected 900x700, got {w._normal_geometry}")
+        finally:
+            root.destroy()
+
+    def test_tiktok_direct_rehydration_with_gzip_and_attribute_order(self):
+        """Verifies _extract_tiktok_direct handles gzip compressed responses and script tags where type precedes id."""
+        import gzip
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        rehydration_json = {
+            "__DEFAULT_SCOPE__": {
+                "webapp.video-detail": {
+                    "itemInfo": {
+                        "itemStruct": {
+                            "id": "999888777",
+                            "desc": "Gzip compressed TikTok test",
+                            "video": {
+                                "duration": 12,
+                                "width": 720,
+                                "height": 1280,
+                                "playAddr": "https://v16.tiktokcdn.com/play_gzip.mp4",
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        # Notice: type="application/json" comes BEFORE id="__UNIVERSAL_DATA_FOR_REHYDRATION__"
+        html = f'<html><head><script type="application/json" id="__UNIVERSAL_DATA_FOR_REHYDRATION__">{json.dumps(rehydration_json)}</script></head><body></body></html>'
+        compressed_bytes = gzip.compress(html.encode("utf-8"))
+
+        mock_resp = MagicMock()
+        mock_resp.geturl.return_value = "https://www.tiktok.com/@creator/video/999888777"
+        mock_resp.read.return_value = compressed_bytes
+        mock_resp.headers = {"Content-Encoding": "gzip"}
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.OpenerDirector.open", return_value=mock_resp):
+            info = resolver._extract_tiktok_direct("https://vt.tiktok.com/ZSgG75rWv/")
+            self.assertIsNotNone(info)
+            self.assertEqual(info["id"], "999888777")
+            self.assertIn("Gzip compressed", info["title"])
+            self.assertEqual(len(info["formats"]), 1)
+            self.assertEqual(info["formats"][0]["url"], "https://v16.tiktokcdn.com/play_gzip.mp4")
 
     def test_youtube_download_controller_exception_dispatch(self):
         """Verifies _start_youtube_download exception handler properly dispatches err_msg without NameError."""
