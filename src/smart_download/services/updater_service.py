@@ -41,7 +41,7 @@ from typing import Dict, List, Optional, Tuple, Callable, Any
 
 APP_NAME = "Smart Download (SD)"
 APP_ID = "SmartDownload"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 
 GITHUB_REPO_OWNER = "hozifa460"
 GITHUB_REPO_NAME = "smart-download-sd"

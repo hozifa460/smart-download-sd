@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Smart Download (SD) Integration",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1J5wOUE1L6ZT7SQPz9qFAN9GmVq1U2n6c2pLLqTKRj2g5FEkR4F9N82rLfKj3WX0nfbvkr0vn3gMkCRjTKeLjF6227OI4kMoE/0Iz0FxioF2a4GQYPJJopyXq1V505DbAWVuh0QBb1R7dcbvCa2yMGM5eL4uERu36n7Pr1yTSh8jp2Lf80nb/qZExqRmLPuskHQS0kh9wLNyOvqgnu0YOCOr76e0lTRUbcFv7aSwN5Kj8LO/ltBnWcCmgm0EZhC3jY6vWUzkkAEo+nqcMpC68cNiSAjVNPap5vo12U0hUPZP+vbOE1+NpMmAjFnp6pCFDPU9gsYD7JvVU/vnVGl92wIDAQAB",
   "description": "Seamlessly intercepts browser downloads and media streams into Smart Download (SD) with dynamic multi-chunk acceleration.",
   "permissions": [

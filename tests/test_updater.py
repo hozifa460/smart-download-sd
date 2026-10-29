@@ -104,7 +104,7 @@ class TestVersionComparisonAndUnification(unittest.TestCase):
         import updater
         import youtube_resolver
 
-        expected = "2.0.1"
+        expected = "2.0.2"
         self.assertEqual(updater.APP_VERSION, expected)
         self.assertEqual(turbo_downloader.APP_VERSION, expected)
         self.assertEqual(youtube_resolver.APP_VERSION, expected)
@@ -129,7 +129,7 @@ class TestVersionComparisonAndUnification(unittest.TestCase):
                 url = f"http://127.0.0.1:{srv.port}{endpoint}"
                 with urllib.request.urlopen(url, timeout=2.0) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
-                    self.assertEqual(data.get("version"), "2.0.1")
+                    self.assertEqual(data.get("version"), "2.0.2")
         finally:
             srv.stop()
 

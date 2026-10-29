@@ -2964,6 +2964,41 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
                 pass
 
 
+class TestMainToolbarCleanup(unittest.TestCase):
+    """Tests for main toolbar cleanup, version bump to 2.0.2, and file copy retry logic."""
+
+    def test_copy_file_with_retry_handles_transient_permission_error(self):
+        """Verifies _copy_file_with_retry recovers from transient PermissionError."""
+        from smart_download.installer.installer_ops import _copy_file_with_retry
+
+        call_count = 0
+        def mock_copy2(src, dst):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise PermissionError(13, "WinError 32: The process cannot access the file because it is being used by another process")
+            return dst
+
+        with patch("shutil.copy2", side_effect=mock_copy2), \
+             patch("smart_download.installer.installer_ops.terminate_running_app") as mock_term, \
+             patch("time.sleep"):
+            _copy_file_with_retry("dummy_src.exe", "dummy_dst.exe", retries=5, delay=0.01)
+            self.assertEqual(call_count, 3)
+            self.assertEqual(mock_term.call_count, 2)
+
+    def test_app_version_is_2_0_2(self):
+        """Verifies APP_VERSION has been bumped to 2.0.2 across modules."""
+        from smart_download.config import APP_VERSION
+        from smart_download import __version__
+        from smart_download.installer.installer_registry import APP_VERSION as REG_VER
+        from smart_download.services.updater_service import APP_VERSION as UPD_VER
+
+        self.assertEqual(APP_VERSION, "2.0.2")
+        self.assertEqual(__version__, "2.0.2")
+        self.assertEqual(REG_VER, "2.0.2")
+        self.assertEqual(UPD_VER, "2.0.2")
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -1,7 +1,7 @@
 """
 Smart Download (SD) — High-Performance Enterprise Modular Download Engine
 """
-__version__ = "2.0.1"
+__version__ = "2.0.2"
 
 from .config import (
     APP_NAME,

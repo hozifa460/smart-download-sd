@@ -310,20 +310,30 @@ def main():
             default_dir = get_default_install_dir()
             if os.path.exists(default_dir):
                 print(f"[*] Updating installed application in default directory: {default_dir}")
+                terminate_running_app()
                 try:
+                    install_application(
+                        target_dir=default_dir,
+                        register_browser=True,
+                        create_desktop=True,
+                        create_start_menu=True,
+                        register_startup=True
+                    )
+                except Exception as first_err:
+                    print(f"[*] Retrying installation after explicit process termination: {first_err}")
                     terminate_running_app()
-                except Exception:
-                    pass
-                install_application(
-                    target_dir=default_dir,
-                    register_browser=True,
-                    create_desktop=True,
-                    create_start_menu=True,
-                    register_startup=True
-                )
+                    time.sleep(0.5)
+                    install_application(
+                        target_dir=default_dir,
+                        register_browser=True,
+                        create_desktop=True,
+                        create_start_menu=True,
+                        register_startup=True
+                    )
                 print(f"[+] Updated installed application in {default_dir}")
         except Exception as e:
-            print(f"[-] Error updating installed application in default directory: {e}")
+            print(f"[!] CRITICAL FAILURE: Error updating installed application in default directory: {e}")
+            raise
 
     if not args.installer_only:
         print("[*] Packaging and applying core patch...")

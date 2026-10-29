@@ -196,6 +196,29 @@ def terminate_running_app():
     time.sleep(0.3)
 
 
+def _copy_file_with_retry(src: str, dst: str, retries: int = 10, delay: float = 0.3):
+    """Copies src to dst with retry logic, terminating locking processes and removing read-only flags."""
+    for attempt in range(retries):
+        try:
+            if os.path.exists(dst):
+                try:
+                    os.chmod(dst, 0o777)
+                except Exception:
+                    pass
+            shutil.copy2(src, dst)
+            return
+        except (PermissionError, OSError):
+            if attempt == retries - 1:
+                raise
+            terminate_running_app()
+            if os.path.exists(dst):
+                try:
+                    os.chmod(dst, 0o777)
+                except Exception:
+                    pass
+            time.sleep(delay * (attempt + 1))
+
+
 def install_application(
     target_dir: str = DEFAULT_INSTALL_DIR,
     create_desktop: bool = True,
@@ -251,9 +274,9 @@ def install_application(
     # 1. Copy SmartDownload.exe
     exe_dest = os.path.join(target_dir, "SmartDownload.exe")
     if "SmartDownload.exe" in sources:
-        shutil.copy2(sources["SmartDownload.exe"], exe_dest)
+        _copy_file_with_retry(sources["SmartDownload.exe"], exe_dest)
     elif "TurboDownloader.exe" in sources:
-        shutil.copy2(sources["TurboDownloader.exe"], exe_dest)
+        _copy_file_with_retry(sources["TurboDownloader.exe"], exe_dest)
     else:
         # If running from source and SmartDownload.exe not pre-built, create a placeholder/copy
         if not os.path.exists(exe_dest):
@@ -273,11 +296,11 @@ def install_application(
     # 2. Copy icons
     ico_dest = os.path.join(target_dir, "app_icon.ico")
     if "app_icon.ico" in sources:
-        shutil.copy2(sources["app_icon.ico"], ico_dest)
+        _copy_file_with_retry(sources["app_icon.ico"], ico_dest)
 
     png_dest = os.path.join(target_dir, "app_icon.png")
     if "app_icon.png" in sources:
-        shutil.copy2(sources["app_icon.png"], png_dest)
+        _copy_file_with_retry(sources["app_icon.png"], png_dest)
 
     # 3. Copy extension directory
     ext_dest = os.path.join(target_dir, "extension")
@@ -288,15 +311,15 @@ def install_application(
 
     # 4. Copy register_browser.py and host_manifest.py if present
     if "register_browser.py" in sources:
-        shutil.copy2(sources["register_browser.py"], os.path.join(target_dir, "register_browser.py"))
+        _copy_file_with_retry(sources["register_browser.py"], os.path.join(target_dir, "register_browser.py"))
     if "host_manifest.py" in sources:
-        shutil.copy2(sources["host_manifest.py"], os.path.join(target_dir, "host_manifest.py"))
+        _copy_file_with_retry(sources["host_manifest.py"], os.path.join(target_dir, "host_manifest.py"))
 
     # 5. Place uninstaller executable
     uninstaller_dest = os.path.join(target_dir, "Uninstall.exe")
     if getattr(sys, "frozen", False):
         try:
-            shutil.copy2(sys.executable, uninstaller_dest)
+            _copy_file_with_retry(sys.executable, uninstaller_dest)
         except Exception:
             pass
     if not os.path.exists(uninstaller_dest):
