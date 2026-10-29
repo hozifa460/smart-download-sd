@@ -186,17 +186,17 @@ class TestBackgroundAndMinimizedLaunch(unittest.TestCase):
             # Initial state
             init_state = is_startup_enabled()
             if init_state:
-                self.assertEqual(gui.btn_startup.cget("text"), "🚀 Boot: ON")
+                self.assertEqual(gui.btn_startup.cget("text"), "⚡ Boot: ON")
             else:
-                self.assertEqual(gui.btn_startup.cget("text"), "🚀 Boot: OFF")
+                self.assertEqual(gui.btn_startup.cget("text"), "⚡ Boot: OFF")
 
             # Toggle state
             toggled = gui.toggle_startup_setting()
             self.assertEqual(toggled, not init_state)
             if toggled:
-                self.assertEqual(gui.btn_startup.cget("text"), "🚀 Boot: ON")
+                self.assertEqual(gui.btn_startup.cget("text"), "⚡ Boot: ON")
             else:
-                self.assertEqual(gui.btn_startup.cget("text"), "🚀 Boot: OFF")
+                self.assertEqual(gui.btn_startup.cget("text"), "⚡ Boot: OFF")
 
             # Toggle back to restore
             gui.toggle_startup_setting()

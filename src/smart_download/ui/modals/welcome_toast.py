@@ -4,8 +4,11 @@ StartupWelcomeToast: Sleek, frameless, dark-themed floating welcome toast displa
 import os
 import sys
 import ctypes
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = ttk = None  # type: ignore
 from typing import Optional, Callable, Dict, Any, List
 
 try:
@@ -19,14 +22,16 @@ from ...locales.i18n import tr
 from ...utils.dpi import get_windows_work_area
 from ...utils.tk_helpers import _detach_photo_tk
 
-class StartupWelcomeToast(tk.Toplevel):
+_BaseToplevel = tk.Toplevel if tk is not None else object
+
+class StartupWelcomeToast(_BaseToplevel):
     """
     Sleek, frameless, dark-themed floating welcome toast displayed upon application startup
     when launched minimized or hidden in the Windows system tray.
     """
     def __init__(
         self,
-        parent: Optional[tk.Tk],
+        parent: Optional[Any],
         parent_app: Optional[Any] = None,
         theme: Optional[Dict[str, str]] = None,
         duration_ms: int = 4000

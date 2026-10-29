@@ -7,8 +7,12 @@ import time
 import threading
 from typing import Optional, Dict, Any, List
 
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = None  # type: ignore
+    ttk = None  # type: ignore
 
 from ...locales.i18n import tr
 from ...utils.file_ops import open_downloaded_file, open_containing_folder, generate_unique_destination_path

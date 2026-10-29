@@ -130,7 +130,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         notebook.pack(fill=tk.BOTH, expand=True)
 
         # Tab 1: Chunk Details Table
-        tab_chunks = tk.Frame(notebook, bg=self.c_panel)
+        tab_chunks = tk.Frame(notebook, bg=self.c_panel, bd=0, highlightthickness=1, highlightbackground=self.c_border)
         notebook.add(tab_chunks, text=tr("tab_chunks", "  ▦ Chunk Segments  "))
 
         cols = ("id", "range", "size", "downloaded", "pct", "status")
@@ -160,7 +160,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         self.tree_chunks.bind("<Button-2>", self._show_tree_context_menu)
 
         # Tab 2: Activity Console Log
-        tab_logs = tk.Frame(notebook, bg=self.c_panel)
+        tab_logs = tk.Frame(notebook, bg=self.c_panel, bd=0, highlightthickness=1, highlightbackground=self.c_border)
         notebook.add(tab_logs, text=tr("tab_logs", "  ▤ Live Activity Log  "))
 
         self.txt_log = tk.Text(
@@ -182,7 +182,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         self.notebook = notebook
 
         # Tab 3: Download History Manager
-        tab_history = tk.Frame(notebook, bg=self.c_panel)
+        tab_history = tk.Frame(notebook, bg=self.c_panel, bd=0, highlightthickness=1, highlightbackground=self.c_border)
         notebook.add(tab_history, text=tr("tab_history", "  ☰ Download History  "))
 
         # Top Toolbar
@@ -404,7 +404,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
             command=self._menu_resume
         )
         self.tree_context_menu.add_command(
-            label=tr("ctx_pause_download", "❚❚ Pause Download"),
+            label=tr("ctx_pause_download", "|| Pause Download"),
             command=self._menu_pause
         )
         self.tree_context_menu.add_command(
@@ -445,7 +445,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         elif self.engine and not self.engine.is_running:
             self.engine.resume_transfer()
             self.btn_start.configure(state="disabled")
-            self.btn_pause.configure(state="normal", text=tr("btn_pause", "❚❚ Pause"), bg=self.c_panel_light)
+            self.btn_pause.configure(state="normal", text=tr("btn_pause", "|| Pause"), bg=self.c_panel_light)
             self.btn_cancel.configure(state="normal")
             if hasattr(self, "btn_refresh_link"):
                 self.btn_refresh_link.configure(state="normal")

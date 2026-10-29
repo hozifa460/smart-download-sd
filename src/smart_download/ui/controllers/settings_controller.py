@@ -137,7 +137,7 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
                     "vivaldi": "Vivaldi",
                 }
                 display_val = display_names.get(cb, cb.capitalize())
-        prefix = tr("btn_cookies_prefix", "🍪 الكوكيز:").strip()
+        prefix = tr("btn_cookies_prefix", "◆ Cookies:").strip()
         return f"{prefix} {display_val}"
 
     def _update_cookies_btn(self):

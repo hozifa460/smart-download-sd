@@ -19,7 +19,7 @@ class LocaleControllerMixin:
         """Dynamically re-translates and updates all main UI widgets in-place."""
         cur_lang = LocalizationManager.get_instance().get_language()
         if hasattr(self, "btn_lang_toggle") and self.btn_lang_toggle.winfo_exists():
-            self.btn_lang_toggle.configure(text="🌐 English" if cur_lang == "ar" else "🌐 العربية")
+            self.btn_lang_toggle.configure(text="⇄ English" if cur_lang == "ar" else "⇄ العربية")
 
         if hasattr(self, "title_lbl") and self.title_lbl.winfo_exists():
             self.title_lbl.configure(text=tr("app_header"))

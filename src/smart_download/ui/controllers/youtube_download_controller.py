@@ -356,7 +356,7 @@ class YouTubeDownloadControllerMixin:
         try:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, final_dest)
-            self.btn_pause.configure(state="normal", text=tr("btn_pause", "❚❚ Pause"), bg=self.c_panel_light)
+            self.btn_pause.configure(state="normal", text=tr("btn_pause", "|| Pause"), bg=self.c_panel_light)
             self.btn_cancel.configure(state="normal")
             self.btn_start.configure(state="disabled")
         except Exception:

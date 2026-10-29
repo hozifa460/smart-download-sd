@@ -8,8 +8,11 @@ import threading
 import urllib.parse
 from typing import Optional, Callable, Dict, Any, Tuple
 
-import tkinter as tk
-from tkinter import filedialog, messagebox
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox
+except Exception:
+    tk = filedialog = messagebox = None  # type: ignore
 
 from ...config import get_base_downloads_dir, set_setting
 from ...locales.i18n import tr
@@ -362,7 +365,7 @@ class ConfirmModalLogicMixin:
                         if getattr(self.engine, "is_paused", False):
                             self.parent_app.btn_pause.configure(text=tr("btn_resume", "▶ Resume"), bg=getattr(self.parent_app, "c_warning", "#f59e0b"), state="normal")
                         else:
-                            self.parent_app.btn_pause.configure(text=tr("btn_pause", "❚❚ Pause"), bg=getattr(self.parent_app, "c_panel_light", "#334155"), state="normal")
+                            self.parent_app.btn_pause.configure(text=tr("btn_pause", "|| Pause"), bg=getattr(self.parent_app, "c_panel_light", "#334155"), state="normal")
                     if hasattr(self.parent_app, "btn_cancel"):
                         self.parent_app.btn_cancel.configure(state="normal")
                     if hasattr(self.parent_app, "btn_start"):
@@ -439,11 +442,11 @@ class ConfirmModalLogicMixin:
                 self.engine.resume()
             except Exception:
                 pass
-            self.btn_pause_resume.configure(text=tr("btn_pause", "❚❚ Pause"), bg=self.c_panel_light)
+            self.btn_pause_resume.configure(text=tr("btn_pause", "|| Pause"), bg=self.c_panel_light)
             self.lbl_status.configure(text=f"{tr('col_chunk_status', 'Status')}: {tr('status_in_progress', 'Downloading...')}", fg=self.c_accent)
             if self.parent_app and hasattr(self.parent_app, "btn_pause"):
                 try:
-                    self.parent_app.btn_pause.configure(text=tr("btn_pause", "❚❚ Pause"), bg=getattr(self.parent_app, "c_panel_light", "#334155"))
+                    self.parent_app.btn_pause.configure(text=tr("btn_pause", "|| Pause"), bg=getattr(self.parent_app, "c_panel_light", "#334155"))
                 except Exception:
                     pass
         else:
@@ -515,7 +518,7 @@ class ConfirmModalLogicMixin:
                 if was_running:
                     self.parent_app.engine = None
                     self.parent_app.btn_start.configure(state="normal")
-                    self.parent_app.btn_pause.configure(state="disabled", text=tr("btn_pause", "❚❚ Pause"))
+                    self.parent_app.btn_pause.configure(state="disabled", text=tr("btn_pause", "|| Pause"))
                     self.parent_app.btn_cancel.configure(state="disabled")
                     self.parent_app.card_size.configure(text=tr("status_cancelled", "Cancelled"))
                     self.parent_app.log(f"[CLIPBOARD] Standalone download cancelled: {self.file_name}")

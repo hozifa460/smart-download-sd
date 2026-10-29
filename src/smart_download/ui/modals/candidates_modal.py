@@ -3,8 +3,12 @@ MultipleCandidatesModal: Interactive selection dialog when page sniffer extracts
 """
 import os
 import sys
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = None  # type: ignore
+    ttk = None  # type: ignore
 from typing import Optional, Callable, Dict, Any, List
 try:
     from PIL import Image, ImageTk
@@ -19,7 +23,9 @@ from ...utils.url_utils import derive_download_filename
 from ...services.youtube_service import format_filesize
 from ...utils.tk_helpers import _detach_photo_tk
 
-class MultipleCandidatesModal(tk.Toplevel):
+_BaseToplevel = tk.Toplevel if tk is not None else object
+
+class MultipleCandidatesModal(_BaseToplevel):
     """
     Sleek, modern, dark-themed Tkinter modal dialog displayed when multiple
     download candidate links are detected on a landing page or download page.

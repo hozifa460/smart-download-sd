@@ -28,8 +28,8 @@ class InputsPanelMixin(ControlsPanelMixin):
         url_row = tk.Frame(card, bg=self.c_panel)
         url_row.pack(fill=tk.X, pady=2)
 
-        self.lbl_url = tk.Label(url_row, text=tr("lbl_url"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
-        self.lbl_url.pack(side=tk.LEFT)
+        self.lbl_url = tk.Label(url_row, text=tr("lbl_url"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=14, anchor="w")
+        self.lbl_url.pack(side=tk.LEFT, padx=(0, 6))
 
         self.url_var = tk.StringVar(value="")
         self.entry_url = tk.Entry(
@@ -70,8 +70,8 @@ class InputsPanelMixin(ControlsPanelMixin):
         dest_row = tk.Frame(card, bg=self.c_panel)
         dest_row.pack(fill=tk.X, pady=(6, 2))
 
-        self.lbl_dest = tk.Label(dest_row, text=tr("lbl_dest"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
-        self.lbl_dest.pack(side=tk.LEFT)
+        self.lbl_dest = tk.Label(dest_row, text=tr("lbl_dest"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=14, anchor="w")
+        self.lbl_dest.pack(side=tk.LEFT, padx=(0, 6))
 
         default_dir = os.path.join(os.path.expanduser("~"), "Downloads")
         self.dest_var = tk.StringVar(value=default_dir)

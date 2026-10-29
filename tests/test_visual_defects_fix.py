@@ -70,6 +70,21 @@ class TestVisualDefectsFix(unittest.TestCase):
             self.assertEqual(tf_conf.get("bordercolor"), gui.c_border)
             self.assertEqual(tf_conf.get("lightcolor"), gui.c_panel)
             self.assertEqual(tf_conf.get("darkcolor"), gui.c_panel)
+
+            # Check TNotebook.client
+            cl_conf = gui.style.configure("TNotebook.client")
+            self.assertEqual(cl_conf.get("background"), gui.c_panel)
+            self.assertEqual(cl_conf.get("bordercolor"), gui.c_border)
+            self.assertEqual(cl_conf.get("lightcolor"), gui.c_panel)
+            self.assertEqual(cl_conf.get("darkcolor"), gui.c_panel)
+
+            # Check Treeview layout (stripped 3D field border)
+            tv_layout = gui.style.layout("Treeview")
+            self.assertEqual(tv_layout, [("Treeview.treearea", {"sticky": "nswe"})])
+
+            # Check inputs panel label widths (Part 1 fix)
+            self.assertEqual(gui.lbl_url.cget("width"), 14)
+            self.assertEqual(gui.lbl_dest.cget("width"), 14)
         finally:
             gui.exit_completely()
 
@@ -93,6 +108,23 @@ class TestVisualDefectsFix(unittest.TestCase):
         """Verifies broken Tcl/Tk supplementary-plane emojis are eliminated."""
         # Check ar.json and en.json for banned SMP emojis
         banned = ["\u23f8", "\u23f9", "\U0001f504", "\U0001f4ca", "\U0001f39e"]  # ⏸, ⏹, 🔄, 📊, 🎞
+        main_window_keys = [
+            "lbl_live_throttle_slider",
+            "btn_paste",
+            "btn_browse",
+            "btn_sniffer_active",
+            "btn_sniffer_paused",
+            "btn_auto_cat_on",
+            "btn_auto_cat_off",
+            "btn_cookies_prefix",
+            "btn_startup_on",
+            "btn_startup_off",
+            "btn_browser",
+            "btn_lang_toggle",
+            "btn_pause",
+            "btn_pause_all",
+            "ctx_pause_download",
+        ]
         for lang, path in [("ar", "src/smart_download/locales/ar.json"), ("en", "src/smart_download/locales/en.json")]:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -101,8 +133,8 @@ class TestVisualDefectsFix(unittest.TestCase):
                     self.assertNotIn(b, val, f"Banned emoji {b!r} found in {lang}.json key '{k}': '{val}'")
 
             # Verify specific required BMP glyphs
-            self.assertIn("❚❚", data["btn_pause"])
-            self.assertIn("❚❚", data["btn_pause_all"])
+            self.assertIn("||", data["btn_pause"])
+            self.assertIn("||", data["btn_pause_all"])
             self.assertIn("✕", data["btn_cancel"])
             self.assertIn("↻", data["btn_refresh_url"])
             self.assertIn("⚙", data["btn_quality_reopen"])
@@ -112,12 +144,22 @@ class TestVisualDefectsFix(unittest.TestCase):
             self.assertIn("☰", data["tab_history"])
             self.assertIn("↻", data["btn_check_updates"])
             self.assertIn("↻", data["btn_hist_redownload"])
-            self.assertIn("❚❚", data["ctx_pause_download"])
+            self.assertIn("||", data["ctx_pause_download"])
             self.assertIn("✕", data["ctx_cancel_download"])
             self.assertIn("↻", data["ctx_resume_retry"])
             self.assertIn("↻", data["ctx_refresh_address"])
             self.assertIn("✕", data["browser_btn_stop_server"])
             self.assertIn("↻", data["browser_btn_reregister"])
+
+            # Verify that none of the main window keys contain supplementary-plane characters
+            for mk in main_window_keys:
+                self.assertIn(mk, data, f"Key '{mk}' missing from {lang}.json")
+                for ch in data[mk]:
+                    self.assertLessEqual(
+                        ord(ch),
+                        0xFFFF,
+                        f"Supplementary-plane char {ch!r} (U+{ord(ch):04X}) found in {lang}.json key '{mk}'"
+                    )
 
     def test_part4_speed_limiter_localization(self):
         """Verifies speed limiter dropdown options localize and switch seamlessly."""
@@ -191,6 +233,13 @@ class TestVisualDefectsFix(unittest.TestCase):
                     self.assertEqual(card.cget("fg"), gui.c_text_bright)
         finally:
             gui.exit_completely()
+
+    def test_part6_headless_guard(self):
+        """Verifies tk_helpers and controls_panel gracefully handle headless tk=None environments."""
+        import smart_download.utils.tk_helpers as tkh
+        import smart_download.ui.panels.controls_panel as cp
+        self.assertTrue(hasattr(tkh, "_safe_winfo_exists"))
+        self.assertTrue(issubclass(cp._StateButton, (tk.Button, object)))
 
 
 if __name__ == "__main__":

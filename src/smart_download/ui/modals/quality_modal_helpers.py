@@ -3,7 +3,10 @@ Helper functions and banner builder for QualitySelectionModal (quality_modal_hel
 Provides track attachment, destination path resolution, and embedded preview banner creation.
 """
 import os
-import tkinter as tk
+try:
+    import tkinter as tk
+except Exception:
+    tk = None  # type: ignore
 from typing import Optional, Dict, Any, List
 
 from ...config import get_base_downloads_dir

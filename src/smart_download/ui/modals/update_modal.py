@@ -4,8 +4,11 @@ AppUpdateModal: Dialog presenting GitHub Release updates with live download prog
 import os
 import sys
 import threading
-import tkinter as tk
-from tkinter import ttk, messagebox
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+except Exception:
+    tk = ttk = messagebox = None  # type: ignore
 from typing import Optional, Callable, Dict, Any
 try:
     from PIL import Image, ImageTk
@@ -20,7 +23,9 @@ from ...services.updater_service import AppAutoUpdater
 from ...services.youtube_service import format_filesize
 from ...utils.tk_helpers import _detach_photo_tk
 
-class AppUpdateModal(tk.Toplevel):
+_BaseToplevel = tk.Toplevel if tk is not None else object
+
+class AppUpdateModal(_BaseToplevel):
     """
     Sleek, non-blocking, dark-themed application update notification and installer download dialog.
     Displays the new version, release notes summary, live download progress bar, and a one-click

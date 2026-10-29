@@ -13,7 +13,10 @@ from smart_download.config import get_setting, set_setting
 from smart_download.ui.components.tooltip import ToolTip
 
 
-class _StateButton(tk.Button):
+_BaseButton = tk.Button if tk is not None else object
+
+
+class _StateButton(_BaseButton):
     """Button subclass that automatically shifts background and foreground according to state."""
 
     def __init__(self, master=None, active_bg=None, disabled_bg=None, active_fg="#ffffff", disabled_fg="#64748b", **kwargs):
@@ -152,7 +155,7 @@ class ControlsPanelMixin:
         self.lbl_slider_title.pack(side=tk.LEFT, padx=(0, 8))
 
         slider_len = max(20, int(22 * getattr(self, "dpi_scale", 1.0)))
-        slider_w = max(12, int(12 * getattr(self, "dpi_scale", 1.0)))
+        slider_w = max(14, int(16 * getattr(self, "dpi_scale", 1.0)))
         self.slider_speed = tk.Scale(
             row_slider,
             from_=0,
@@ -227,7 +230,7 @@ class ControlsPanelMixin:
 
         self.btn_pause = _StateButton(
             row_transfers,
-            text=tr("btn_pause", "❚❚ Pause"),
+            text=tr("btn_pause", "|| Pause"),
             font=("Segoe UI", 9, "bold"),
             active_bg=self.c_panel_light,
             disabled_bg="#182234",
@@ -297,7 +300,7 @@ class ControlsPanelMixin:
 
         self.btn_clipboard_sniffer = tk.Button(
             row_toggles,
-            text=tr("btn_sniffer_active", "📋 Sniffer: Active"),
+            text=tr("btn_sniffer_active", "● Sniffer: Active"),
             font=("Segoe UI", 8, "bold"),
             bg="#0f292a",
             fg=self.c_success,
@@ -317,7 +320,7 @@ class ControlsPanelMixin:
 
         self.btn_auto_cat = tk.Button(
             row_toggles,
-            text=tr("btn_auto_cat_on", "📁 Auto-Sort: ON") if getattr(self, "auto_categorize_folders", True) else tr("btn_auto_cat_off", "📁 Auto-Sort: OFF"),
+            text=tr("btn_auto_cat_on", "❖ Auto-Sort: ON") if getattr(self, "auto_categorize_folders", True) else tr("btn_auto_cat_off", "❖ Auto-Sort: OFF"),
             font=("Segoe UI", 8, "bold"),
             relief="flat",
             bg="#0f292a" if getattr(self, "auto_categorize_folders", True) else "#182234",
@@ -338,7 +341,7 @@ class ControlsPanelMixin:
 
         self.btn_cookies = tk.Button(
             row_toggles,
-            text=self._get_cookies_btn_text() if hasattr(self, "_get_cookies_btn_text") else "🍪 Cookies: Auto",
+            text=self._get_cookies_btn_text() if hasattr(self, "_get_cookies_btn_text") else "◆ Cookies: Auto",
             font=("Segoe UI", 8, "bold"),
             relief="flat",
             bg="#182234",
@@ -358,7 +361,7 @@ class ControlsPanelMixin:
 
         self.btn_startup = tk.Button(
             row_toggles,
-            text=tr("btn_startup_off", "🚀 Boot: OFF"),
+            text=tr("btn_startup_off", "⚡ Boot: OFF"),
             font=("Segoe UI", 8, "bold"),
             relief="flat",
             bg="#182234",
@@ -379,7 +382,7 @@ class ControlsPanelMixin:
 
         self.btn_browser = tk.Button(
             row_toggles,
-            text=tr("btn_browser", "🌐 Settings & Integration"),
+            text=tr("btn_browser", "⚙ Browser Integration"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,

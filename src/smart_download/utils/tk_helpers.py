@@ -6,8 +6,12 @@ import gc
 import weakref
 import threading
 import queue
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = None  # type: ignore
+    ttk = None  # type: ignore
 from typing import Any, Tuple, Callable, Optional
 
 def _detach_photo_tk(photo: Any) -> None:
@@ -45,7 +49,7 @@ def _detach_widget_tk_refs(obj: Any) -> None:
             for v in list(d.values()):
                 if v is None:
                     continue
-                if isinstance(v, (tk.Variable, tk.Image, ttk.Style)) or hasattr(v, "_PhotoImage__photo"):
+                if (tk is not None and isinstance(v, (tk.Variable, tk.Image, ttk.Style if ttk is not None else ()))) or hasattr(v, "_PhotoImage__photo"):
                     _detach_photo_tk(v)
         if hasattr(obj, "master"):
             obj.master = None
@@ -57,11 +61,14 @@ def _detach_widget_tk_refs(obj: Any) -> None:
         pass
 
 
-_EXISTING_QUEUE = getattr(tk.Misc, "_sd_bg_callback_queue", None)
-if _EXISTING_QUEUE is None:
-    _EXISTING_QUEUE = queue.Queue()
-    setattr(tk.Misc, "_sd_bg_callback_queue", _EXISTING_QUEUE)
-_BG_TK_CALLBACK_QUEUE: "queue.Queue[Tuple[Any, Callable, Tuple]]" = _EXISTING_QUEUE
+if tk is not None:
+    _EXISTING_QUEUE = getattr(tk.Misc, "_sd_bg_callback_queue", None)
+    if _EXISTING_QUEUE is None:
+        _EXISTING_QUEUE = queue.Queue()
+        setattr(tk.Misc, "_sd_bg_callback_queue", _EXISTING_QUEUE)
+    _BG_TK_CALLBACK_QUEUE: "queue.Queue[Tuple[Any, Callable, Tuple]]" = _EXISTING_QUEUE
+else:
+    _BG_TK_CALLBACK_QUEUE = queue.Queue()
 
 
 def _drain_bg_tk_callbacks() -> None:
@@ -81,43 +88,57 @@ def _drain_bg_tk_callbacks() -> None:
             pass
 
 
-if not hasattr(tk.Misc, "_sd_orig_destroy"):
-    tk.Misc._sd_orig_destroy = tk.Misc.destroy
-if not hasattr(tk.Misc, "_sd_orig_Toplevel_destroy"):
-    tk.Misc._sd_orig_Toplevel_destroy = tk.Toplevel.destroy
-if not hasattr(tk.Misc, "_sd_orig_after"):
-    tk.Misc._sd_orig_after = tk.Misc.after
-if not hasattr(tk.Misc, "_sd_orig_after_idle"):
-    tk.Misc._sd_orig_after_idle = tk.Misc.after_idle
-if not hasattr(tk.Misc, "_sd_orig_update"):
-    tk.Misc._sd_orig_update = tk.Misc.update
-if not hasattr(tk.Misc, "_sd_orig_update_idletasks"):
-    tk.Misc._sd_orig_update_idletasks = tk.Misc.update_idletasks
-if not hasattr(tk.Misc, "_sd_orig_after_cancel"):
-    tk.Misc._sd_orig_after_cancel = tk.Misc.after_cancel
-if not hasattr(tk.Misc, "_sd_orig_winfo_exists"):
-    tk.Misc._sd_orig_winfo_exists = tk.Misc.winfo_exists
-if not hasattr(tk.Misc, "_sd_orig_grab_release"):
-    tk.Misc._sd_orig_grab_release = tk.Misc.grab_release
-if not hasattr(tk.Misc, "_sd_orig_grab_current"):
-    tk.Misc._sd_orig_grab_current = tk.Misc.grab_current
-if not hasattr(tk.Misc, "_sd_orig_basewidget_destroy"):
-    tk.Misc._sd_orig_basewidget_destroy = tk.BaseWidget.destroy
-if not hasattr(tk.Misc, "_sd_orig_tk_destroy"):
-    tk.Misc._sd_orig_tk_destroy = tk.Tk.destroy
+if tk is not None:
+    if not hasattr(tk.Misc, "_sd_orig_destroy"):
+        tk.Misc._sd_orig_destroy = tk.Misc.destroy
+    if not hasattr(tk.Misc, "_sd_orig_Toplevel_destroy"):
+        tk.Misc._sd_orig_Toplevel_destroy = tk.Toplevel.destroy
+    if not hasattr(tk.Misc, "_sd_orig_after"):
+        tk.Misc._sd_orig_after = tk.Misc.after
+    if not hasattr(tk.Misc, "_sd_orig_after_idle"):
+        tk.Misc._sd_orig_after_idle = tk.Misc.after_idle
+    if not hasattr(tk.Misc, "_sd_orig_update"):
+        tk.Misc._sd_orig_update = tk.Misc.update
+    if not hasattr(tk.Misc, "_sd_orig_update_idletasks"):
+        tk.Misc._sd_orig_update_idletasks = tk.Misc.update_idletasks
+    if not hasattr(tk.Misc, "_sd_orig_after_cancel"):
+        tk.Misc._sd_orig_after_cancel = tk.Misc.after_cancel
+    if not hasattr(tk.Misc, "_sd_orig_winfo_exists"):
+        tk.Misc._sd_orig_winfo_exists = tk.Misc.winfo_exists
+    if not hasattr(tk.Misc, "_sd_orig_grab_release"):
+        tk.Misc._sd_orig_grab_release = tk.Misc.grab_release
+    if not hasattr(tk.Misc, "_sd_orig_grab_current"):
+        tk.Misc._sd_orig_grab_current = tk.Misc.grab_current
+    if not hasattr(tk.Misc, "_sd_orig_basewidget_destroy"):
+        tk.Misc._sd_orig_basewidget_destroy = tk.BaseWidget.destroy
+    if not hasattr(tk.Misc, "_sd_orig_tk_destroy"):
+        tk.Misc._sd_orig_tk_destroy = tk.Tk.destroy
 
-_ORIG_MISC_DESTROY = tk.Misc._sd_orig_destroy
-_ORIG_TOPLEVEL_DESTROY = tk.Misc._sd_orig_Toplevel_destroy
-_ORIG_MISC_AFTER = tk.Misc._sd_orig_after
-_ORIG_MISC_AFTER_IDLE = tk.Misc._sd_orig_after_idle
-_ORIG_MISC_UPDATE = tk.Misc._sd_orig_update
-_ORIG_MISC_UPDATE_IDLETASKS = tk.Misc._sd_orig_update_idletasks
-_ORIG_MISC_AFTER_CANCEL = tk.Misc._sd_orig_after_cancel
-_ORIG_MISC_WINFO_EXISTS = tk.Misc._sd_orig_winfo_exists
-_ORIG_MISC_GRAB_RELEASE = tk.Misc._sd_orig_grab_release
-_ORIG_MISC_GRAB_CURRENT = tk.Misc._sd_orig_grab_current
-_ORIG_BASEWIDGET_DESTROY = tk.Misc._sd_orig_basewidget_destroy
-_ORIG_TK_DESTROY = tk.Misc._sd_orig_tk_destroy
+    _ORIG_MISC_DESTROY = tk.Misc._sd_orig_destroy
+    _ORIG_TOPLEVEL_DESTROY = tk.Misc._sd_orig_Toplevel_destroy
+    _ORIG_MISC_AFTER = tk.Misc._sd_orig_after
+    _ORIG_MISC_AFTER_IDLE = tk.Misc._sd_orig_after_idle
+    _ORIG_MISC_UPDATE = tk.Misc._sd_orig_update
+    _ORIG_MISC_UPDATE_IDLETASKS = tk.Misc._sd_orig_update_idletasks
+    _ORIG_MISC_AFTER_CANCEL = tk.Misc._sd_orig_after_cancel
+    _ORIG_MISC_WINFO_EXISTS = tk.Misc._sd_orig_winfo_exists
+    _ORIG_MISC_GRAB_RELEASE = tk.Misc._sd_orig_grab_release
+    _ORIG_MISC_GRAB_CURRENT = tk.Misc._sd_orig_grab_current
+    _ORIG_BASEWIDGET_DESTROY = tk.Misc._sd_orig_basewidget_destroy
+    _ORIG_TK_DESTROY = tk.Misc._sd_orig_tk_destroy
+else:
+    _ORIG_MISC_DESTROY = None
+    _ORIG_TOPLEVEL_DESTROY = None
+    _ORIG_MISC_AFTER = None
+    _ORIG_MISC_AFTER_IDLE = None
+    _ORIG_MISC_UPDATE = None
+    _ORIG_MISC_UPDATE_IDLETASKS = None
+    _ORIG_MISC_AFTER_CANCEL = None
+    _ORIG_MISC_WINFO_EXISTS = None
+    _ORIG_MISC_GRAB_RELEASE = None
+    _ORIG_MISC_GRAB_CURRENT = None
+    _ORIG_BASEWIDGET_DESTROY = None
+    _ORIG_TK_DESTROY = None
 
 
 def _safe_winfo_exists(self):
@@ -254,9 +275,6 @@ def _safe_tk_destroy(self):
         _detach_widget_tk_refs(self)
 
 
-_ORIG_VARIABLE_DEL = getattr(tk.Variable, "__del__", None)
-
-
 def _safe_variable_del(self):
     tk_inst = getattr(self, "_tk", None)
     if tk_inst is None:
@@ -288,22 +306,26 @@ def _safe_variable_del(self):
         self._tclCommands = None
 
 
-if _ORIG_VARIABLE_DEL is not None:
-    tk.Variable.__del__ = _safe_variable_del
+if tk is not None:
+    _ORIG_VARIABLE_DEL = getattr(tk.Variable, "__del__", None)
+    if _ORIG_VARIABLE_DEL is not None:
+        tk.Variable.__del__ = _safe_variable_del
 
-tk.Misc.winfo_exists = _safe_winfo_exists
-tk.Misc.update = _safe_misc_update
-tk.Misc.update_idletasks = _safe_misc_update_idletasks
-tk.Misc.after = _safe_misc_after
-tk.Misc.after_idle = _safe_misc_after_idle
-tk.Misc.after_cancel = _safe_after_cancel
-tk.Misc.grab_release = _safe_grab_release
-tk.Misc.grab_current = _safe_grab_current
-tk.Misc.destroy = _safe_misc_destroy
-tk.Toplevel.destroy = _safe_toplevel_destroy
-tk.BaseWidget.destroy = _safe_basewidget_destroy
-tk.Tk.destroy = _safe_tk_destroy
-tk.Misc._sd_safe_destroy_patched = True
+    tk.Misc.winfo_exists = _safe_winfo_exists
+    tk.Misc.update = _safe_misc_update
+    tk.Misc.update_idletasks = _safe_misc_update_idletasks
+    tk.Misc.after = _safe_misc_after
+    tk.Misc.after_idle = _safe_misc_after_idle
+    tk.Misc.after_cancel = _safe_after_cancel
+    tk.Misc.grab_release = _safe_grab_release
+    tk.Misc.grab_current = _safe_grab_current
+    tk.Misc.destroy = _safe_misc_destroy
+    tk.Toplevel.destroy = _safe_toplevel_destroy
+    tk.BaseWidget.destroy = _safe_basewidget_destroy
+    tk.Tk.destroy = _safe_tk_destroy
+    tk.Misc._sd_safe_destroy_patched = True
+else:
+    _ORIG_VARIABLE_DEL = None
 
 
 def animate_window_open(win: Any, duration_ms: int = 140, steps: int = 7) -> None:

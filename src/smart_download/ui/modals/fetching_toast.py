@@ -4,15 +4,21 @@ FetchingLinkToast: Sleek, frameless toast notification for fetching/analyzing li
 import os
 import sys
 import urllib.parse
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = ttk = None  # type: ignore
 from typing import Optional, Callable, Dict, Any
 
 from ...locales.i18n import tr
 from ...utils.dpi import get_windows_work_area
 from ...utils.tk_helpers import _detach_photo_tk, animate_window_open
 
-class FetchingLinkToast(tk.Toplevel):
+_BaseToplevel = tk.Toplevel if tk is not None else object
+
+
+class FetchingLinkToast(_BaseToplevel):
     """
     Sleek, dark-themed, frameless toast/popup window displayed instantaneously (< 50ms)
     when a downloadable URL (especially YouTube or remote stream requiring format analysis)

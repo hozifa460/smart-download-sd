@@ -7,7 +7,10 @@ import threading
 import urllib.parse
 from typing import Dict, Any, Optional
 
-import tkinter as tk
+try:
+    import tkinter as tk
+except Exception:
+    tk = None  # type: ignore
 
 from ...config import get_base_downloads_dir
 from ...utils.url_utils import is_potential_html_url, derive_download_filename

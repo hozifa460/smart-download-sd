@@ -5,8 +5,11 @@ import os
 import sys
 import threading
 import ssl
-import tkinter as tk
-from tkinter import ttk, messagebox
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+except Exception:
+    tk = ttk = messagebox = None  # type: ignore
 from typing import Optional, Callable, Dict, Any
 try:
     from PIL import Image, ImageTk
@@ -23,7 +26,9 @@ from ...utils.url_utils import derive_download_filename
 from ...utils.clipboard import get_clipboard_text
 from ...utils.tk_helpers import _detach_photo_tk
 
-class RefreshLinkModal(tk.Toplevel):
+_BaseToplevel = tk.Toplevel if tk is not None else object
+
+class RefreshLinkModal(_BaseToplevel):
     """
     Modern dark-themed TDM-style dialog for updating an expired or forbidden download link:
     - Displays current URL, file name, existing progress preserved, and input for the new URL.

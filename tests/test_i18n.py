@@ -301,8 +301,8 @@ class TestBilingualLocalization(unittest.TestCase):
 
         try:
             # When language is English:
-            # btn_lang_toggle displays '🌐 العربية'
-            self.assertEqual(app.btn_lang_toggle.cget("text"), "🌐 العربية")
+            # btn_lang_toggle displays '⇄ العربية'
+            self.assertEqual(app.btn_lang_toggle.cget("text"), "⇄ العربية")
             self.assertEqual(app.title_lbl.cget("text"), tr("app_header"))
             self.assertEqual(app.btn_start.cget("text"), "▶ Start Download")
             self.assertEqual(app.tree_history.heading("category")["text"], "Category")
@@ -313,9 +313,9 @@ class TestBilingualLocalization(unittest.TestCase):
             app.btn_lang_toggle.invoke()
 
             # Now language is Arabic:
-            # btn_lang_toggle displays '🌐 English'
+            # btn_lang_toggle displays '⇄ English'
             self.assertEqual(self.loc.get_language(), "ar")
-            self.assertEqual(app.btn_lang_toggle.cget("text"), "🌐 English")
+            self.assertEqual(app.btn_lang_toggle.cget("text"), "⇄ English")
             self.assertEqual(app.title_lbl.cget("text"), "التحميل الذكي (SD)")
             self.assertEqual(app.btn_start.cget("text"), "▶ بدء التحميل")
             self.assertEqual(app.tree_history.heading("category")["text"], "التصنيف")
@@ -325,7 +325,7 @@ class TestBilingualLocalization(unittest.TestCase):
             # Toggle back to English by invoking button again
             app.btn_lang_toggle.invoke()
             self.assertEqual(self.loc.get_language(), "en")
-            self.assertEqual(app.btn_lang_toggle.cget("text"), "🌐 العربية")
+            self.assertEqual(app.btn_lang_toggle.cget("text"), "⇄ العربية")
             self.assertEqual(app.title_lbl.cget("text"), "SMART DOWNLOAD (SD)")
             self.assertEqual(app.btn_start.cget("text"), "▶ Start Download")
             self.assertEqual(app.tree_history.heading("category")["text"], "Category")

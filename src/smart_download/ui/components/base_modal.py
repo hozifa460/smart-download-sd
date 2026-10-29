@@ -3,15 +3,21 @@ SafeModalDialog: Resilient, High-DPI scaled, localized dialog base modal.
 """
 import os
 import sys
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = None  # type: ignore
+    ttk = None  # type: ignore
 from typing import Optional, Callable, Dict, Any
 
 from ...config import get_resource_path
 from ...locales.i18n import tr, LocalizationManager
 from ...utils.tk_helpers import _detach_photo_tk
 
-class SafeModalDialog(tk.Toplevel):
+_BaseToplevel = tk.Toplevel if tk is not None else object
+
+class SafeModalDialog(_BaseToplevel):
     """
     Sleek, theme-consistent modal dialog designed specifically for borderless / overrideredirect windows.
     Replaces native Win32 messageboxes to eliminate window hierarchy corruption, message pump deadlocks,
@@ -19,7 +25,7 @@ class SafeModalDialog(tk.Toplevel):
     """
     def __init__(
         self,
-        parent: Optional[tk.Tk],
+        parent: Optional[Any],
         title: str,
         message: str,
         dialog_type: str = "error",  # "error", "info", "warning", "confirm"

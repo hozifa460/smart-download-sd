@@ -22,6 +22,9 @@ from .locales.i18n import LocalizationManager, tr, get_current_language, set_cur
 from .core.engine import TurboDownloadEngine
 from .core.chunk import DownloadChunk, get_permissive_ssl_context
 try:
+    import tkinter as tk
+    if tk is None:
+        raise ImportError("Tkinter not available")
     from .ui.main_window import ModernFramelessGUI, main
 except Exception:
     ModernFramelessGUI = None  # type: ignore

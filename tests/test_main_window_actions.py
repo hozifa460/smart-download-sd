@@ -381,17 +381,17 @@ class TestClipboardSnifferAndUrlValidation(unittest.TestCase):
             gui = ModernFramelessGUI(root)
             self.assertTrue(gui._clipboard_sniffer_active, "Clipboard sniffer should default to Active")
             self.assertIsNotNone(gui._clipboard_job, "Clipboard periodic timer job must be scheduled")
-            self.assertEqual(gui.btn_clipboard_sniffer.cget("text"), "📋 Sniffer: Active")
+            self.assertEqual(gui.btn_clipboard_sniffer.cget("text"), "● Sniffer: Active")
 
             # Toggle to paused
             gui.toggle_clipboard_sniffer()
             self.assertFalse(gui._clipboard_sniffer_active)
-            self.assertEqual(gui.btn_clipboard_sniffer.cget("text"), "📋 Sniffer: Paused")
+            self.assertEqual(gui.btn_clipboard_sniffer.cget("text"), "○ Sniffer: Paused")
 
             # Toggle back to active
             gui.toggle_clipboard_sniffer()
             self.assertTrue(gui._clipboard_sniffer_active)
-            self.assertEqual(gui.btn_clipboard_sniffer.cget("text"), "📋 Sniffer: Active")
+            self.assertEqual(gui.btn_clipboard_sniffer.cget("text"), "● Sniffer: Active")
 
             gui._cleanup_resources()
             self.assertIsNone(gui._clipboard_job, "Clipboard job must be cleared on cleanup")

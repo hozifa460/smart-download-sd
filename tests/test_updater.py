@@ -506,7 +506,7 @@ class TestAppAutoUpdaterAndModal(unittest.TestCase):
         gui = ModernFramelessGUI(root)
         try:
             self.assertTrue(hasattr(gui, "btn_check_updates"))
-            self.assertEqual(gui.btn_check_updates.cget("text"), "🔄 Check for Updates")
+            self.assertEqual(gui.btn_check_updates.cget("text"), "↻ Check for Updates")
 
             update_info = {
                 "update_available": True,

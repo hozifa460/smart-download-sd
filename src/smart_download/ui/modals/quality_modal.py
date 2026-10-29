@@ -4,8 +4,11 @@ Includes compact embedded preview banner and support for unified VidMate-style p
 """
 import os
 import sys
-import tkinter as tk
-from tkinter import ttk, filedialog
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog
+except Exception:
+    tk = ttk = filedialog = None  # type: ignore
 from typing import Optional, Callable, Dict, Any, List
 
 from ...config import get_resource_path, get_base_downloads_dir
@@ -24,13 +27,14 @@ from .quality_modal_helpers import (
     resolve_preferred_option_index,
 )
 
+_BaseToplevel = tk.Toplevel if tk is not None else object
 
-class QualitySelectionModal(tk.Toplevel):
+class QualitySelectionModal(_BaseToplevel):
     """Modern dark-themed modal dialog for choosing video quality, audio dubbing, and subtitle options."""
 
     def __init__(
         self,
-        parent: tk.Tk,
+        parent: Any,
         video_title: str,
         duration: int,
         options: List[VideoFormatOption],

@@ -4,8 +4,11 @@ DownloadConfirmationModal: Download metadata inspection, category routing, and p
 import os
 import sys
 import threading
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox
+except Exception:
+    tk = ttk = filedialog = messagebox = None  # type: ignore
 from typing import Optional, Callable, Dict, Any
 try:
     from PIL import Image, ImageTk
@@ -31,8 +34,10 @@ from ...utils.tk_helpers import _detach_photo_tk, animate_window_open
 
 from .confirm_modal_logic import ConfirmModalLogicMixin
 
+_BaseToplevel = tk.Toplevel if tk is not None else object
 
-class DownloadConfirmationModal(ConfirmModalLogicMixin, tk.Toplevel):
+
+class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
     """
     Modern dark-themed TDM-style Download Confirmation & Standalone Progress Dialog:
     - Displays intercepted URL, extracted filename, file category badge & icon, and target save path.
@@ -482,7 +487,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, tk.Toplevel):
         )
         self.btn_cancel_prog.pack(side=tk.RIGHT, padx=(6, 0))
 
-        self.btn_pause_resume = tk.Button( self.prog_btn_row, text=tr("btn_pause", "❚❚ Pause"),
+        self.btn_pause_resume = tk.Button( self.prog_btn_row, text=tr("btn_pause", "|| Pause"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
             fg=self.c_text_bright,

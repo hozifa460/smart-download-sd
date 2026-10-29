@@ -266,7 +266,7 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
 
         # Prominent Language Toggle Button
         cur_lang = LocalizationManager.get_instance().get_language()
-        toggle_txt = "🌐 English" if cur_lang == "ar" else "🌐 العربية"
+        toggle_txt = "⇄ English" if cur_lang == "ar" else "⇄ العربية"
         self.btn_lang_toggle = tk.Button(
             title_bar,
             text=toggle_txt,

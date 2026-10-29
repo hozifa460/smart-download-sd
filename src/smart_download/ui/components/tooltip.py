@@ -1,8 +1,11 @@
 """
 ToolTip: Lightweight hovered tooltip bubble for widgets.
 """
-import tkinter as tk
-from typing import Optional, Union, Callable
+try:
+    import tkinter as tk
+except Exception:
+    tk = None  # type: ignore
+from typing import Optional, Union, Callable, Any
 
 from ...locales.i18n import tr
 
@@ -11,10 +14,10 @@ class ToolTip:
     Lightweight, high-DPI aware, floating tooltip for Tkinter widgets.
     Dynamically resolves localized text via callable or translation key.
     """
-    def __init__(self, widget: tk.Widget, text_or_key: Union[str, Callable[[], str]]):
+    def __init__(self, widget: Any, text_or_key: Union[str, Callable[[], str]]):
         self.widget = widget
         self.text_or_key = text_or_key
-        self.tip_window: Optional[tk.Toplevel] = None
+        self.tip_window: Optional[Any] = None
         self._show_job = None
         try:
             self.widget.bind("<Enter>", self._on_enter, add="+")

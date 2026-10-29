@@ -11,8 +11,11 @@ import urllib.request
 import urllib.parse
 from typing import Dict, Any, Optional
 
-import tkinter as tk
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception:
+    tk = ttk = None  # type: ignore
 
 from ...config import get_resource_path, get_setting, set_setting
 from ...locales.i18n import tr

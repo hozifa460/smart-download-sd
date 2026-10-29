@@ -50,6 +50,13 @@ class ThemeControllerMixin:
             # Treeview styling
             row_h = max(26, int(26 * getattr(self, "dpi_scale", 1.0)))
             for tv_name in ("Treeview", "Custom.Treeview"):
+                try:
+                    self.style.layout(tv_name, [(f"{tv_name}.treearea", {"sticky": "nswe"})])
+                except Exception:
+                    try:
+                        self.style.layout(tv_name, [("Treeview.treearea", {"sticky": "nswe"})])
+                    except Exception:
+                        pass
                 self.style.configure(
                     tv_name,
                     background=self.c_input_bg,
@@ -97,6 +104,14 @@ class ThemeControllerMixin:
                     darkcolor=self.c_bg,
                     tabmargins=[0, 2, 0, 0],
                     borderwidth=0,
+                )
+            for cl_name in ("TNotebook.client", "Custom.TNotebook.client"):
+                self.style.configure(
+                    cl_name,
+                    background=self.c_panel,
+                    bordercolor=self.c_border,
+                    lightcolor=self.c_panel,
+                    darkcolor=self.c_panel,
                 )
             for tab_name in ("TNotebook.Tab", "Custom.TNotebook.Tab"):
                 self.style.configure(

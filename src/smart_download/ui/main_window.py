@@ -24,8 +24,11 @@ import zipfile
 import tarfile
 from typing import List, Optional, Callable, Dict, Any, Union, Tuple
 
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox, filedialog
+except Exception:
+    tk = ttk = messagebox = filedialog = None  # type: ignore
 try:
     from PIL import Image, ImageTk
 except ImportError:
@@ -212,7 +215,7 @@ class ModernFramelessGUI(
     - Real-time performance metrics (speed, progress, ETA, active threads).
     - Detailed chunk status table and event logging console.
     """
-    def __init__(self, root: tk.Tk, start_hidden: Optional[bool] = None, initial_url: Optional[str] = None):
+    def __init__(self, root: Any, start_hidden: Optional[bool] = None, initial_url: Optional[str] = None):
         self.root = root
         if start_hidden is None:
             start_hidden = any(arg.lower() in ("--background", "-background", "/background",
