@@ -22,12 +22,17 @@ DIST_DIR = os.path.join(BASE_DIR, "dist")
 PAYLOAD_DIR = os.path.join(BASE_DIR, "installer_payload")
 
 
-STALE_DIST_ARTIFACTS = (
+ROOT_DIR = BASE_DIR
+
+STALE_DIST_ARTIFACTS = [
     "TurboDownloader.exe",
+    "turbo_downloader.exe",
     "TurboDownloader-Setup.exe",
+    "turbo_downloader_setup.exe",
+    "TurboDownloader-CorePatch.zip",
     "com.turbodownloader.host.json",
     "turbo_host.bat",
-)
+]
 
 
 def clean_stale_shadow_modules():
@@ -111,6 +116,16 @@ def verify_exe_startup(exe_path: str, timeout: int = 30):
 def clean_stale_dist_artifacts():
     """Removes legacy TurboDownloader artifacts from dist/ and syncs the Smart Download extension folder."""
     clean_stale_shadow_modules()
+    for stale_spec in ("turbo_downloader.spec", "TurboDownloader.spec"):
+        sp = os.path.join(ROOT_DIR, stale_spec)
+        if os.path.exists(sp):
+            try:
+                os.chmod(sp, 0o777)
+                os.remove(sp)
+                print(f"[*] Removed stale spec file: {sp}")
+            except Exception as e:
+                print(f"[-] Warning: Failed to remove {sp}: {e}")
+
     if not os.path.isdir(DIST_DIR):
         return
     for name in STALE_DIST_ARTIFACTS:

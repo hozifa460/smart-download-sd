@@ -96,18 +96,20 @@ class QualitySelectionModal(tk.Toplevel):
                 self.iconphoto(True, self._modal_icon_photo)
             except Exception: pass
 
-        self._topmost_job = None
-        self._idle_job = None
-        try:
-            self.lift(); self.attributes("-topmost", True)
-            self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
-            self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
-        except Exception: pass
-
         self._build_ui()
         animate_window_open(self, duration_ms=130)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", lambda e: self._on_close())
+
+        self._topmost_job = None
+        self._idle_job = None
+        try:
+            self.lift()
+            self.attributes("-topmost", True)
+            self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
+            self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
+        except Exception:
+            pass
 
     def _build_ui(self):
         c_bg, c_panel = self.theme["c_bg"], self.theme["c_panel"]

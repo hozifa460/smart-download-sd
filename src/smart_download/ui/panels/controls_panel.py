@@ -13,6 +13,43 @@ from smart_download.config import get_setting, set_setting
 from smart_download.ui.components.tooltip import ToolTip
 
 
+class _StateButton(tk.Button):
+    """Button subclass that automatically shifts background and foreground according to state."""
+
+    def __init__(self, master=None, active_bg=None, disabled_bg=None, active_fg="#ffffff", disabled_fg="#64748b", **kwargs):
+        self._active_bg = active_bg
+        self._disabled_bg = disabled_bg
+        self._active_fg = active_fg
+        self._disabled_fg = disabled_fg
+        initial_state = kwargs.get("state", "normal")
+        if "bg" not in kwargs:
+            kwargs["bg"] = self._disabled_bg if initial_state == "disabled" else self._active_bg
+        if "fg" not in kwargs:
+            kwargs["fg"] = self._disabled_fg if initial_state == "disabled" else self._active_fg
+        if "disabledforeground" not in kwargs and self._disabled_fg:
+            kwargs["disabledforeground"] = self._disabled_fg
+        super().__init__(master, **kwargs)
+
+    def configure(self, cnf=None, **kwargs):
+        if cnf is not None and isinstance(cnf, dict):
+            kwargs = {**cnf, **kwargs}
+        if "state" in kwargs:
+            st = kwargs["state"]
+            if "bg" not in kwargs:
+                if st == "disabled" and self._disabled_bg:
+                    kwargs["bg"] = self._disabled_bg
+                elif st == "normal" and self._active_bg:
+                    kwargs["bg"] = self._active_bg
+            if "fg" not in kwargs:
+                if st == "disabled" and self._disabled_fg:
+                    kwargs["fg"] = self._disabled_fg
+                elif st == "normal" and self._active_fg:
+                    kwargs["fg"] = self._active_fg
+        return super().configure(**kwargs)
+
+    config = configure
+
+
 class ControlsPanelMixin:
     """Configuration options: Speed Limiter (Presets + Custom + Dynamic Slider) & Action Buttons."""
 
@@ -67,7 +104,19 @@ class ControlsPanelMixin:
             saved_kbps = int(get_setting("custom_speed_limit_kbps", 0) or 0)
         except Exception:
             saved_kbps = 0
-        self.entry_custom_speed = tk.Entry(row1, font=("Segoe UI", 9), width=7, bg=self.c_input_bg, fg=self.c_text_bright, insertbackground=self.c_accent, relief="flat")
+        self.entry_custom_speed = tk.Entry(
+            row1,
+            font=("Segoe UI", 9),
+            width=7,
+            bg=self.c_input_bg,
+            fg=self.c_text_bright,
+            insertbackground=self.c_accent,
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.c_border,
+            highlightcolor=self.c_accent,
+        )
         self.entry_custom_speed.insert(0, str(saved_kbps))
         self.entry_custom_speed.pack(side=tk.LEFT, padx=(4, 6), ipady=1)
         self.entry_custom_speed.bind("<Return>", lambda e: self._apply_speed_limit())
@@ -136,29 +185,32 @@ class ControlsPanelMixin:
         row_transfers = tk.Frame(card, bg=self.c_panel)
         row_transfers.pack(fill=tk.X, pady=(10, 4))
 
-        self.btn_start = tk.Button(
+        self.btn_start = _StateButton(
             row_transfers,
             text=tr("btn_start", "▶ Start Download"),
             font=("Segoe UI", 9, "bold"),
-            bg="#10b981",
-            fg="white",
+            active_bg="#059669",
+            disabled_bg="#1e293b",
+            activebackground="#10b981",
+            disabledforeground="#64748b",
             relief="flat",
-            activebackground="#059669",
             cursor="hand2",
             padx=14,
             pady=4,
+            state="normal",
             command=self._on_start_download
         )
         self.btn_start.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_pause = tk.Button(
+        self.btn_pause = _StateButton(
             row_transfers,
             text=tr("btn_pause", "⏸ Pause"),
             font=("Segoe UI", 9, "bold"),
-            bg="#334155",
-            fg=self.c_text_bright,
-            relief="flat",
+            active_bg=self.c_panel_light,
+            disabled_bg="#182234",
             activebackground=self.c_border,
+            disabledforeground="#64748b",
+            relief="flat",
             cursor="hand2",
             padx=14,
             pady=4,
@@ -167,14 +219,15 @@ class ControlsPanelMixin:
         )
         self.btn_pause.pack(side=tk.LEFT, padx=(0, 8))
 
-        self.btn_cancel = tk.Button(
+        self.btn_cancel = _StateButton(
             row_transfers,
             text=tr("btn_cancel", "⏹ Cancel"),
             font=("Segoe UI", 9, "bold"),
-            bg="#ef4444",
-            fg="white",
-            relief="flat",
+            active_bg=self.c_danger,
+            disabled_bg="#182234",
             activebackground="#dc2626",
+            disabledforeground="#64748b",
+            relief="flat",
             cursor="hand2",
             padx=14,
             pady=4,
@@ -221,32 +274,37 @@ class ControlsPanelMixin:
 
         self.btn_clipboard_sniffer = tk.Button(
             row_toggles,
-            text="📋 Sniffer: Active",
-            font=("Segoe UI", 9, "bold"),
-            bg=self.c_panel_light,
+            text=tr("btn_sniffer_active", "📋 Sniffer: Active"),
+            font=("Segoe UI", 8, "bold"),
+            bg="#0f292a",
             fg=self.c_success,
+            highlightbackground="#10b981",
+            highlightthickness=1,
             relief="flat",
             activebackground=self.c_accent_dark,
             activeforeground="white",
             cursor="hand2",
-            padx=12,
+            padx=10,
             pady=4,
             command=self.toggle_clipboard_sniffer
         )
         self.btn_clipboard_sniffer.pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_sniffer = self.btn_clipboard_sniffer
         ToolTip(self.btn_clipboard_sniffer, "tip_sniffer")
 
         self.btn_auto_cat = tk.Button(
             row_toggles,
-            text="📁 Auto-Sort: ON" if getattr(self, "auto_categorize_folders", True) else "📁 Auto-Sort: OFF",
-            font=("Segoe UI", 9, "bold"),
+            text=tr("btn_auto_cat_on", "📁 Auto-Sort: ON") if getattr(self, "auto_categorize_folders", True) else tr("btn_auto_cat_off", "📁 Auto-Sort: OFF"),
+            font=("Segoe UI", 8, "bold"),
             relief="flat",
-            bg=self.c_panel_light if getattr(self, "auto_categorize_folders", True) else self.c_panel,
+            bg="#0f292a" if getattr(self, "auto_categorize_folders", True) else "#182234",
             fg=self.c_success if getattr(self, "auto_categorize_folders", True) else self.c_text_muted,
+            highlightbackground="#10b981" if getattr(self, "auto_categorize_folders", True) else self.c_border,
+            highlightthickness=1,
             activebackground=self.c_accent_dark,
             activeforeground="white",
             cursor="hand2",
-            padx=12,
+            padx=10,
             pady=4,
             command=self.toggle_auto_categorize
         )
@@ -258,12 +316,16 @@ class ControlsPanelMixin:
         self.btn_cookies = tk.Button(
             row_toggles,
             text=self._get_cookies_btn_text() if hasattr(self, "_get_cookies_btn_text") else "🍪 Cookies: Auto",
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
             relief="flat",
+            bg="#182234",
+            fg=self.c_text_muted,
+            highlightbackground=self.c_border,
+            highlightthickness=1,
             activebackground=self.c_accent_dark,
             activeforeground="white",
             cursor="hand2",
-            padx=12,
+            padx=10,
             pady=4,
             command=self.cycle_cookies_setting
         )
@@ -274,12 +336,16 @@ class ControlsPanelMixin:
         self.btn_startup = tk.Button(
             row_toggles,
             text=tr("btn_startup_off", "🚀 Boot: OFF"),
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
             relief="flat",
+            bg="#182234",
+            fg=self.c_text_muted,
+            highlightbackground=self.c_border,
+            highlightthickness=1,
             activebackground=self.c_accent_dark,
             activeforeground="white",
             cursor="hand2",
-            padx=12,
+            padx=10,
             pady=4,
             command=self.toggle_startup_setting
         )
@@ -291,13 +357,15 @@ class ControlsPanelMixin:
         self.btn_browser = tk.Button(
             row_toggles,
             text=tr("btn_browser", "🌐 Settings & Integration"),
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,
+            highlightbackground=self.c_border,
+            highlightthickness=1,
             relief="flat",
             activebackground=self.c_accent_dark,
             cursor="hand2",
-            padx=12,
+            padx=10,
             pady=4,
             command=self._open_browser_integration_dialog
         )

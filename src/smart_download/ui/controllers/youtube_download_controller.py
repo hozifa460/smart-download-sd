@@ -304,10 +304,7 @@ class YouTubeDownloadControllerMixin:
             finally:
                 if hasattr(self, "_close_fetching_toast"):
                     try:
-                        if hasattr(self, "root") and self.root:
-                            self.root.after(0, self._close_fetching_toast)
-                        else:
-                            self.dispatch_to_main_thread(self._close_fetching_toast)
+                        self.dispatch_to_main_thread(self._close_fetching_toast)
                     except Exception:
                         pass
 

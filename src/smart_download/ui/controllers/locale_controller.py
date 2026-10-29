@@ -35,7 +35,7 @@ class LocaleControllerMixin:
             self.lbl_url.configure(text=tr("lbl_url"))
         if hasattr(self, "btn_paste") and self.btn_paste.winfo_exists():
             self.btn_paste.configure(text=tr("btn_paste"))
-        if hasattr(self, "btn_refresh_url") and self.btn_refresh_url.winfo_exists():
+        if hasattr(self, "btn_refresh_url") and self.btn_refresh_url and self.btn_refresh_url.winfo_exists():
             self.btn_refresh_url.configure(text=tr("btn_refresh_url"))
         if hasattr(self, "lbl_dest") and self.lbl_dest.winfo_exists():
             self.lbl_dest.configure(text=tr("lbl_dest"))
@@ -91,6 +91,16 @@ class LocaleControllerMixin:
             self.lbl_t_eta.configure(text=tr("metric_eta"))
         if hasattr(self, "lbl_t_threads") and self.lbl_t_threads.winfo_exists():
             self.lbl_t_threads.configure(text=tr("metric_threads"))
+        if not getattr(self, "engine", None) and hasattr(self, "card_threads") and self.card_threads.winfo_exists():
+            self.card_threads.configure(text=f"0 / 0 {tr('lbl_threads_unit', 'Threads')}")
+
+        # Chunk visualizer card
+        if hasattr(self, "lbl_chunk_vis_title") and self.lbl_chunk_vis_title.winfo_exists():
+            self.lbl_chunk_vis_title.configure(text=tr("lbl_chunk_vis_title"))
+        if hasattr(self, "lbl_chunk_vis_legend") and self.lbl_chunk_vis_legend.winfo_exists():
+            self.lbl_chunk_vis_legend.configure(text=tr("lbl_chunk_vis_legend"))
+        if hasattr(self, "_draw_chunk_segments") and callable(self._draw_chunk_segments):
+            self._draw_chunk_segments(getattr(self.engine, "chunks", []) if getattr(self, "engine", None) else [])
 
         # Notebook tabs
         if hasattr(self, "notebook") and self.notebook.winfo_exists():

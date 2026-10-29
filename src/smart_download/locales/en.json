@@ -255,5 +255,11 @@
   "btn_quality_reopen": "🎞️ Quality / Dubbing & Subtitles",
   "btn_live_preview": "▶️ Live Preview",
   "btn_preview_video": "🎬 Preview Video",
-  "btn_preview_short": "🎬 Preview"
+  "btn_preview_short": "🎬 Preview",
+  "lbl_chunk_vis_title": "📊 SD DYNAMIC CHUNK VISUALIZER (Segmented Byte Map)",
+  "lbl_chunk_vis_legend": "■ Active (Cyan)   ■ Done (Green)   ■ Remaining (Dark)",
+  "lbl_waiting_to_start": "Waiting to start...",
+  "lbl_single_stream": "Single-stream / unknown size",
+  "lbl_threads_unit": "Threads",
+  "lbl_cookies_off": "Off"
 }

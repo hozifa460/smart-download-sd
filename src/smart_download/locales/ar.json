@@ -255,5 +255,11 @@
   "btn_quality_reopen": "🎞️ الجودة / الصوت والترجمة",
   "btn_live_preview": "▶️ معاينة الفيديو بالصوت والترجمة",
   "btn_preview_video": "🎬 معاينة الفيديو",
-  "btn_preview_short": "🎬 معاينة"
+  "btn_preview_short": "🎬 معاينة",
+  "lbl_chunk_vis_title": "📊 خريطة قطاعات التحميل المباشرة (توزيع البايتات)",
+  "lbl_chunk_vis_legend": "■ نشط (سماوي)   ■ مكتمل (أخضر)   ■ متبقي (داكن)",
+  "lbl_waiting_to_start": "بانتظار بدء التحميل...",
+  "lbl_single_stream": "مسار واحد / حجم غير معروف",
+  "lbl_threads_unit": "مسارات",
+  "lbl_cookies_off": "معطل"
 }

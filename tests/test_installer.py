@@ -283,7 +283,7 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             self.assertTrue(res.get("success"))
             self.assertTrue(os.path.isdir(install_target))
             self.assertTrue(os.path.isfile(os.path.join(install_target, "SmartDownload.exe")))
-            self.assertTrue(os.path.isfile(os.path.join(install_target, "TurboDownloader.exe")), "TurboDownloader.exe must be present for backward compatibility")
+            self.assertFalse(os.path.isfile(os.path.join(install_target, "TurboDownloader.exe")), "TurboDownloader.exe must NOT be present in modern installation")
             self.assertTrue(os.path.isfile(os.path.join(install_target, "app_icon.ico")))
             self.assertTrue(len(progress_events) >= 5)
             self.assertEqual(progress_events[-1][0], 1.0)

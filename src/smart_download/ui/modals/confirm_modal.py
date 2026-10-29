@@ -139,6 +139,8 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, tk.Toplevel):
             except Exception:
                 pass
 
+        self._build_ui()
+
         # Elevate and focus to ensure modal stays above parent window
         try:
             self.lift()
@@ -148,8 +150,6 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, tk.Toplevel):
             self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
         except Exception:
             pass
-
-        self._build_ui()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", lambda e: self._on_close())

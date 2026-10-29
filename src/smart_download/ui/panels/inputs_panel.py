@@ -28,39 +28,83 @@ class InputsPanelMixin(ControlsPanelMixin):
         url_row = tk.Frame(card, bg=self.c_panel)
         url_row.pack(fill=tk.X, pady=2)
 
-        self.lbl_url = tk.Label(url_row, text=tr("lbl_url"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
+        self.lbl_url = tk.Label(url_row, text=tr("lbl_url"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
         self.lbl_url.pack(side=tk.LEFT)
 
-        default_url = "https://speed.cloudflare.com/__down?bytes=50000000"  # 50MB benchmark file
-        self.entry_url = tk.Entry(url_row, font=("Segoe UI", 9), bg=self.c_input_bg, fg=self.c_text_bright, insertbackground=self.c_accent, relief="flat")
-        self.entry_url.insert(0, default_url)
-        self.entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), ipady=3)
+        self.url_var = tk.StringVar(value="")
+        self.entry_url = tk.Entry(
+            url_row,
+            textvariable=self.url_var,
+            font=("Segoe UI", 9),
+            bg=self.c_input_bg,
+            fg=self.c_text_bright,
+            insertbackground=self.c_accent,
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.c_border,
+            highlightcolor=self.c_accent,
+        )
+        self.entry_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), ipady=5, ipadx=6)
         self.entry_url.bind("<KeyRelease>", lambda e: self._on_url_change())
 
-        self.btn_paste = tk.Button(url_row, text=tr("btn_paste"), font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._paste_url)
+        self.btn_paste = tk.Button(
+            url_row,
+            text=tr("btn_paste"),
+            font=("Segoe UI", 8),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            highlightthickness=1,
+            highlightbackground=self.c_border,
+            command=self._paste_url,
+        )
         self.btn_paste.pack(side=tk.RIGHT)
-
-        self.btn_refresh_url = tk.Button(url_row, text=tr("btn_refresh_url"), font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._open_refresh_link_dialog)
-        self.btn_refresh_url.pack(side=tk.RIGHT, padx=(0, 6))
+        self.btn_refresh_url = None
 
         # Destination Row
         dest_row = tk.Frame(card, bg=self.c_panel)
         dest_row.pack(fill=tk.X, pady=(6, 2))
 
-        self.lbl_dest = tk.Label(dest_row, text=tr("lbl_dest"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=13, anchor="w")
+        self.lbl_dest = tk.Label(dest_row, text=tr("lbl_dest"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
         self.lbl_dest.pack(side=tk.LEFT)
 
-        downloads_dir = self._get_base_downloads_dir()
-        default_fn = "cloudflare_50mb.bin"
-        if getattr(self, "auto_categorize_folders", True):
-            default_dest = resolve_categorized_path(downloads_dir, default_fn, auto_categorize=True)
-        else:
-            default_dest = os.path.join(downloads_dir, default_fn)
-        self.entry_dest = tk.Entry(dest_row, font=("Segoe UI", 9), bg=self.c_input_bg, fg=self.c_text_bright, insertbackground=self.c_accent, relief="flat")
-        self.entry_dest.insert(0, default_dest)
-        self.entry_dest.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), ipady=3)
+        default_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        self.dest_var = tk.StringVar(value=default_dir)
+        self.entry_dest = tk.Entry(
+            dest_row,
+            textvariable=self.dest_var,
+            font=("Segoe UI", 9),
+            bg=self.c_input_bg,
+            fg=self.c_text_bright,
+            insertbackground=self.c_accent,
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.c_border,
+            highlightcolor=self.c_accent,
+        )
+        self.entry_dest.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 8), ipady=5, ipadx=6)
 
-        self.btn_browse = tk.Button(dest_row, text=tr("btn_browse"), font=("Segoe UI", 8), bg=self.c_panel_light, fg=self.c_text_bright, relief="flat", activebackground=self.c_accent_dark, cursor="hand2", command=self._browse_destination)
+        self.btn_browse = tk.Button(
+            dest_row,
+            text=tr("btn_browse"),
+            font=("Segoe UI", 8),
+            bg=self.c_panel_light,
+            fg=self.c_text_bright,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            cursor="hand2",
+            padx=12,
+            pady=4,
+            highlightthickness=1,
+            highlightbackground=self.c_border,
+            command=self._browse_destination,
+        )
         self.btn_browse.pack(side=tk.RIGHT)
 
         if hasattr(self, "_build_media_options_bar"):
@@ -128,7 +172,7 @@ class InputsPanelMixin(ControlsPanelMixin):
         fn = derive_download_filename(url)
         cur_dest = self.entry_dest.get().strip()
         downloads_dir = self._get_base_downloads_dir()
-        dest_dir = os.path.dirname(cur_dest) if cur_dest else downloads_dir
+        dest_dir = cur_dest if cur_dest and os.path.isdir(cur_dest) else (os.path.dirname(cur_dest) if cur_dest else downloads_dir)
         if not os.path.isdir(dest_dir):
             dest_dir = downloads_dir
         if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):

@@ -53,7 +53,7 @@ class BrowserControllerMixin:
         # Populate Destination entry
         downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
         cur_dest = self.entry_dest.get().strip()
-        dest_dir = os.path.dirname(cur_dest) if cur_dest else downloads_dir
+        dest_dir = cur_dest if cur_dest and os.path.isdir(cur_dest) else (os.path.dirname(cur_dest) if cur_dest else downloads_dir)
         if not os.path.isdir(dest_dir):
             dest_dir = downloads_dir
 
@@ -108,7 +108,7 @@ class BrowserControllerMixin:
 
                     downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
                     cur_d = self.entry_dest.get().strip()
-                    dest_dir = os.path.dirname(cur_d) if cur_d else downloads_dir
+                    dest_dir = cur_d if cur_d and os.path.isdir(cur_d) else (os.path.dirname(cur_d) if cur_d else downloads_dir)
                     if not os.path.isdir(dest_dir):
                         dest_dir = downloads_dir
 

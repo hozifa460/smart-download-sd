@@ -260,20 +260,13 @@ def install_application(
             with open(exe_dest, "wb") as f:
                 f.write(b"")
 
-    # Backward compatibility: Provide TurboDownloader.exe link or copy at install time
-    legacy_dest = os.path.join(target_dir, "TurboDownloader.exe")
-    if os.path.exists(exe_dest):
+    # Clean up legacy binary names from previous installations so install folder only contains SmartDownload.exe
+    for legacy_name in ("TurboDownloader.exe", "turbo_downloader.exe"):
+        legacy_dest = os.path.join(target_dir, legacy_name)
         if os.path.exists(legacy_dest):
             try:
                 os.chmod(legacy_dest, 0o777)
                 os.remove(legacy_dest)
-            except Exception:
-                pass
-        try:
-            os.link(exe_dest, legacy_dest)
-        except Exception:
-            try:
-                shutil.copy2(exe_dest, legacy_dest)
             except Exception:
                 pass
 

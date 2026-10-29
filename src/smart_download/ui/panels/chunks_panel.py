@@ -31,16 +31,17 @@ class ChunksPanelMixin(MetricsPanelMixin):
         header_row = tk.Frame(card, bg=self.c_panel)
         header_row.pack(fill=tk.X, pady=(0, 4))
 
-        lbl = tk.Label(header_row, text="SD DYNAMIC CHUNK VISUALIZER (Segmented Byte Map)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
-        lbl.pack(side=tk.LEFT)
+        self.lbl_chunk_vis_title = tk.Label(header_row, text=tr("lbl_chunk_vis_title", "📊 خريطة قطاعات التحميل المباشرة"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
+        self.lbl_chunk_vis_title.pack(side=tk.LEFT)
 
-        lbl_legend = tk.Label(header_row, text="■ Active (Cyan)   ■ Done (Green)   ■ Remaining (Dark)", font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
-        lbl_legend.pack(side=tk.RIGHT)
+        self.lbl_chunk_vis_legend = tk.Label(header_row, text=tr("lbl_chunk_vis_legend", "■ نشط (سماوي)   ■ مكتمل (أخضر)   ■ متبقي (داكن)"), font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
+        self.lbl_chunk_vis_legend.pack(side=tk.RIGHT)
 
-        chunk_height = max(30, int(32 * getattr(self, "dpi_scale", 1.0)))
-        self.canvas_chunks = tk.Canvas(card, height=chunk_height, bg=self.c_input_bg, highlightthickness=0)
+        chunks_height = max(28, int(28 * getattr(self, "dpi_scale", 1.0)))
+        self.canvas_chunks = tk.Canvas(card, height=chunks_height, bg=self.c_input_bg, highlightthickness=1, highlightbackground=self.c_border)
         self.chunk_canvas = self.canvas_chunks
         self.canvas_chunks.pack(fill=tk.X)
+        self.canvas_chunks.bind("<Configure>", lambda e: self._draw_chunk_segments(getattr(self.engine, "chunks", []) if getattr(self, "engine", None) and hasattr(self.engine, "chunks") and isinstance(self.engine.chunks, (list, tuple)) else []))
         self._draw_chunk_segments([])
 
     def _draw_chunk_segments(self, chunks: List[Any]):
@@ -48,18 +49,34 @@ class ChunksPanelMixin(MetricsPanelMixin):
         if not canvas:
             return
         w = canvas.winfo_width()
-        if w <= 1:
-            w = getattr(self, "width", 800) - 64
-        h = canvas.winfo_height() or max(30, int(32 * getattr(self, "dpi_scale", 1.0)))
+        if w <= 10:
+            w = 910
+        h = canvas.winfo_height()
+        if h <= 6:
+            h = max(28, int(28 * getattr(self, "dpi_scale", 1.0)))
+
+        if not isinstance(chunks, (list, tuple)):
+            chunks = []
+
+        total_size = 0
+        if getattr(self, "engine", None):
+            raw_ts = getattr(self.engine, "total_size", 0)
+            try:
+                total_size = int(raw_ts)
+            except Exception:
+                total_size = 0
 
         # Cache lightweight visual signature to eliminate redundant 4x/sec canvas redraws
         chunk_sig = []
-        for c in chunks:
-            with c.lock:
-                span = max(1, c.end_byte - c.start_byte + 1)
-                ratio_int = int((c.downloaded_bytes / span) * 1000)
-                chunk_sig.append((c.chunk_id, c.start_byte, c.end_byte, ratio_int, c.status))
-        current_sig = (w, h, tuple(chunk_sig), getattr(self.engine, "total_size", 0) if self.engine else 0)
+        try:
+            for c in chunks:
+                with c.lock:
+                    span = max(1, c.end_byte - c.start_byte + 1)
+                    ratio_int = int((c.downloaded_bytes / span) * 1000)
+                    chunk_sig.append((c.chunk_id, c.start_byte, c.end_byte, ratio_int, c.status))
+        except Exception:
+            chunk_sig = []
+        current_sig = (w, h, tuple(chunk_sig), total_size)
 
         if getattr(self, "_last_chunk_canvas_sig", None) == current_sig:
             return
@@ -76,12 +93,10 @@ class ChunksPanelMixin(MetricsPanelMixin):
         # Background track
         canvas.create_rectangle(0, 0, w, h, fill=c_input_bg, outline=c_border)
 
-        if not chunks or not self.engine or self.engine.total_size <= 0:
-            msg = "Waiting to start..." if not self.engine else "Single-stream / unknown size"
-            canvas.create_text(w // 2, h // 2, text=msg, font=("Segoe UI", 8), fill=c_text_muted)
+        if not chunks or not getattr(self, "engine", None) or total_size <= 0:
+            msg = tr("lbl_waiting_to_start", "بانتظار بدء التحميل...") if not getattr(self, "engine", None) else tr("lbl_single_stream", "مسار واحد / حجم غير معروف")
+            canvas.create_text(w / 2, h / 2, text=msg, font=("Segoe UI", 9), fill=c_text_muted, anchor="center")
             return
-
-        total_size = self.engine.total_size
 
         for c in chunks:
             with c.lock:
@@ -106,7 +121,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
             # Chunk label if wide enough
             if chunk_w > 36:
                 mid_x = (start_x + end_x) / 2
-                canvas.create_text(mid_x, h // 2, text=f"#{c.chunk_id}", font=("Segoe UI", 8, "bold"), fill="white")
+                canvas.create_text(mid_x, h / 2, text=f"#{c.chunk_id}", font=("Segoe UI", 8, "bold"), fill="white")
 
     def _build_tabs_card(self, parent):
         """Dual Tab View: Detailed Chunk Table and Activity Console."""

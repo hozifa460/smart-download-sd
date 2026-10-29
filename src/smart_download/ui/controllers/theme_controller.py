@@ -16,10 +16,10 @@ class ThemeControllerMixin:
 
     def _init_theme(self):
         """Palette and styling definitions."""
-        self.c_bg = "#0f172a"          # Slate 900
-        self.c_panel = "#1e293b"       # Slate 800
-        self.c_panel_light = "#334155" # Slate 700
-        self.c_border = "#475569"      # Slate 600
+        self.c_bg = "#0b1120"
+        self.c_panel = "#131c31"
+        self.c_panel_light = "#1e293b"
+        self.c_border = "#283548"
         self.c_accent = "#38bdf8"      # Sky 400
         self.c_accent_dark = "#0284c7" # Sky 600
         self.c_success = "#10b981"     # Emerald 500
@@ -27,7 +27,7 @@ class ThemeControllerMixin:
         self.c_danger = "#ef4444"      # Red 500
         self.c_text_bright = "#f8fafc" # Slate 50
         self.c_text_muted = "#94a3b8"  # Slate 400
-        self.c_input_bg = "#090d16"
+        self.c_input_bg = "#090e1a"
 
         if hasattr(self, "root") and self.root:
             try:
@@ -41,20 +41,22 @@ class ThemeControllerMixin:
                 self.style.theme_use("clam")
 
                 # Treeview styling
+                row_h = max(26, int(26 * getattr(self, "dpi_scale", 1.0)))
                 self.style.configure(
                     "Custom.Treeview",
                     background=self.c_panel,
                     foreground=self.c_text_bright,
                     fieldbackground=self.c_panel,
                     borderwidth=0,
-                    rowheight=max(26, int(28 * getattr(self, "dpi_scale", 1.0))),
+                    rowheight=row_h,
                     font=("Segoe UI", 9)
                 )
                 self.style.configure(
                     "Custom.Treeview.Heading",
-                    background=self.c_panel_light,
+                    background="#1a2639",
                     foreground=self.c_accent,
                     font=("Segoe UI", 9, "bold"),
+                    padding=(6, 5),
                     relief="flat"
                 )
                 self.style.map("Custom.Treeview.Heading", background=[('active', self.c_border)])
@@ -74,16 +76,66 @@ class ThemeControllerMixin:
                     background=[("selected", self.c_accent_dark)],
                     foreground=[("selected", self.c_text_bright)]
                 )
+
+                # Dark styling for TCombobox
+                self.style.configure(
+                    "TCombobox",
+                    fieldbackground=self.c_input_bg,
+                    background=self.c_panel_light,
+                    foreground=self.c_text_bright,
+                    arrowcolor=self.c_accent,
+                    bordercolor=self.c_border,
+                    lightcolor=self.c_border,
+                    darkcolor=self.c_input_bg,
+                    insertcolor=self.c_text_bright,
+                    padding=4,
+                )
+                self.style.map(
+                    "TCombobox",
+                    fieldbackground=[("readonly", self.c_input_bg), ("disabled", self.c_bg)],
+                    selectbackground=[("readonly", self.c_input_bg)],
+                    selectforeground=[("readonly", self.c_text_bright)],
+                    background=[("active", self.c_border), ("readonly", self.c_panel_light)],
+                    foreground=[("readonly", self.c_text_bright), ("disabled", self.c_text_muted)],
+                    arrowcolor=[("active", self.c_text_bright), ("readonly", self.c_accent)],
+                )
+                try:
+                    self.root.option_add("*TCombobox*Listbox.background", self.c_panel)
+                    self.root.option_add("*TCombobox*Listbox.foreground", self.c_text_bright)
+                    self.root.option_add("*TCombobox*Listbox.selectBackground", self.c_accent_dark)
+                    self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+                    self.root.option_add("*TCombobox*Listbox.font", ("Segoe UI", 9))
+                except Exception:
+                    pass
+
+                # Dark styling for Scrollbars
+                for sb_style in ("Vertical.TScrollbar", "Horizontal.TScrollbar", "TScrollbar"):
+                    self.style.configure(
+                        sb_style,
+                        background=self.c_panel_light,
+                        troughcolor=self.c_bg,
+                        bordercolor=self.c_bg,
+                        arrowcolor=self.c_text_muted,
+                        lightcolor=self.c_panel_light,
+                        darkcolor=self.c_panel_light,
+                        gripcount=0,
+                        relief="flat",
+                    )
+                    self.style.map(
+                        sb_style,
+                        background=[("active", self.c_accent_dark), ("pressed", self.c_accent)],
+                        arrowcolor=[("active", self.c_text_bright)],
+                    )
             except Exception:
                 pass
 
     def _theme_dict(self) -> Dict[str, str]:
         """Returns active theme dictionary for modals and child widgets."""
         return {
-            "c_bg": getattr(self, "c_bg", "#0f172a"),
-            "c_panel": getattr(self, "c_panel", "#1e293b"),
-            "c_panel_light": getattr(self, "c_panel_light", "#334155"),
-            "c_border": getattr(self, "c_border", "#475569"),
+            "c_bg": getattr(self, "c_bg", "#0b1120"),
+            "c_panel": getattr(self, "c_panel", "#131c31"),
+            "c_panel_light": getattr(self, "c_panel_light", "#1e293b"),
+            "c_border": getattr(self, "c_border", "#283548"),
             "c_accent": getattr(self, "c_accent", "#38bdf8"),
             "c_accent_dark": getattr(self, "c_accent_dark", "#0284c7"),
             "c_success": getattr(self, "c_success", "#10b981"),
@@ -91,7 +143,7 @@ class ThemeControllerMixin:
             "c_danger": getattr(self, "c_danger", "#ef4444"),
             "c_text_bright": getattr(self, "c_text_bright", "#f8fafc"),
             "c_text_muted": getattr(self, "c_text_muted", "#94a3b8"),
-            "c_input_bg": getattr(self, "c_input_bg", "#090d16")
+            "c_input_bg": getattr(self, "c_input_bg", "#090e1a")
         }
 
 

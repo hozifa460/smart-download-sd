@@ -254,6 +254,43 @@ def _safe_tk_destroy(self):
         _detach_widget_tk_refs(self)
 
 
+_ORIG_VARIABLE_DEL = getattr(tk.Variable, "__del__", None)
+
+
+def _safe_variable_del(self):
+    tk_inst = getattr(self, "_tk", None)
+    if tk_inst is None:
+        return
+    # If not on main thread or interpreter shutting down, don't execute Tcl commands
+    if threading.current_thread() is not threading.main_thread():
+        self._tk = None
+        self._tclCommands = None
+        return
+    try:
+        if hasattr(tk_inst, "call"):
+            try:
+                exists = tk_inst.getboolean(tk_inst.call("info", "exists", getattr(self, "_name", "")))
+                if exists and hasattr(tk_inst, "globalunsetvar"):
+                    tk_inst.globalunsetvar(getattr(self, "_name", ""))
+            except Exception:
+                # Interpreter is no longer running or valid
+                return
+        if getattr(self, "_tclCommands", None) is not None:
+            for name in list(self._tclCommands):
+                try:
+                    tk_inst.deletecommand(name)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    finally:
+        self._tk = None
+        self._tclCommands = None
+
+
+if _ORIG_VARIABLE_DEL is not None:
+    tk.Variable.__del__ = _safe_variable_del
+
 tk.Misc.winfo_exists = _safe_winfo_exists
 tk.Misc.update = _safe_misc_update
 tk.Misc.update_idletasks = _safe_misc_update_idletasks

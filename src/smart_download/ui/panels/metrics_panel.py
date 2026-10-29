@@ -18,9 +18,10 @@ class MetricsPanelMixin:
         card.pack(fill=tk.X, pady=(0, 10))
 
         # Main Progress Canvas
-        prog_height = max(22, int(24 * getattr(self, "dpi_scale", 1.0)))
-        self.canvas_prog = tk.Canvas(card, height=prog_height, bg=self.c_input_bg, highlightthickness=0)
+        prog_height = max(26, int(26 * getattr(self, "dpi_scale", 1.0)))
+        self.canvas_prog = tk.Canvas(card, height=prog_height, bg=self.c_input_bg, highlightthickness=1, highlightbackground=self.c_border)
         self.canvas_prog.pack(fill=tk.X, pady=(0, 10))
+        self.canvas_prog.bind("<Configure>", lambda e: self._draw_main_progress(getattr(self, "_last_pct", 0.0)))
         self._draw_main_progress(0.0)
 
         # 4 Metric Cards Grid
@@ -39,7 +40,7 @@ class MetricsPanelMixin:
         self.card_eta = self._create_metric_box(grid_frame, 2, tr("metric_eta"), "--:--:--")
         self.lbl_t_eta = self.card_eta.master.lbl_t
         # 4. Connections
-        self.card_threads = self._create_metric_box(grid_frame, 3, tr("metric_threads"), "0 / 0 Threads")
+        self.card_threads = self._create_metric_box(grid_frame, 3, tr("metric_threads"), f"0 / 0 {tr('lbl_threads_unit', 'Threads')}")
         self.lbl_t_threads = self.card_threads.master.lbl_t
 
     def _create_metric_box(self, parent, col, title, initial_value):
@@ -58,10 +59,13 @@ class MetricsPanelMixin:
     def _draw_main_progress(self, pct: float):
         if not hasattr(self, "canvas_prog") or not self.canvas_prog:
             return
+        self._last_pct = pct
         w = self.canvas_prog.winfo_width()
-        if w <= 1:
-            w = getattr(self, "width", 800) - 64
-        h = self.canvas_prog.winfo_height() or max(22, int(24 * getattr(self, "dpi_scale", 1.0)))
+        if w <= 10:
+            w = 910
+        h = self.canvas_prog.winfo_height()
+        if h <= 6:
+            h = max(26, int(26 * getattr(self, "dpi_scale", 1.0)))
         sig = (w, h, round(pct, 1))
         if getattr(self, "_last_main_prog_sig", None) == sig:
             return
@@ -85,7 +89,7 @@ class MetricsPanelMixin:
 
         # Percentage text overlay
         text_color = "white" if fill_w > (w * 0.45) else c_text_bright
-        self.canvas_prog.create_text(w // 2, h // 2, text=f"{pct:.1f}%", font=("Segoe UI", 9, "bold"), fill=text_color)
+        self.canvas_prog.create_text(w / 2, h / 2, text=f"{pct:.1f}%", font=("Segoe UI", 9, "bold"), fill=text_color, anchor="center")
 
 
 __all__ = ["MetricsPanelMixin"]

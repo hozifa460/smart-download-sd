@@ -39,6 +39,33 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
                     self.entry_dest.delete(0, tk.END)
                     self.entry_dest.insert(0, new_dest)
 
+    def _update_sniffer_btn(self):
+        """Refreshes the visual state of the clipboard sniffer button."""
+        btn = getattr(self, "btn_clipboard_sniffer", None) or getattr(self, "btn_sniffer", None)
+        if not btn:
+            return
+        try:
+            if not btn.winfo_exists():
+                return
+        except Exception:
+            return
+        if getattr(self, "_clipboard_sniffer_active", True):
+            btn.configure(
+                text=tr("btn_sniffer_active"),
+                fg=self.c_success,
+                bg="#0f292a",
+                highlightbackground="#10b981",
+                highlightthickness=1,
+            )
+        else:
+            btn.configure(
+                text=tr("btn_sniffer_paused"),
+                fg=self.c_text_muted,
+                bg="#182234",
+                highlightbackground=self.c_border,
+                highlightthickness=1,
+            )
+
     def _update_auto_cat_btn(self):
         if not hasattr(self, "btn_auto_cat") or not self.btn_auto_cat.winfo_exists():
             return
@@ -46,13 +73,17 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
             self.btn_auto_cat.configure(
                 text=tr("btn_auto_cat_on"),
                 fg=self.c_success,
-                bg=self.c_panel_light
+                bg="#0f292a",
+                highlightbackground="#10b981",
+                highlightthickness=1,
             )
         else:
             self.btn_auto_cat.configure(
                 text=tr("btn_auto_cat_off"),
                 fg=self.c_text_muted,
-                bg=self.c_panel
+                bg="#182234",
+                highlightbackground=self.c_border,
+                highlightthickness=1,
             )
 
     def _update_startup_btn(self):
@@ -74,32 +105,40 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
                 self.btn_startup.configure(
                     text=tr("btn_startup_on"),
                     fg=self.c_success,
-                    bg=self.c_panel_light
+                    bg="#0f292a",
+                    highlightbackground="#10b981",
+                    highlightthickness=1,
                 )
             else:
                 self.btn_startup.configure(
                     text=tr("btn_startup_off"),
                     fg=self.c_text_muted,
-                    bg=self.c_panel
+                    bg="#182234",
+                    highlightbackground=self.c_border,
+                    highlightthickness=1,
                 )
 
     def _get_cookies_btn_text(self) -> str:
         """Returns the display label for the cookies setting button."""
         if getattr(self, "cookies_file", "") and os.path.isfile(self.cookies_file):
-            return "🍪 Cookies: File"
-        cb = (getattr(self, "cookies_browser", "auto") or "auto").lower()
-        if cb in ("none", "off"):
-            return "🍪 Cookies: Off"
-        display_names = {
-            "auto": "Auto",
-            "edge": "Edge",
-            "chrome": "Chrome",
-            "firefox": "Firefox",
-            "brave": "Brave",
-            "opera": "Opera",
-            "vivaldi": "Vivaldi",
-        }
-        return f"🍪 Cookies: {display_names.get(cb, cb.capitalize())}"
+            display_val = "File"
+        else:
+            cb = (getattr(self, "cookies_browser", "auto") or "auto").lower()
+            if cb in ("none", "off"):
+                display_val = tr("lbl_cookies_off", "Off")
+            else:
+                display_names = {
+                    "auto": "Auto",
+                    "edge": "Edge",
+                    "chrome": "Chrome",
+                    "firefox": "Firefox",
+                    "brave": "Brave",
+                    "opera": "Opera",
+                    "vivaldi": "Vivaldi",
+                }
+                display_val = display_names.get(cb, cb.capitalize())
+        prefix = tr("btn_cookies_prefix", "🍪 Cookies:").strip()
+        return f"{prefix} {display_val}"
 
     def _update_cookies_btn(self):
         """Refreshes the visual text and theme colors of the cookies button."""
@@ -115,11 +154,22 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
         cb = (getattr(self, "cookies_browser", "auto") or "auto").lower()
         has_cookies = not (cb in ("none", "off") and not (getattr(self, "cookies_file", "") and os.path.isfile(self.cookies_file)))
 
-        self.btn_cookies.configure(
-            text=btn_text,
-            fg=self.c_accent if has_cookies else self.c_text_muted,
-            bg=self.c_panel_light if has_cookies else self.c_panel
-        )
+        if has_cookies:
+            self.btn_cookies.configure(
+                text=btn_text,
+                bg="#172554",
+                fg=self.c_accent,
+                highlightbackground=self.c_accent_dark,
+                highlightthickness=1,
+            )
+        else:
+            self.btn_cookies.configure(
+                text=btn_text,
+                bg="#182234",
+                fg=self.c_text_muted,
+                highlightbackground=self.c_border,
+                highlightthickness=1,
+            )
 
     def cycle_cookies_setting(self):
         """

@@ -284,7 +284,7 @@ class ClipboardControllerMixin:
             cur_dest = self.entry_dest.get().strip()
         except Exception:
             pass
-        dest_dir = os.path.dirname(cur_dest) if cur_dest else downloads_dir
+        dest_dir = cur_dest if cur_dest and os.path.isdir(cur_dest) else (os.path.dirname(cur_dest) if cur_dest else downloads_dir)
         if not os.path.isdir(dest_dir):
             dest_dir = downloads_dir
 
@@ -345,7 +345,7 @@ class ClipboardControllerMixin:
                         cur_d = self.entry_dest.get().strip()
                     except Exception:
                         pass
-                    dest_dir = os.path.dirname(cur_d) if cur_d else downloads_dir
+                    dest_dir = cur_d if cur_d and os.path.isdir(cur_d) else (os.path.dirname(cur_d) if cur_d else downloads_dir)
                     if not os.path.isdir(dest_dir):
                         dest_dir = downloads_dir
 
@@ -508,13 +508,17 @@ class ClipboardControllerMixin:
             self.btn_clipboard_sniffer.configure(
                 text=tr("btn_sniffer_active"),
                 fg=self.c_success,
-                bg=self.c_panel_light
+                bg="#0f292a",
+                highlightbackground="#10b981",
+                highlightthickness=1,
             )
         else:
             self.btn_clipboard_sniffer.configure(
                 text=tr("btn_sniffer_paused"),
                 fg=self.c_text_muted,
-                bg=self.c_panel
+                bg="#182234",
+                highlightbackground=self.c_border,
+                highlightthickness=1,
             )
 
     def toggle_clipboard_sniffer(self):
