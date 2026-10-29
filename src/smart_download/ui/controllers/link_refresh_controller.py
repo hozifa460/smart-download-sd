@@ -81,7 +81,7 @@ class LinkRefreshControllerMixin:
                     self.log(f"[REFRESH] Link refreshed successfully: {new_url}")
                 if hasattr(self, "show_safe_info") and callable(self.show_safe_info):
                     self.show_safe_info(
-                        "Link Refreshed Successfully 🔄",
+                        "Link Refreshed Successfully ↻",
                         f"Download address updated to:\n{new_url}\n\nResuming download seamlessly from existing progress without losing data!"
                     )
             else:

@@ -74,7 +74,7 @@ class RefreshLinkModal(tk.Toplevel):
         self.c_warning = th.get("c_warning", "#f59e0b")
         self.c_input_bg = th.get("c_input_bg", "#0b1220")
 
-        self.title(tr("refresh_modal_title", "🔄 Refresh Download Address — Smart Download"))
+        self.title(tr("refresh_modal_title", "↻ Refresh Download Address — Smart Download"))
         self.configure(bg=self.c_bg)
 
         if parent:
@@ -205,7 +205,7 @@ class RefreshLinkModal(tk.Toplevel):
         header = tk.Frame(container, bg=self.c_bg)
         header.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_icon = tk.Label(header, text="🔄", font=("Segoe UI Emoji", 20), bg=self.c_bg, fg=self.c_accent)
+        lbl_icon = tk.Label(header, text="↻", font=("Segoe UI", 20, "bold"), bg=self.c_bg, fg=self.c_accent)
         lbl_icon.pack(side=tk.LEFT, padx=(0, 10))
 
         title_box = tk.Frame(header, bg=self.c_bg)
@@ -346,7 +346,7 @@ class RefreshLinkModal(tk.Toplevel):
 
         self.btn_validate = tk.Button(
             btn_row,
-            text=tr("refresh_modal_btn_validate", "🔄 Validate & Resume"),
+            text=tr("refresh_modal_btn_validate", "↻ Validate & Resume"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_success,
             fg="white",
@@ -457,13 +457,13 @@ class RefreshLinkModal(tk.Toplevel):
                 self.on_success(new_url, self.custom_headers)
             except Exception as e:
                 self._set_status(f"Error applying update: {e}", is_error=True)
-                self.btn_validate.configure(state="normal", text=tr("refresh_modal_btn_validate", "🔄 Validate & Resume"))
+                self.btn_validate.configure(state="normal", text=tr("refresh_modal_btn_validate", "↻ Validate & Resume"))
                 self.btn_cancel.configure(state="normal")
                 return
         self.destroy()
 
     def _on_validation_failure(self, err_msg: str):
-        self.btn_validate.configure(state="normal", text=tr("refresh_modal_btn_validate", "🔄 Validate & Resume"))
+        self.btn_validate.configure(state="normal", text=tr("refresh_modal_btn_validate", "↻ Validate & Resume"))
         self.btn_cancel.configure(state="normal")
         self._set_status(f"❌ {err_msg}", is_error=True)
 

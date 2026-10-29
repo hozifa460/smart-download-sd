@@ -192,7 +192,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         def _update_server_status_label():
             if self.bridge_server and self.bridge_server.is_running:
                 lbl_status.configure(text=tr("browser_server_active", f"● Active on http://{self.bridge_server.host}:{self.bridge_server.port}").format(host=self.bridge_server.host, port=self.bridge_server.port), fg=self.c_success)
-                btn_toggle_server.configure(text=tr("browser_btn_stop_server", "⏹ Stop Server"), bg=self.c_danger)
+                btn_toggle_server.configure(text=tr("browser_btn_stop_server", "✕ Stop Server"), bg=self.c_danger)
             else:
                 lbl_status.configure(text=tr("browser_server_stopped", "● Listener Stopped / Offline"), fg=self.c_danger)
                 btn_toggle_server.configure(text=tr("browser_btn_start_server", "▶ Start Server"), bg=self.c_success)
@@ -266,7 +266,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
                 chrome_str = "Chrome ✓" if status.get("chrome_registered") else "Chrome ✕"
                 edge_str = "Edge ✓" if status.get("edge_registered") else "Edge ✕"
                 lbl_reg_status.configure(text=tr("browser_reg_active", f"● Registry Active: {chrome_str}  {edge_str} (com.smartdownload.host)").format(chrome=chrome_str, edge=edge_str), fg=self.c_success)
-                btn_reg.configure(text=tr("browser_btn_reregister", "🔄 Re-Register"), bg=self.c_panel_light)
+                btn_reg.configure(text=tr("browser_btn_reregister", "↻ Re-Register"), bg=self.c_panel_light)
             else:
                 lbl_reg_status.configure(text=tr("browser_reg_inactive", "● Not Registered in Windows Registry"), fg=self.c_warning)
                 btn_reg.configure(text=tr("browser_btn_register", "🔗 1-Click Register (Chrome & Edge)"), bg=self.c_success)

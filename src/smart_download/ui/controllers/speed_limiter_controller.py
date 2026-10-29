@@ -54,7 +54,7 @@ class SpeedLimiterControllerMixin:
             try:
                 set_setting("custom_speed_limit_kbps", kb_val)
                 preset_name = "Custom"
-                reverse_mapping = {128: "128 KB/s", 256: "256 KB/s", 512: "512 KB/s", 1024: "1.0 MB/s", 2048: "2.0 MB/s", 5120: "5.0 MB/s", 10240: "10.0 MB/s", 20480: "20.0 MB/s"}
+                reverse_mapping = {128: "128 KB/s", 256: "256 KB/s", 512: "512 KB/s", 1024: "1 MB/s", 2048: "2 MB/s", 5120: "5 MB/s", 10240: "10 MB/s", 20480: "20 MB/s"}
                 if kb_val in reverse_mapping:
                     preset_name = reverse_mapping[kb_val]
                 if hasattr(self, "limit_preset_var") and self.limit_preset_var:

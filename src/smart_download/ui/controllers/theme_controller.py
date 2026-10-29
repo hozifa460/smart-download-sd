@@ -36,143 +36,149 @@ class ThemeControllerMixin:
             except Exception:
                 pass
 
-        if ttk and hasattr(self, "root") and self.root:
-            try:
-                self.style = ttk.Style(self.root)
-                self.style.theme_use("clam")
+        self._setup_styles()
 
-                # Treeview styling
-                row_h = max(26, int(26 * getattr(self, "dpi_scale", 1.0)))
-                for tv_name in ("Treeview", "Custom.Treeview"):
-                    self.style.configure(
-                        tv_name,
-                        background=self.c_input_bg,
-                        foreground=self.c_text_main,
-                        fieldbackground=self.c_input_bg,
-                        bordercolor=self.c_border,
-                        lightcolor=self.c_border,
-                        darkcolor=self.c_border,
-                        borderwidth=0,
-                        relief="flat",
-                        rowheight=row_h,
-                        font=("Segoe UI", 9),
-                    )
-                    self.style.map(
-                        tv_name,
-                        background=[("selected", self.c_accent_dark)],
-                        foreground=[("selected", "#ffffff")],
-                    )
-                for hd_name in ("Treeview.Heading", "Custom.Treeview.Heading"):
-                    self.style.configure(
-                        hd_name,
-                        background="#182338",
-                        foreground=self.c_accent,
-                        bordercolor=self.c_border,
-                        lightcolor="#182338",
-                        darkcolor="#182338",
-                        relief="flat",
-                        padding=(8, 6),
-                        font=("Segoe UI", 9, "bold"),
-                    )
-                    self.style.map(
-                        hd_name,
-                        background=[("active", self.c_panel_light)],
-                        lightcolor=[("active", self.c_panel_light)],
-                        darkcolor=[("active", self.c_panel_light)],
-                    )
+    def _setup_styles(self):
+        """Configures TTK dark theme styles for Notebook, Treeview, Frames, and Scrollbars."""
+        if not (ttk and hasattr(self, "root") and self.root):
+            return
 
-                # Notebook tabs
-                for nb_name in ("TNotebook", "Custom.TNotebook"):
-                    self.style.configure(
-                        nb_name,
-                        background=self.c_bg,
-                        bordercolor=self.c_border,
-                        lightcolor=self.c_bg,
-                        darkcolor=self.c_bg,
-                        tabmargins=[0, 2, 0, 0],
-                        borderwidth=0,
-                    )
-                for tab_name in ("TNotebook.Tab", "Custom.TNotebook.Tab"):
-                    self.style.configure(
-                        tab_name,
-                        background=self.c_panel,
-                        foreground=self.c_text_muted,
-                        bordercolor=self.c_border,
-                        lightcolor=self.c_panel,
-                        darkcolor=self.c_panel,
-                        focuscolor=self.c_panel,
-                        padding=[16, 7],
-                        font=("Segoe UI", 9, "bold"),
-                    )
-                    self.style.map(
-                        tab_name,
-                        background=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
-                        foreground=[("selected", "#ffffff"), ("active", self.c_text_bright)],
-                        bordercolor=[("selected", self.c_accent_dark), ("active", self.c_border)],
-                        lightcolor=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
-                        darkcolor=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
-                    )
+        try:
+            self.style = ttk.Style(self.root)
+            self.style.theme_use("clam")
 
-                # TFrame styling
+            # Treeview styling
+            row_h = max(26, int(26 * getattr(self, "dpi_scale", 1.0)))
+            for tv_name in ("Treeview", "Custom.Treeview"):
                 self.style.configure(
-                    "TFrame",
+                    tv_name,
+                    background=self.c_input_bg,
+                    foreground=self.c_text_main,
+                    fieldbackground=self.c_input_bg,
+                    bordercolor=self.c_border,
+                    lightcolor=self.c_border,
+                    darkcolor=self.c_border,
+                    borderwidth=0,
+                    relief="flat",
+                    rowheight=row_h,
+                    font=("Segoe UI", 9),
+                )
+                self.style.map(
+                    tv_name,
+                    background=[("selected", self.c_accent_dark)],
+                    foreground=[("selected", "#ffffff")],
+                )
+            for hd_name in ("Treeview.Heading", "Custom.Treeview.Heading"):
+                self.style.configure(
+                    hd_name,
+                    background="#182338",
+                    foreground=self.c_accent,
+                    bordercolor=self.c_border,
+                    lightcolor="#182338",
+                    darkcolor="#182338",
+                    relief="flat",
+                    padding=(8, 6),
+                    font=("Segoe UI", 9, "bold"),
+                )
+                self.style.map(
+                    hd_name,
+                    background=[("active", self.c_panel_light)],
+                    lightcolor=[("active", self.c_panel_light)],
+                    darkcolor=[("active", self.c_panel_light)],
+                )
+
+            # Notebook tabs
+            for nb_name in ("TNotebook", "Custom.TNotebook"):
+                self.style.configure(
+                    nb_name,
+                    background=self.c_bg,
+                    bordercolor=self.c_border,
+                    lightcolor=self.c_bg,
+                    darkcolor=self.c_bg,
+                    tabmargins=[0, 2, 0, 0],
+                    borderwidth=0,
+                )
+            for tab_name in ("TNotebook.Tab", "Custom.TNotebook.Tab"):
+                self.style.configure(
+                    tab_name,
                     background=self.c_panel,
+                    foreground=self.c_text_muted,
                     bordercolor=self.c_border,
                     lightcolor=self.c_panel,
                     darkcolor=self.c_panel,
-                )
-
-                # Dark styling for TCombobox
-                self.style.configure(
-                    "TCombobox",
-                    fieldbackground=self.c_input_bg,
-                    background=self.c_panel_light,
-                    foreground=self.c_text_bright,
-                    arrowcolor=self.c_accent,
-                    bordercolor=self.c_border,
-                    lightcolor=self.c_border,
-                    darkcolor=self.c_input_bg,
-                    insertcolor=self.c_text_bright,
-                    padding=4,
+                    focuscolor=self.c_panel,
+                    padding=[16, 7],
+                    font=("Segoe UI", 9, "bold"),
                 )
                 self.style.map(
-                    "TCombobox",
-                    fieldbackground=[("readonly", self.c_input_bg), ("disabled", self.c_bg)],
-                    selectbackground=[("readonly", self.c_input_bg)],
-                    selectforeground=[("readonly", self.c_text_bright)],
-                    background=[("active", self.c_border), ("readonly", self.c_panel_light)],
-                    foreground=[("readonly", self.c_text_bright), ("disabled", self.c_text_muted)],
-                    arrowcolor=[("active", self.c_text_bright), ("readonly", self.c_accent)],
+                    tab_name,
+                    background=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
+                    foreground=[("selected", "#ffffff"), ("active", self.c_text_bright)],
+                    bordercolor=[("selected", self.c_accent_dark), ("active", self.c_border)],
+                    lightcolor=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
+                    darkcolor=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
                 )
-                try:
-                    self.root.option_add("*TCombobox*Listbox.background", self.c_panel)
-                    self.root.option_add("*TCombobox*Listbox.foreground", self.c_text_bright)
-                    self.root.option_add("*TCombobox*Listbox.selectBackground", self.c_accent_dark)
-                    self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
-                    self.root.option_add("*TCombobox*Listbox.font", ("Segoe UI", 9))
-                except Exception:
-                    pass
 
-                # Dark styling for Scrollbars
-                for sb_style in ("Vertical.TScrollbar", "Horizontal.TScrollbar", "TScrollbar"):
-                    self.style.configure(
-                        sb_style,
-                        background=self.c_panel_light,
-                        troughcolor=self.c_bg,
-                        bordercolor=self.c_bg,
-                        arrowcolor=self.c_text_muted,
-                        lightcolor=self.c_panel_light,
-                        darkcolor=self.c_panel_light,
-                        gripcount=0,
-                        relief="flat",
-                    )
-                    self.style.map(
-                        sb_style,
-                        background=[("active", self.c_accent_dark), ("pressed", self.c_accent)],
-                        arrowcolor=[("active", self.c_text_bright)],
-                    )
+            # TFrame styling
+            self.style.configure(
+                "TFrame",
+                background=self.c_panel,
+                bordercolor=self.c_border,
+                lightcolor=self.c_panel,
+                darkcolor=self.c_panel,
+            )
+
+            # Dark styling for TCombobox
+            self.style.configure(
+                "TCombobox",
+                fieldbackground=self.c_input_bg,
+                background=self.c_panel_light,
+                foreground=self.c_text_bright,
+                arrowcolor=self.c_accent,
+                bordercolor=self.c_border,
+                lightcolor=self.c_border,
+                darkcolor=self.c_input_bg,
+                insertcolor=self.c_text_bright,
+                padding=4,
+            )
+            self.style.map(
+                "TCombobox",
+                fieldbackground=[("readonly", self.c_input_bg), ("disabled", self.c_bg)],
+                selectbackground=[("readonly", self.c_input_bg)],
+                selectforeground=[("readonly", self.c_text_bright)],
+                background=[("active", self.c_border), ("readonly", self.c_panel_light)],
+                foreground=[("readonly", self.c_text_bright), ("disabled", self.c_text_muted)],
+                arrowcolor=[("active", self.c_text_bright), ("readonly", self.c_accent)],
+            )
+            try:
+                self.root.option_add("*TCombobox*Listbox.background", self.c_panel)
+                self.root.option_add("*TCombobox*Listbox.foreground", self.c_text_bright)
+                self.root.option_add("*TCombobox*Listbox.selectBackground", self.c_accent_dark)
+                self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+                self.root.option_add("*TCombobox*Listbox.font", ("Segoe UI", 9))
             except Exception:
                 pass
+
+            # Dark styling for Scrollbars
+            for sb_style in ("Vertical.TScrollbar", "Horizontal.TScrollbar", "TScrollbar"):
+                self.style.configure(
+                    sb_style,
+                    background=self.c_panel_light,
+                    troughcolor=self.c_bg,
+                    bordercolor=self.c_bg,
+                    arrowcolor=self.c_text_muted,
+                    lightcolor=self.c_panel_light,
+                    darkcolor=self.c_panel_light,
+                    gripcount=0,
+                    relief="flat",
+                )
+                self.style.map(
+                    sb_style,
+                    background=[("active", self.c_accent_dark), ("pressed", self.c_accent)],
+                    arrowcolor=[("active", self.c_text_bright)],
+                )
+        except Exception:
+            pass
 
     def _theme_dict(self) -> Dict[str, str]:
         """Returns active theme dictionary for modals and child widgets."""
@@ -191,10 +197,6 @@ class ThemeControllerMixin:
             "c_text_main": getattr(self, "c_text_main", "#f8fafc"),
             "c_input_bg": getattr(self, "c_input_bg", "#090e1a")
         }
-
-    def _setup_styles(self):
-        """Public alias configuring theme color palette and TTK widgets."""
-        self._init_theme()
 
 
 __all__ = ["ThemeControllerMixin"]

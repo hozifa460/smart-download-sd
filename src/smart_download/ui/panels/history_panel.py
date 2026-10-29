@@ -47,11 +47,11 @@ class HistoryPanelMixin:
             command=self._history_copy_selected_url
         )
         self.history_context_menu.add_command(
-            label=tr("ctx_resume_retry", "🔄 Resume / Retry"),
+            label=tr("ctx_resume_retry", "↻ Resume / Retry"),
             command=self._history_redownload_selected
         )
         self.history_context_menu.add_command(
-            label=tr("ctx_redownload_quality", "🎞️ Re-Download with Different Quality"),
+            label=tr("ctx_redownload_quality", "⚙ Re-Download with Different Quality"),
             command=self._history_redownload_with_quality
         )
         self.history_context_menu.add_separator()

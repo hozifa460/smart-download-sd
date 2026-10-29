@@ -194,7 +194,7 @@ class LocaleControllerMixin:
 
         # Media Options Bar
         if hasattr(self, "lbl_main_quality") and self.lbl_main_quality.winfo_exists():
-            self.lbl_main_quality.configure(text=tr("lbl_main_quality", "🎞️ Quality:"))
+            self.lbl_main_quality.configure(text=tr("lbl_main_quality", "⚙ Quality:"))
         if hasattr(self, "lbl_main_audio") and self.lbl_main_audio.winfo_exists():
             self.lbl_main_audio.configure(text=tr("lbl_main_audio", "🎙️ Audio:"))
         if hasattr(self, "lbl_main_sub") and self.lbl_main_sub.winfo_exists():
@@ -202,7 +202,7 @@ class LocaleControllerMixin:
         if hasattr(self, "lbl_main_sub_mode") and self.lbl_main_sub_mode.winfo_exists():
             self.lbl_main_sub_mode.configure(text=tr("lbl_main_sub_mode", "⚙️ Mode:"))
         if hasattr(self, "btn_reopen_quality") and self.btn_reopen_quality.winfo_exists():
-            self.btn_reopen_quality.configure(text=tr("btn_media_quality_options", "⚙️ Options..."))
+            self.btn_reopen_quality.configure(text=tr("btn_media_quality_options", "⚙ Options..."))
 
         # Tray menu
         if hasattr(self, "tray_manager") and self.tray_manager:

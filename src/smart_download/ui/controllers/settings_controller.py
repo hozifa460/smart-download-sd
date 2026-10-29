@@ -293,9 +293,22 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
                 pass
 
     def _on_speed_preset_change(self, event=None):
-        """Delegates speed preset changes to speed limiter controller if available."""
+        """Delegates speed preset changes to speed limiter controller if available, treating Unlimited, بدون حد as 0."""
         if hasattr(self, "_on_preset_selected") and callable(self._on_preset_selected):
             return self._on_preset_selected(event)
+        var = getattr(self, "speed_preset_var", None) or getattr(self, "limit_preset_var", None)
+        if not var:
+            return
+        val = str(var.get()).strip()
+        if val in ("Unlimited", "بدون حد", tr("lbl_unlimited", "Unlimited")):
+            self.speed_limit = 0.0
+            if hasattr(self, "slider_speed"):
+                self.slider_speed.set(0)
+            if hasattr(self, "entry_custom_speed") and tk:
+                self.entry_custom_speed.delete(0, tk.END)
+                self.entry_custom_speed.insert(0, "0")
+            if hasattr(self, "_apply_speed_limit") and callable(self._apply_speed_limit):
+                self._apply_speed_limit()
 
 
 __all__ = ["SettingsControllerMixin", "LocaleControllerMixin", "SpeedLimiterControllerMixin"]

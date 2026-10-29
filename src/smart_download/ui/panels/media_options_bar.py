@@ -60,7 +60,7 @@ class MediaOptionsBarMixin:
         # Row 1: Quality (Combobox), Audio/Dubbing (Combobox), Reopen Modal Button
         row1 = tk.Frame(self.media_options_frame, bg=self.c_panel)
         row1.pack(fill=tk.X, pady=(4, 2))
-        self.lbl_main_quality = tk.Label(row1, text=tr("lbl_main_quality", "🎞️ Quality:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
+        self.lbl_main_quality = tk.Label(row1, text=tr("lbl_main_quality", "⚙ Quality:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
         self.cb_main_quality = ttk.Combobox(row1, state="readonly", font=("Segoe UI", 8), width=22)
         self.lbl_main_quality.pack(side=tk.LEFT); self.cb_main_quality.pack(side=tk.LEFT, padx=(4, 10))
         self.cb_main_quality.bind("<<ComboboxSelected>>", self._on_main_quality_changed)
@@ -72,7 +72,7 @@ class MediaOptionsBarMixin:
 
         self.btn_main_preview = tk.Button(row1, text=tr("btn_preview_short", "🎬 Preview"), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._open_main_media_preview)
         self.btn_main_preview.pack(side=tk.RIGHT, padx=(4, 0))
-        self.btn_reopen_quality = tk.Button(row1, text=tr("btn_media_quality_options", "🎞️ خيارات الجودة والترجمة"), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._reopen_media_quality_modal)
+        self.btn_reopen_quality = tk.Button(row1, text=tr("btn_media_quality_options", "⚙ Options..."), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._reopen_media_quality_modal)
         self.btn_reopen_quality.pack(side=tk.RIGHT, padx=(0, 4))
 
         # Row 2: Subtitles (Combobox), Subtitle Delivery Mode (Combobox), Subtitle Position (Combobox)

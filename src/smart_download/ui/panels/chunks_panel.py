@@ -31,7 +31,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         header_row = tk.Frame(card, bg=self.c_panel)
         header_row.pack(fill=tk.X, pady=(0, 4))
 
-        self.lbl_chunk_vis_title = tk.Label(header_row, text=tr("lbl_chunk_vis_title", "▦ خريطة قطاعات التحميل المباشرة (توزيع البايتات)"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
+        self.lbl_chunk_vis_title = tk.Label(header_row, text=tr("lbl_chunk_vis_title", "▦ SD DYNAMIC CHUNK VISUALIZER (Segmented Byte Map)"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
         self.lbl_chunk_vis_title.pack(side=tk.LEFT)
 
         self.lbl_chunk_vis_legend = tk.Label(header_row, text=tr("lbl_chunk_vis_legend", "■ نشط (سماوي)   ■ مكتمل (أخضر)   ■ متبقي (داكن)"), font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
@@ -247,7 +247,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         self.btn_hist_redownload = tk.Button(
             hist_toolbar,
-            text=tr("btn_hist_redownload", "🔄 Resume / Retry"),
+            text=tr("btn_hist_redownload", "↻ Resume / Retry"),
             command=self._history_redownload_selected,
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
@@ -263,7 +263,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         self.btn_hist_quality = tk.Button(
             hist_toolbar,
-            text=tr("ctx_redownload_quality", "🎞️ Re-Download Quality"),
+            text=tr("ctx_redownload_quality", "⚙ Re-Download Quality"),
             command=self._history_redownload_with_quality,
             font=btn_font,
             bg=self.c_panel_light,
@@ -395,7 +395,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
             bd=1
         )
         self.tree_context_menu.add_command(
-            label=tr("ctx_refresh_address", "🔄 Refresh Download Address..."),
+            label=tr("ctx_refresh_address", "↻ Refresh Download Address..."),
             command=self._open_refresh_link_dialog
         )
         self.tree_context_menu.add_separator()
@@ -404,11 +404,11 @@ class ChunksPanelMixin(MetricsPanelMixin):
             command=self._menu_resume
         )
         self.tree_context_menu.add_command(
-            label=tr("ctx_pause_download", "⏸ Pause Download"),
+            label=tr("ctx_pause_download", "❚❚ Pause Download"),
             command=self._menu_pause
         )
         self.tree_context_menu.add_command(
-            label=tr("ctx_cancel_download", "⏹ Cancel Download"),
+            label=tr("ctx_cancel_download", "✕ Cancel Download"),
             command=self._on_cancel_download
         )
         self.tree_context_menu.add_separator()

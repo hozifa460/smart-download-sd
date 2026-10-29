@@ -1,6 +1,6 @@
 """
 ========================================================================================
-🔄 AUTO-UPDATE ENGINE — Smart Download (SD) & yt-dlp Dynamic Plugin Updater
+↻ AUTO-UPDATE ENGINE — Smart Download (SD) & yt-dlp Dynamic Plugin Updater
 ========================================================================================
 Provides:
 1. Unified application version constant (APP_VERSION = "2.0.0").

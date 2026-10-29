@@ -60,7 +60,7 @@ class UpdateControllerMixin(ToastControllerMixin):
         t.start()
 
     def check_for_updates_manual(self):
-        """Triggered manually by user clicking '🔄 Check for Updates'."""
+        """Triggered manually by user clicking '↻ Check for Updates'."""
         if getattr(self, "_closing", False):
             return
         self.log("[UPDATER] Checking for Smart Download and yt-dlp updates...")
