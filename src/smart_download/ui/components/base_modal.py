@@ -54,19 +54,23 @@ class SafeModalDialog(_BaseToplevel):
 
         if dialog_type == "error":
             accent_col = c_danger
-            icon_str = "⚠️"
+            icon_str = "⚠"
         elif dialog_type == "warning":
             accent_col = c_warning
-            icon_str = "⚠️"
+            icon_str = "⚠"
         elif dialog_type == "confirm":
             accent_col = c_accent
-            icon_str = "❓"
+            icon_str = "?"
         else:
             accent_col = c_accent
-            icon_str = "ℹ️"
+            icon_str = "ℹ"
 
         self.title(title)
         self.configure(bg=c_bg)
+        try:
+            self.overrideredirect(True)
+        except Exception:
+            pass
         # Do not use grab_set(): with borderless / overrideredirect windows,
         # grab_set traps Win32 input messages and locks the main window pump.
 
@@ -80,7 +84,7 @@ class SafeModalDialog(_BaseToplevel):
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         dlg_w = min(int(520 * dpi_scale), max(440, int(sw * 0.90)))
-        dlg_h = min(int(260 * dpi_scale), max(220, int(sh * 0.70)))
+        dlg_h = min(int(280 * dpi_scale), max(240, int(sh * 0.70)))
 
         is_parent_visible = False
         try:
@@ -114,7 +118,7 @@ class SafeModalDialog(_BaseToplevel):
             y = max(0, (sh - dlg_h) // 2)
 
         self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
-        self.minsize(min(440, dlg_w), min(220, dlg_h))
+        self.minsize(min(440, dlg_w), min(240, dlg_h))
 
         # Apply application icon to modal window
         ico_path = get_resource_path("app_icon.ico")
@@ -143,6 +147,40 @@ class SafeModalDialog(_BaseToplevel):
 
         outer = tk.Frame(self, bg=c_border, padx=1, pady=1)
         outer.pack(fill=tk.BOTH, expand=True)
+
+        # Custom dark frameless title bar
+        title_bar = tk.Frame(outer, bg=c_panel, height=30)
+        title_bar.pack(fill=tk.X, side=tk.TOP)
+
+        lbl_app_icon = None
+        if os.path.isfile(png_path):
+            try:
+                from PIL import Image, ImageTk
+                img = Image.open(png_path).resize((16, 16), getattr(Image, "Resampling", Image).LANCZOS if hasattr(Image, "Resampling") else getattr(Image, "ANTIALIAS", 1))
+                self._modal_title_photo = ImageTk.PhotoImage(img)
+                lbl_app_icon = tk.Label(title_bar, image=self._modal_title_photo, bg=c_panel)
+                lbl_app_icon.pack(side=tk.LEFT, padx=(8, 4), pady=4)
+            except Exception:
+                pass
+        if not lbl_app_icon:
+            lbl_app_icon = tk.Label(title_bar, text="⚡", font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_accent)
+            lbl_app_icon.pack(side=tk.LEFT, padx=(8, 4), pady=4)
+
+        lbl_win_title = tk.Label(title_bar, text=title, font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright, anchor="w")
+        lbl_win_title.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 6))
+
+        btn_close = tk.Label(title_bar, text="✕", font=("Segoe UI", 10, "bold"), bg=c_panel, fg=c_text_muted, width=3, cursor="hand2")
+        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
+        btn_close.bind("<Enter>", lambda e: btn_close.configure(bg=c_danger, fg="white"))
+        btn_close.bind("<Leave>", lambda e: btn_close.configure(bg=c_panel, fg=c_text_muted))
+        btn_close.bind("<Button-1>", lambda e: self._on_close())
+
+        for w in (title_bar, lbl_win_title, lbl_app_icon):
+            w.bind("<ButtonPress-1>", self._on_drag_press)
+            w.bind("<B1-Motion>", self._on_drag_motion)
+
+        sep = tk.Frame(outer, bg=c_border, height=1)
+        sep.pack(fill=tk.X, side=tk.TOP)
 
         body = tk.Frame(outer, bg=c_bg, padx=18, pady=16)
         body.pack(fill=tk.BOTH, expand=True)
@@ -232,6 +270,15 @@ class SafeModalDialog(_BaseToplevel):
         self.bind("<Escape>", lambda e: self._on_close())
         self.bind("<Return>", lambda e: self._on_ok())
 
+    def _on_drag_press(self, event):
+        self._drag_offset_x = event.x_root - self.winfo_x()
+        self._drag_offset_y = event.y_root - self.winfo_y()
+
+    def _on_drag_motion(self, event):
+        x = event.x_root - getattr(self, "_drag_offset_x", 0)
+        y = event.y_root - getattr(self, "_drag_offset_y", 0)
+        self.geometry(f"+{x}+{y}")
+
     def grab_set(self):
         """No-op: Eliminates Win32 input capture and message pump locking."""
         pass
@@ -241,7 +288,10 @@ class SafeModalDialog(_BaseToplevel):
         pass
 
     def destroy(self):
-        if hasattr(self, "_modal_icon_photo"):
+        if hasattr(self, "_modal_title_photo") and self._modal_title_photo:
+            _detach_photo_tk(self._modal_title_photo)
+            self._modal_title_photo = None
+        if hasattr(self, "_modal_icon_photo") and self._modal_icon_photo:
             _detach_photo_tk(self._modal_icon_photo)
             self._modal_icon_photo = None
         try:

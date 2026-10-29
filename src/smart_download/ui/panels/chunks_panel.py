@@ -143,12 +143,12 @@ class ChunksPanelMixin(MetricsPanelMixin):
         self.tree_chunks.heading("status", text=tr("col_chunk_status", "Status"))
 
         scale = getattr(self, "dpi_scale", 1.0)
-        self.tree_chunks.column("id", width=max(50, int(60 * scale)), minwidth=40, anchor="center")
-        self.tree_chunks.column("range", width=max(200, int(250 * scale)), minwidth=180, anchor="w")
-        self.tree_chunks.column("size", width=max(90, int(110 * scale)), minwidth=80, anchor="e")
-        self.tree_chunks.column("downloaded", width=max(90, int(110 * scale)), minwidth=80, anchor="e")
-        self.tree_chunks.column("pct", width=max(80, int(90 * scale)), minwidth=70, anchor="center")
-        self.tree_chunks.column("status", width=max(100, int(120 * scale)), minwidth=90, anchor="center")
+        self.tree_chunks.column("id", width=max(50, int(60 * scale)), minwidth=40, anchor="center", stretch=True)
+        self.tree_chunks.column("range", width=max(200, int(250 * scale)), minwidth=180, anchor="w", stretch=True)
+        self.tree_chunks.column("size", width=max(90, int(110 * scale)), minwidth=80, anchor="e", stretch=True)
+        self.tree_chunks.column("downloaded", width=max(90, int(110 * scale)), minwidth=80, anchor="e", stretch=True)
+        self.tree_chunks.column("pct", width=max(80, int(90 * scale)), minwidth=70, anchor="center", stretch=True)
+        self.tree_chunks.column("status", width=max(100, int(120 * scale)), minwidth=90, anchor="center", stretch=True)
 
         scroll_tree = ttk.Scrollbar(tab_chunks, orient="vertical", command=self.tree_chunks.yview)
         self.tree_chunks.configure(yscrollcommand=scroll_tree.set)
@@ -158,6 +158,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         self._build_tree_context_menu()
         self.tree_chunks.bind("<Button-3>", self._show_tree_context_menu)
         self.tree_chunks.bind("<Button-2>", self._show_tree_context_menu)
+        self.tree_chunks.bind("<Configure>", self._on_tree_chunks_configure)
 
         # Tab 2: Activity Console Log
         tab_logs = tk.Frame(notebook, bg=self.c_panel, bd=0, highlightthickness=1, highlightbackground=self.c_border, highlightcolor=self.c_border)
@@ -322,12 +323,12 @@ class ChunksPanelMixin(MetricsPanelMixin):
         self.tree_history.heading("date", text=tr("col_hist_date", "Date Added"))
         self.tree_history.heading("path", text=tr("col_hist_path", "Saved Location"))
 
-        self.tree_history.column("category", width=max(80, int(95 * scale)), minwidth=70, anchor="center")
-        self.tree_history.column("filename", width=max(180, int(220 * scale)), minwidth=140, anchor="w")
-        self.tree_history.column("size", width=max(80, int(90 * scale)), minwidth=70, anchor="e")
-        self.tree_history.column("status", width=max(80, int(90 * scale)), minwidth=70, anchor="center")
-        self.tree_history.column("date", width=max(120, int(135 * scale)), minwidth=100, anchor="center")
-        self.tree_history.column("path", width=max(220, int(260 * scale)), minwidth=180, anchor="w")
+        self.tree_history.column("category", width=max(80, int(95 * scale)), minwidth=70, anchor="center", stretch=True)
+        self.tree_history.column("filename", width=max(180, int(220 * scale)), minwidth=140, anchor="w", stretch=True)
+        self.tree_history.column("size", width=max(80, int(90 * scale)), minwidth=70, anchor="e", stretch=True)
+        self.tree_history.column("status", width=max(80, int(90 * scale)), minwidth=70, anchor="center", stretch=True)
+        self.tree_history.column("date", width=max(120, int(135 * scale)), minwidth=100, anchor="center", stretch=True)
+        self.tree_history.column("path", width=max(220, int(260 * scale)), minwidth=180, anchor="w", stretch=True)
 
         scroll_hist = ttk.Scrollbar(tree_hist_frame, orient="vertical", command=self.tree_history.yview)
         self.tree_history.configure(yscrollcommand=scroll_hist.set)
@@ -338,6 +339,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         self.tree_history.bind("<Button-3>", self._show_history_context_menu)
         self.tree_history.bind("<Button-2>", self._show_history_context_menu)
         self.tree_history.bind("<Double-Button-1>", lambda e: self._history_open_selected_file())
+        self.tree_history.bind("<Configure>", self._on_tree_history_configure)
 
         self._refresh_history_table()
 
@@ -479,6 +481,34 @@ class ChunksPanelMixin(MetricsPanelMixin):
             except Exception as e:
                 if hasattr(self, "log") and callable(self.log):
                     self.log(f"Failed to open folder: {e}")
+
+    def _on_tree_chunks_configure(self, event):
+        """Proportionally distributes tree_chunks table width across columns when enlarged or maximized."""
+        w = getattr(event, "width", 0)
+        if w > 600:
+            if getattr(self, "_last_chunks_configured_w", None) == w:
+                return
+            self._last_chunks_configured_w = w
+            self.tree_chunks.column("id", width=max(50, int(w * 0.08)))
+            self.tree_chunks.column("range", width=max(200, int(w * 0.34)))
+            self.tree_chunks.column("size", width=max(90, int(w * 0.15)))
+            self.tree_chunks.column("downloaded", width=max(90, int(w * 0.15)))
+            self.tree_chunks.column("pct", width=max(80, int(w * 0.12)))
+            self.tree_chunks.column("status", width=max(100, int(w * 0.16)))
+
+    def _on_tree_history_configure(self, event):
+        """Proportionally distributes tree_history table width across columns when enlarged or maximized."""
+        w = getattr(event, "width", 0)
+        if w > 600:
+            if getattr(self, "_last_history_configured_w", None) == w:
+                return
+            self._last_history_configured_w = w
+            self.tree_history.column("category", width=max(80, int(w * 0.10)))
+            self.tree_history.column("filename", width=max(180, int(w * 0.25)))
+            self.tree_history.column("size", width=max(80, int(w * 0.10)))
+            self.tree_history.column("status", width=max(80, int(w * 0.10)))
+            self.tree_history.column("date", width=max(120, int(w * 0.15)))
+            self.tree_history.column("path", width=max(220, int(w * 0.30)))
 
 
 __all__ = ["ChunksPanelMixin", "MetricsPanelMixin"]

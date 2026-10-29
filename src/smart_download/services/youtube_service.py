@@ -2,25 +2,15 @@
 YouTube & universal streaming resolver: yt-dlp metadata extraction,
 fallback TikTok direct rehydration, progressive format detection, and FFmpeg stream merging.
 """
-import os
-import re
-import sys
-import time
-import json
-import shutil
-import subprocess
-import urllib.request
-import http.cookiejar
+import os, re, sys, time, json, shutil, subprocess, http.cookiejar, urllib.request
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
 try:
     from .updater_service import APP_VERSION, YtDlpAutoUpdater, get_ytdlp_plugin_dir
 except ImportError:
-    try:
-        from smart_download.services.updater_service import APP_VERSION, YtDlpAutoUpdater, get_ytdlp_plugin_dir
-    except ImportError:
-        from updater import APP_VERSION, YtDlpAutoUpdater, get_ytdlp_plugin_dir
+    try: from smart_download.services.updater_service import APP_VERSION, YtDlpAutoUpdater, get_ytdlp_plugin_dir
+    except ImportError: from updater import APP_VERSION, YtDlpAutoUpdater, get_ytdlp_plugin_dir
 
 from ..core.chunk import get_permissive_ssl_context
 
@@ -82,13 +72,99 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
 
     def log(self, message: str):
         if self.on_log:
-            try:
-                self.on_log(message)
-            except Exception:
-                pass
+            try: self.on_log(message)
+            except Exception: pass
+
+    def _extract_tiktok_via_tikwm(self, url: str) -> Optional[Dict[str, Any]]:
+        """Queries TikWM API fallback when TikTok webpage requests fail or trigger WAF challenge."""
+        try:
+            import urllib.parse
+            api_url = f"https://www.tikwm.com/api/?url={urllib.parse.quote(url)}&hd=1"
+            self.log(f"[TIKTOK] Querying TikWM API fallback: {api_url}")
+            req = urllib.request.Request(
+                api_url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                res = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+            if not isinstance(res, dict) or res.get("code") != 0 or not isinstance(res.get("data"), dict):
+                return None
+
+            d = res["data"]
+            media_id = str(d.get("id") or extract_media_id(url) or "tiktok_video")
+            title = str(d.get("title") or f"TikTok_Video_{media_id}").strip()[:180]
+            duration = int(d.get("duration") or 0)
+            thumbnail = d.get("origin_cover") or d.get("cover") or ""
+            formats: List[Dict[str, Any]] = []
+            seen_urls = set()
+
+            def _resolve_url(u: str) -> str:
+                return f"https://www.tikwm.com{u}" if u.startswith("/") else u
+
+            stream_headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.tiktok.com/"}
+
+            if d.get("hdplay"):
+                hd_url = _resolve_url(str(d["hdplay"]))
+                seen_urls.add(hd_url)
+                formats.append({
+                    "format_id": "hd_no_watermark", "url": hd_url, "ext": "mp4",
+                    "width": 1080, "height": 1920,
+                    "filesize": int(d.get("hd_size") or d.get("size") or 0),
+                    "tbr": 0.0, "vcodec": "h264", "acodec": "aac",
+                    "http_headers": dict(stream_headers), "protocol": "https",
+                    "format_note": "HD (No Watermark)"
+                })
+
+            if d.get("play"):
+                play_url = _resolve_url(str(d["play"]))
+                if play_url not in seen_urls:
+                    seen_urls.add(play_url)
+                    formats.append({
+                        "format_id": "sd_no_watermark", "url": play_url, "ext": "mp4",
+                        "width": 576, "height": 1024,
+                        "filesize": int(d.get("size") or 0),
+                        "tbr": 0.0, "vcodec": "h264", "acodec": "aac",
+                        "http_headers": dict(stream_headers), "protocol": "https",
+                        "format_note": "SD (No Watermark)"
+                    })
+
+            if d.get("wmplay"):
+                wm_url = _resolve_url(str(d["wmplay"]))
+                if wm_url not in seen_urls:
+                    seen_urls.add(wm_url)
+                    formats.append({
+                        "format_id": "watermarked", "url": wm_url, "ext": "mp4",
+                        "width": 480, "height": 854,
+                        "filesize": int(d.get("wm_size") or d.get("size") or 0),
+                        "tbr": 0.0, "vcodec": "h264", "acodec": "aac",
+                        "http_headers": dict(stream_headers), "protocol": "https"
+                    })
+
+            if d.get("music"):
+                music_url = _resolve_url(str(d["music"]))
+                formats.append({
+                    "format_id": "music_audio", "url": music_url, "ext": "mp3",
+                    "vcodec": "none", "acodec": "mp3", "abr": 128, "filesize": 0,
+                    "http_headers": dict(stream_headers), "protocol": "https"
+                })
+
+            if not formats:
+                return None
+
+            self.log(f"[TIKTOK] TikWM API extraction successful: {len(formats)} formats found.")
+            return {
+                "id": media_id, "title": title, "duration": duration, "thumbnail": thumbnail,
+                "webpage_url": url, "http_headers": stream_headers, "_sd_cookie_header": "",
+                "formats": formats, "subtitles": {}
+            }
+        except Exception as e:
+            self.log(f"[TIKTOK ERROR] TikWM extraction failed: {e}")
+            return None
 
     def _extract_tiktok_direct(self, url: str) -> Optional[Dict[str, Any]]:
-        """Direct TikTok rehydration extractor parsing __UNIVERSAL_DATA_FOR_REHYDRATION__ or SIGI_STATE."""
+        """Direct TikTok rehydration extractor parsing __UNIVERSAL_DATA_FOR_REHYDRATION__, falling back to TikWM API."""
+        html_info = None
         try:
             self.log(f"[TIKTOK] Attempting direct HTML rehydration extraction for: {url}")
             cj = http.cookiejar.CookieJar()
@@ -107,13 +183,9 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 raw = resp.read()
                 enc = (resp.headers.get("Content-Encoding") or "").lower()
                 if "gzip" in enc or raw[:2] == b"\x1f\x8b":
-                    import gzip
-                    try: raw = gzip.decompress(raw)
-                    except Exception: pass
+                    import gzip; raw = gzip.decompress(raw)
                 elif "deflate" in enc:
-                    import zlib
-                    try: raw = zlib.decompress(raw)
-                    except Exception: pass
+                    import zlib; raw = zlib.decompress(raw)
                 html = raw.decode("utf-8", errors="replace")
 
             data = None
@@ -126,107 +198,109 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 if m2:
                     try: data = json.loads(m2.group(1).strip())
                     except Exception: pass
-            if not isinstance(data, dict):
-                return None
 
-            scope = data.get("__DEFAULT_SCOPE__", {})
-            vdetail = scope.get("webapp.video-detail", {})
-            item = vdetail.get("itemInfo", {}).get("itemStruct") or vdetail.get("itemStruct")
-            if not item and "ItemModule" in data:
-                im = data["ItemModule"]
-                if isinstance(im, dict) and im:
-                    item = next(iter(im.values()), None)
-            if not isinstance(item, dict):
-                def _find_item(obj, d=0):
-                    if d > 8 or not isinstance(obj, dict): return None
-                    if "itemStruct" in obj and isinstance(obj["itemStruct"], dict): return obj["itemStruct"]
-                    if "video" in obj and "id" in obj and isinstance(obj.get("video"), dict): return obj
-                    for v in obj.values():
-                        if isinstance(v, dict):
-                            r = _find_item(v, d + 1)
-                            if r: return r
-                    return None
-                item = _find_item(data)
-            if not isinstance(item, dict):
-                return None
+            if isinstance(data, dict):
+                scope = data.get("__DEFAULT_SCOPE__", {})
+                vdetail = scope.get("webapp.video-detail", {})
+                item = vdetail.get("itemInfo", {}).get("itemStruct") or vdetail.get("itemStruct")
+                if not item and "ItemModule" in data and isinstance(data["ItemModule"], dict):
+                    item = next(iter(data["ItemModule"].values()), None)
+                if not isinstance(item, dict):
+                    def _find_item(obj, d=0):
+                        if d > 8 or not isinstance(obj, dict): return None
+                        if "itemStruct" in obj and isinstance(obj["itemStruct"], dict): return obj["itemStruct"]
+                        if "video" in obj and "id" in obj and isinstance(obj.get("video"), dict): return obj
+                        for v in obj.values():
+                            if isinstance(v, dict):
+                                r = _find_item(v, d + 1)
+                                if r: return r
+                        return None
+                    item = _find_item(data)
 
-            cookie_header = "; ".join(f"{c.name}={c.value}" for c in cj)
-            stream_headers = {"User-Agent": ua, "Referer": "https://www.tiktok.com/"}
-            if cookie_header:
-                stream_headers["Cookie"] = cookie_header
+                if isinstance(item, dict):
+                    cookie_header = "; ".join(f"{c.name}={c.value}" for c in cj)
+                    stream_headers = {"User-Agent": ua, "Referer": "https://www.tiktok.com/"}
+                    if cookie_header: stream_headers["Cookie"] = cookie_header
+                    video = item.get("video") or {}
+                    media_id = str(item.get("id") or extract_media_id(final_url) or "tiktok_video")
+                    title = str(item.get("desc") or f"TikTok_Video_{media_id}").strip()[:180]
+                    duration = int(video.get("duration") or 0)
+                    thumbnail = video.get("originCover") or video.get("cover") or ""
+                    formats: List[Dict[str, Any]] = []
+                    seen_urls = set()
 
-            video = item.get("video") or {}
-            media_id = str(item.get("id") or extract_media_id(final_url) or "tiktok_video")
-            title = str(item.get("desc") or f"TikTok_Video_{media_id}").strip()[:180]
-            duration = int(video.get("duration") or 0)
-            thumbnail = video.get("originCover") or video.get("cover") or ""
+                    for b in video.get("bitrateInfo") or []:
+                        if not isinstance(b, dict): continue
+                        pa = b.get("PlayAddr") or {}
+                        url_list = pa.get("UrlList") or []
+                        s_url = next((u for u in url_list if u and isinstance(u, str) and u.startswith("http")), None)
+                        if not s_url or s_url in seen_urls: continue
+                        seen_urls.add(s_url)
+                        formats.append({
+                            "format_id": str(b.get("GearName") or f"tt_{pa.get('Height') or 1024}p"),
+                            "url": s_url, "ext": "mp4",
+                            "width": int(pa.get("Width") or video.get("width") or 576),
+                            "height": int(pa.get("Height") or video.get("height") or 1024),
+                            "filesize": int(pa.get("DataSize") or 0),
+                            "tbr": float(b.get("Bitrate") or 0) / 1000.0,
+                            "vcodec": str(b.get("CodecType") or "h264").lower(),
+                            "acodec": "aac", "http_headers": dict(stream_headers), "protocol": "https"
+                        })
 
-            formats: List[Dict[str, Any]] = []
-            seen_urls = set()
+                    for k, pfx in (("downloadAddr", "download"), ("playAddr", "play")):
+                        v = video.get(k)
+                        cu = v if isinstance(v, str) and v.startswith("http") else None
+                        if not cu and isinstance(v, dict):
+                            cu = next((u for u in v.get("UrlList") or [] if isinstance(u, str) and u.startswith("http")), None)
+                        if cu and cu not in seen_urls:
+                            seen_urls.add(cu)
+                            formats.append({
+                                "format_id": f"{pfx}_addr", "url": cu, "ext": "mp4",
+                                "width": int(video.get("width") or 576), "height": int(video.get("height") or 1024),
+                                "filesize": int(video.get("dataSize") or 0), "tbr": 0.0,
+                                "vcodec": "h264", "acodec": "aac", "http_headers": dict(stream_headers), "protocol": "https"
+                            })
 
-            for b in video.get("bitrateInfo") or []:
-                if not isinstance(b, dict): continue
-                pa = b.get("PlayAddr") or {}
-                url_list = pa.get("UrlList") or []
-                s_url = next((u for u in url_list if u and isinstance(u, str) and u.startswith("http")), None)
-                if not s_url or s_url in seen_urls: continue
-                seen_urls.add(s_url)
-                codec = str(b.get("CodecType") or "h264").lower()
-                w = int(pa.get("Width") or video.get("width") or 576)
-                h = int(pa.get("Height") or video.get("height") or 1024)
-                fs = int(pa.get("DataSize") or 0)
-                tbr = float(b.get("Bitrate") or 0) / 1000.0
-                fid = str(b.get("GearName") or f"tt_{h}p")
-                formats.append({
-                    "format_id": fid, "url": s_url, "ext": "mp4",
-                    "width": w, "height": h, "filesize": fs, "tbr": tbr,
-                    "vcodec": codec, "acodec": "aac", "http_headers": dict(stream_headers), "protocol": "https"
-                })
+                    music = item.get("music") or {}
+                    mu = music.get("playUrl")
+                    if isinstance(mu, str) and mu.startswith("http") and mu not in seen_urls:
+                        seen_urls.add(mu)
+                        formats.append({
+                            "format_id": "music_audio", "url": mu, "ext": "mp3",
+                            "vcodec": "none", "acodec": "mp3", "abr": 128,
+                            "http_headers": dict(stream_headers), "protocol": "https"
+                        })
 
-            for k, pfx in (("downloadAddr", "download"), ("playAddr", "play")):
-                v = video.get(k)
-                cu = v if isinstance(v, str) and v.startswith("http") else None
-                if not cu and isinstance(v, dict):
-                    cu = next((u for u in v.get("UrlList") or [] if isinstance(u, str) and u.startswith("http")), None)
-                if cu and cu not in seen_urls:
-                    seen_urls.add(cu)
-                    formats.append({
-                        "format_id": f"{pfx}_addr", "url": cu, "ext": "mp4",
-                        "width": int(video.get("width") or 576), "height": int(video.get("height") or 1024),
-                        "filesize": int(video.get("dataSize") or 0), "tbr": 0.0,
-                        "vcodec": "h264", "acodec": "aac", "http_headers": dict(stream_headers), "protocol": "https"
-                    })
+                    subtitles: Dict[str, List[Dict[str, Any]]] = {}
+                    caps = (video.get("claInfo") or {}).get("captionInfos") or video.get("subtitleInfos") or (item.get("claInfo") or {}).get("captionInfos") or item.get("subtitleInfos") or []
+                    for cap in caps:
+                        if isinstance(cap, dict) and cap.get("Url"):
+                            lang_raw = str(cap.get("LanguageCodeName") or cap.get("language") or "und").strip()
+                            l_key = lang_raw.split("-")[0].lower() if "-" in lang_raw else lang_raw.lower()
+                            fmt = str(cap.get("Format") or "vtt").lower()
+                            subtitles.setdefault(l_key, []).append({
+                                "url": str(cap["Url"]), "ext": fmt if fmt in ("vtt", "srt") else "vtt", "name": lang_raw
+                            })
 
-            music = item.get("music") or {}
-            mu = music.get("playUrl")
-            if isinstance(mu, str) and mu.startswith("http") and mu not in seen_urls:
-                seen_urls.add(mu)
-                formats.append({
-                    "format_id": "music_audio", "url": mu, "ext": "mp3",
-                    "vcodec": "none", "acodec": "mp3", "abr": 128,
-                    "http_headers": dict(stream_headers), "protocol": "https"
-                })
-
-            subtitles: Dict[str, List[Dict[str, Any]]] = {}
-            caps = (video.get("claInfo") or {}).get("captionInfos") or video.get("subtitleInfos") or (item.get("claInfo") or {}).get("captionInfos") or item.get("subtitleInfos") or []
-            for cap in caps:
-                if isinstance(cap, dict) and cap.get("Url"):
-                    lang_raw = str(cap.get("LanguageCodeName") or cap.get("language") or "und").strip()
-                    l_key = lang_raw.split("-")[0].lower() if "-" in lang_raw else lang_raw.lower()
-                    fmt = str(cap.get("Format") or "vtt").lower()
-                    subtitles.setdefault(l_key, []).append({
-                        "url": str(cap["Url"]), "ext": fmt if fmt in ("vtt", "srt") else "vtt", "name": lang_raw
-                    })
-
-            self.log(f"[TIKTOK] Direct rehydration successful: {len(formats)} formats, {len(subtitles)} subtitle tracks.")
-            return {
-                "id": media_id, "title": title, "duration": duration, "thumbnail": thumbnail,
-                "webpage_url": final_url, "http_headers": stream_headers, "_sd_cookie_header": cookie_header,
-                "formats": formats, "subtitles": subtitles
-            }
+                    if formats:
+                        self.log(f"[TIKTOK] Direct rehydration successful: {len(formats)} formats, {len(subtitles)} subtitle tracks.")
+                        html_info = {
+                            "id": media_id, "title": title, "duration": duration, "thumbnail": thumbnail,
+                            "webpage_url": final_url, "http_headers": stream_headers, "_sd_cookie_header": cookie_header,
+                            "formats": formats, "subtitles": subtitles
+                        }
         except Exception as e:
             self.log(f"[TIKTOK ERROR] Direct extraction failed: {e}")
-            return None
+
+        if html_info and html_info.get("formats"):
+            return html_info
+
+        self.log(f"[TIKTOK] Direct HTML rehydration produced no formats. Falling back to TikWM API for: {url}")
+        tikwm_info = self._extract_tiktok_via_tikwm(url)
+        if tikwm_info and tikwm_info.get("formats"):
+            return tikwm_info
+
+        return html_info
 
     def extract_format_options(self, url: str) -> Tuple[Dict[str, Any], List[VideoFormatOption]]:
         """Extracts raw metadata and structured VideoFormatOption choices."""
@@ -264,11 +338,13 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             is_auth_error = any(kw in err_str for kw in (
                 "sign in", "confirm your age", "private", "login", "log in", "account",
                 "permission", "403", "401", "forbidden", "cookie", "restricted", "member",
-                "bot", "authenticate", "unauthorized", "unavailable", "checkpoint", "not available"
+                "bot", "authenticate", "unauthorized", "unavailable", "checkpoint", "not available",
+                "unexpected response", "webpage request", "unable to extract", "status code",
+                "10204", "challenge", "captcha", "slardar"
             ))
 
             if platform == "TikTok":
-                self.log(f"[{tag}] yt-dlp extraction failed ({e}). Attempting direct TikTok rehydration extraction...")
+                self.log(f"[{tag}] yt-dlp extraction failed ({e}). Attempting direct TikTok extraction...")
                 info = self._extract_tiktok_direct(url)
 
             if not info and self.cookies_from_browser and self.cookies_from_browser.lower() not in ("none", "auto", "off", "") and not (self.cookies_file and os.path.isfile(self.cookies_file)):
@@ -281,6 +357,8 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 except Exception as fb_err:
                     self.log(f"[{tag}] Unauthenticated fallback also failed: {fb_err}")
                     info = None
+                    if any(kw in str(fb_err).lower() for kw in ("sign in", "confirm your age", "private", "login", "log in", "account", "permission", "403", "401", "forbidden", "cookie", "restricted")):
+                        is_auth_error = True
 
             if not info and is_auth_error:
                 for b in detect_installed_cookie_browsers():
@@ -298,7 +376,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                     except Exception as cookie_err:
                         self.log(f"[{tag}] Cookies from '{b}' failed: {cookie_err}")
 
-            if not info:
+            if not info and platform != "TikTok":
                 is_ydl_mocked = bool(getattr(yt_dlp.YoutubeDL, "_mock_name", None))
                 is_updater_mocked = bool(getattr(YtDlpAutoUpdater, "_mock_name", None) or getattr(YtDlpAutoUpdater.update, "_mock_name", None))
                 if self.auto_update_on_failure and (not is_ydl_mocked or is_updater_mocked):
@@ -327,58 +405,46 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         if not info:
             raise RuntimeError("yt-dlp returned empty metadata for the provided URL.")
 
-        if platform == "TikTok" and not info.get("formats"):
-            self.log(f"[{tag}] yt-dlp returned no formats for TikTok. Retrying direct rehydration extraction...")
+        if platform == "TikTok" and not (info and info.get("formats")):
+            self.log(f"[{tag}] yt-dlp returned no formats for TikTok. Retrying direct extraction...")
             tt_direct = self._extract_tiktok_direct(url)
             if tt_direct and tt_direct.get("formats"):
                 info = tt_direct
 
         cookiejar = getattr(ydl, "cookiejar", None) if ydl else None
-        formats_to_patch = info.get("formats", [])
-        if not formats_to_patch and info.get("url"):
-            formats_to_patch = [info]
-
+        formats_to_patch = info.get("formats", []) or ([info] if info.get("url") else [])
         fallback_cookie_str = ""
-        if isinstance(info.get("cookies"), str):
-            fallback_cookie_str = info["cookies"]
-        elif isinstance(info.get("cookies"), dict):
-            fallback_cookie_str = "; ".join(f"{k}={v}" for k, v in info["cookies"].items())
-        elif isinstance(info.get("http_headers"), dict):
-            fallback_cookie_str = info["http_headers"].get("Cookie") or info["http_headers"].get("cookie") or ""
+        if isinstance(info.get("cookies"), str): fallback_cookie_str = info["cookies"]
+        elif isinstance(info.get("cookies"), dict): fallback_cookie_str = "; ".join(f"{k}={v}" for k, v in info["cookies"].items())
+        elif isinstance(info.get("http_headers"), dict): fallback_cookie_str = info["http_headers"].get("Cookie") or info["http_headers"].get("cookie") or ""
 
         if not fallback_cookie_str and cookiejar:
-            try:
-                fallback_cookie_str = (hasattr(cookiejar, "get_cookie_header") and cookiejar.get_cookie_header(url)) or "; ".join(f"{c.name}={c.value}" for c in cookiejar)
-            except Exception:
-                pass
+            try: fallback_cookie_str = (hasattr(cookiejar, "get_cookie_header") and cookiejar.get_cookie_header(url)) or "; ".join(f"{c.name}={c.value}" for c in cookiejar)
+            except Exception: pass
 
         if cookiejar:
             try:
-                yt_cookies = "; ".join(f"{c.name}={c.value}" for c in cookiejar if "youtube" in (getattr(c, "domain", "") or ""))
-                if yt_cookies: info["_sd_cookie_header"] = yt_cookies
+                yt_c = "; ".join(f"{c.name}={c.value}" for c in cookiejar if "youtube" in (getattr(c, "domain", "") or ""))
+                if yt_c: info["_sd_cookie_header"] = yt_c
             except Exception: pass
         if not info.get("_sd_cookie_header") and fallback_cookie_str:
             info["_sd_cookie_header"] = fallback_cookie_str
 
         for f in formats_to_patch:
             headers = f.setdefault("http_headers", {})
-            if platform == "TikTok":
-                headers.setdefault("Referer", "https://www.tiktok.com/")
-            if "Cookie" in headers or "cookie" in headers:
-                continue
+            if platform == "TikTok": headers.setdefault("Referer", "https://www.tiktok.com/")
+            if "Cookie" in headers or "cookie" in headers: continue
             fmt_url = f.get("url") or ""
-            cookie_val = ""
+            c_val = ""
             if cookiejar and fmt_url and hasattr(cookiejar, "get_cookie_header"):
-                try: cookie_val = cookiejar.get_cookie_header(fmt_url) or ""
+                try: c_val = cookiejar.get_cookie_header(fmt_url) or ""
                 except Exception: pass
-            if not cookie_val:
-                cookie_val = fallback_cookie_str
-            if cookie_val:
-                headers["Cookie"] = cookie_val
+            c_val = c_val or fallback_cookie_str
+            if c_val: headers["Cookie"] = c_val
 
         options = self.build_format_options(info)
         if not options and platform == "TikTok":
-            self.log(f"[{tag}] No downloadable format options produced by yt-dlp. Retrying direct rehydration extraction...")
+            self.log(f"[{tag}] No downloadable format options produced by yt-dlp. Retrying direct extraction...")
             tt_direct = self._extract_tiktok_direct(url)
             if tt_direct and tt_direct.get("formats"):
                 info = tt_direct
@@ -386,94 +452,45 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         return info, options
 
     def resolve(self, url: str, format_id: Optional[str] = None) -> YouTubeStreamInfo:
-        """
-        Extracts stream URLs and metadata from a YouTube or social media link using yt-dlp.
-        If format_id is specified, selects that format; otherwise chooses the best available format.
-        Preserves complete backward compatibility for automated tests and direct invocations.
-        """
+        """Extracts stream URLs and metadata from a YouTube or social media link using yt-dlp."""
         info, options = self.extract_format_options(url)
-
         if not options:
             raise RuntimeError("No downloadable media formats found for this media URL.")
 
-        selected_option: Optional[VideoFormatOption] = None
-        if format_id:
-            for opt in options:
-                if opt.format_id == format_id:
-                    selected_option = opt
-                    break
-
+        selected_option = next((opt for opt in options if opt.format_id == format_id), None) if format_id else None
         if not selected_option:
-            # Pick first (highest resolution) option
             selected_option = options[0]
 
         stream_info = self.build_stream_info(info, selected_option)
         plat = extract_media_platform(url)
         tag = plat.upper().replace(" / X", "")
         if stream_info.is_progressive:
-            self.log(
-                f"[{tag}] Selected stream: {stream_info.video_resolution} ({stream_info.video_ext}). "
-                f"Directly chunk-downloadable without merging."
-            )
+            self.log(f"[{tag}] Selected stream: {stream_info.video_resolution} ({stream_info.video_ext}). Directly chunk-downloadable without merging.")
         else:
-            self.log(
-                f"[{tag}] Selected dual-stream: Video {stream_info.video_resolution} ({stream_info.video_ext}) + Audio ({stream_info.audio_ext}). "
-                f"Will download both and merge seamlessly with FFmpeg."
-            )
+            self.log(f"[{tag}] Selected dual-stream: Video {stream_info.video_resolution} ({stream_info.video_ext}) + Audio ({stream_info.audio_ext}). Merging with FFmpeg.")
         return stream_info
 
     @staticmethod
-    def merge_video_audio(
-        video_path: str,
-        audio_path: str,
-        output_path: str,
-        on_log: Optional[Callable[[str], None]] = None,
-        cancel_event: Optional[Any] = None
-    ) -> bool:
-        """
-        Lossless FFmpeg stream multiplexing (-c copy).
-        Merges video and audio streams into the final container without quality loss.
-        Cleans up temporary video and audio files upon successful completion.
-        Supports cancel_event for instant 50ms abort.
-        """
+    def merge_video_audio(video_path: str, audio_path: str, output_path: str, on_log: Optional[Callable[[str], None]] = None, cancel_event: Optional[Any] = None) -> bool:
+        """Lossless FFmpeg stream multiplexing (-c copy) or transcode fallback."""
         ffmpeg_bin = find_ffmpeg_bin()
         if not ffmpeg_bin:
             raise RuntimeError("FFmpeg executable was not found on PATH or app directory. Cannot merge video and audio.")
-
         if cancel_event and cancel_event.is_set():
-            if on_log:
-                on_log("[FFMPEG] Merge cancelled before execution.")
+            if on_log: on_log("[FFMPEG] Merge cancelled before execution.")
             return False
-
-        if not os.path.exists(video_path):
-            raise FileNotFoundError(f"Video part file not found: {video_path}")
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"Audio part file not found: {audio_path}")
-
+        if not os.path.exists(video_path): raise FileNotFoundError(f"Video part file not found: {video_path}")
+        if not os.path.exists(audio_path): raise FileNotFoundError(f"Audio part file not found: {audio_path}")
         dest_dir = os.path.dirname(output_path)
-        if dest_dir:
-            os.makedirs(dest_dir, exist_ok=True)
+        if dest_dir: os.makedirs(dest_dir, exist_ok=True)
+        if on_log: on_log(f"[FFMPEG] Merging streams into final file: {os.path.basename(output_path)}...")
 
-        if on_log:
-            on_log(f"[FFMPEG] Merging streams into final file: {os.path.basename(output_path)}...")
-
-        cmd = [
-            ffmpeg_bin, "-y",
-            "-i", video_path, "-i", audio_path,
-            "-map", "0:v:0", "-map", "1:a:0",
-            "-c", "copy"
-        ]
-        if output_path.lower().endswith((".mp4", ".m4v", ".mov")):
-            cmd.extend(["-movflags", "+faststart"])
-        cmd.append(output_path)
-
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
-
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform.startswith("win") else 0
         def _run_proc(cmd_list):
             if cancel_event is None:
-                res = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=creationflags)
+                res = subprocess.run(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=flags)
                 return res.returncode, res.stderr
-            p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=creationflags)
+            p = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", creationflags=flags)
             try:
                 while True:
                     try:
@@ -492,49 +509,36 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                     try: p.kill()
                     except Exception: pass
 
-        rc, primary_err = _run_proc(cmd)
-        if cancel_event and cancel_event.is_set():
-            return False
+        def _build_cmd(extra_args):
+            c = [ffmpeg_bin, "-y", "-i", video_path, "-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"] + extra_args
+            if output_path.lower().endswith((".mp4", ".m4v", ".mov")): c.extend(["-movflags", "+faststart"])
+            c.append(output_path)
+            return c
+
+        rc, primary_err = _run_proc(_build_cmd(["-c", "copy"]))
+        if cancel_event and cancel_event.is_set(): return False
 
         if rc != 0:
             for enc_args, desc in [
                 (["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"], "audio transcode to AAC"),
                 (["-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "192k"], "container transcode (libx264+aac)"),
             ]:
-                if on_log:
-                    on_log(f"[FFMPEG] Direct stream copy failed ({rc}). Retrying with {desc}...")
-                retry_cmd = [ffmpeg_bin, "-y", "-i", video_path, "-i", audio_path, "-map", "0:v:0", "-map", "1:a:0"] + enc_args
-                if output_path.lower().endswith((".mp4", ".m4v", ".mov")):
-                    retry_cmd.extend(["-movflags", "+faststart"])
-                retry_cmd.append(output_path)
-                rc, primary_err = _run_proc(retry_cmd)
-                if cancel_event and cancel_event.is_set():
-                    return False
-                if rc == 0:
-                    break
+                if on_log: on_log(f"[FFMPEG] Direct stream copy failed ({rc}). Retrying with {desc}...")
+                rc, primary_err = _run_proc(_build_cmd(enc_args))
+                if (cancel_event and cancel_event.is_set()) or rc == 0: break
             if rc != 0:
                 err_msg = primary_err.strip() or "Unknown FFmpeg error"
-                if on_log:
-                    on_log(f"[FFMPEG ERROR] Merge failed (exit code {rc}): {err_msg}")
+                if on_log: on_log(f"[FFMPEG ERROR] Merge failed (exit code {rc}): {err_msg}")
                 raise RuntimeError(f"FFmpeg stream merge failed: {err_msg}")
 
-        # Validate that the merged file exists and has non-zero size
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             raise RuntimeError("FFmpeg merge completed but output file is missing or empty.")
-
-        # Clean up temporary video and audio component files
-        try:
-            if os.path.exists(video_path):
-                os.remove(video_path)
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-        except Exception:
-            pass
-
+        for p in (video_path, audio_path):
+            try:
+                if os.path.exists(p): os.remove(p)
+            except Exception: pass
         if on_log:
-            merged_size = os.path.getsize(output_path)
-            on_log(f"[FFMPEG SUCCESS] Merged file successfully created ({merged_size:,} bytes).")
-
+            on_log(f"[FFMPEG SUCCESS] Merged file successfully created ({os.path.getsize(output_path):,} bytes).")
         return True
 
 

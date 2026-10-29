@@ -1920,6 +1920,198 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
                 self.assertTrue(len(options) >= 1)
                 mock_direct.assert_called_once()
 
+    def test_extract_tiktok_via_tikwm_success(self):
+        """Verifies _extract_tiktok_via_tikwm parses TikWM API response properly."""
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        mock_payload = {
+            "code": 0,
+            "msg": "success",
+            "data": {
+                "id": "7488392019283",
+                "title": "TikWM Video",
+                "duration": 25,
+                "origin_cover": "https://p16.tiktokcdn.com/cover.jpg",
+                "hdplay": "/play/hd1080.mp4",
+                "hd_size": 15000000,
+                "play": "https://www.tikwm.com/play/sd.mp4",
+                "size": 7500000,
+                "wmplay": "https://www.tikwm.com/play/wm.mp4",
+                "wm_size": 7600000,
+                "music": "/music/track.mp3",
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_payload).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            info = resolver._extract_tiktok_via_tikwm("https://vt.tiktok.com/ZSgG75rWv/")
+            self.assertIsNotNone(info)
+            self.assertEqual(info["id"], "7488392019283")
+            self.assertEqual(info["title"], "TikWM Video")
+            self.assertEqual(info["duration"], 25)
+            self.assertEqual(len(info["formats"]), 4)
+            self.assertEqual(info["formats"][0]["url"], "https://www.tikwm.com/play/hd1080.mp4")
+            self.assertEqual(info["formats"][0]["format_id"], "hd_no_watermark")
+            self.assertEqual(info["formats"][1]["format_id"], "sd_no_watermark")
+            self.assertEqual(info["formats"][2]["format_id"], "watermarked")
+            self.assertEqual(info["formats"][3]["format_id"], "music_audio")
+
+    def test_extract_tiktok_direct_waf_fallback_to_tikwm(self):
+        """Verifies _extract_tiktok_direct falls back to TikWM when HTML scraping returns no formats (WAF challenge)."""
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        waf_challenge_html = b"<html><head><title>TikTok Security Check</title></head><body><script>Slardar challenge</script></body></html>"
+        mock_resp = MagicMock()
+        mock_resp.geturl.return_value = "https://www.tiktok.com/@creator/video/7488392019283"
+        mock_resp.read.return_value = waf_challenge_html
+        mock_resp.headers = {}
+        mock_resp.__enter__.return_value = mock_resp
+
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_resp
+
+        mock_tikwm_info = {
+            "id": "7488392019283",
+            "title": "TikWM Video",
+            "duration": 25,
+            "thumbnail": "https://p16.tiktokcdn.com/cover.jpg",
+            "webpage_url": "https://vt.tiktok.com/ZSgG75rWv/",
+            "http_headers": {"User-Agent": "Mozilla/5.0", "Referer": "https://www.tiktok.com/"},
+            "_sd_cookie_header": "",
+            "formats": [
+                {
+                    "format_id": "hd_no_watermark",
+                    "url": "https://www.tikwm.com/play/hd1080.mp4",
+                    "ext": "mp4",
+                    "width": 1080,
+                    "height": 1920,
+                    "filesize": 15000000,
+                    "tbr": 0.0,
+                    "vcodec": "h264",
+                    "acodec": "aac",
+                    "http_headers": {"User-Agent": "Mozilla/5.0", "Referer": "https://www.tiktok.com/"},
+                    "protocol": "https",
+                    "format_note": "HD (No Watermark)",
+                }
+            ],
+            "subtitles": {},
+        }
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            with patch.object(resolver, "_extract_tiktok_via_tikwm", return_value=mock_tikwm_info) as mock_tikwm:
+                info = resolver._extract_tiktok_direct("https://vt.tiktok.com/ZSgG75rWv/")
+                self.assertIsNotNone(info)
+                self.assertEqual(info["id"], "7488392019283")
+                mock_tikwm.assert_called_once()
+
+    def test_extract_format_options_tiktok_slardar_waf_end_to_end(self):
+        """
+        Verifies YouTubeResolver.extract_format_options('https://vt.tiktok.com/ZSgG75rWv/')
+        survives yt-dlp Unexpected response error and WAF challenge, succeeding via TikWM.
+        """
+        from smart_download.services.youtube_service import YouTubeResolver
+        from smart_download.services.youtube_models import VideoFormatOption
+        resolver = YouTubeResolver()
+
+        mock_payload = {
+            "code": 0,
+            "msg": "success",
+            "data": {
+                "id": "7488392019283",
+                "title": "WAF Bypassed TikTok",
+                "duration": 18,
+                "origin_cover": "https://p16.tiktokcdn.com/cover.jpg",
+                "hdplay": "https://www.tikwm.com/play/hd.mp4",
+                "hd_size": 9500000,
+                "play": "https://www.tikwm.com/play/sd.mp4",
+                "size": 5200000,
+            }
+        }
+        mock_tikwm_resp = MagicMock()
+        mock_tikwm_resp.read.return_value = json.dumps(mock_payload).encode("utf-8")
+        mock_tikwm_resp.__enter__.return_value = mock_tikwm_resp
+
+        waf_challenge_html = b"<html><body>Slardar JS challenge</body></html>"
+        mock_html_resp = MagicMock()
+        mock_html_resp.geturl.return_value = "https://www.tiktok.com/@creator/video/7488392019283"
+        mock_html_resp.read.return_value = waf_challenge_html
+        mock_html_resp.headers = {}
+        mock_html_resp.__enter__.return_value = mock_html_resp
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_html_resp
+
+        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+            mock_ydl = MagicMock()
+            mock_ydl.__enter__.return_value = mock_ydl
+            mock_ydl.extract_info.side_effect = Exception("ERROR: Unexpected response from webpage request")
+            mock_ydl_cls.return_value = mock_ydl
+
+            with patch("urllib.request.build_opener", return_value=mock_opener):
+                with patch("urllib.request.urlopen", return_value=mock_tikwm_resp):
+                    info, options = resolver.extract_format_options("https://vt.tiktok.com/ZSgG75rWv/")
+                    self.assertIsNotNone(info)
+                    self.assertEqual(info["id"], "7488392019283")
+                    self.assertTrue(len(options) >= 1)
+                    self.assertTrue(all(isinstance(opt, VideoFormatOption) for opt in options))
+
+    def test_tree_chunks_proportional_column_scaling_maximized(self):
+        """Verifies _on_tree_chunks_configure scales columns proportionally at width=1880."""
+        from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
+
+        class DummyChunksPanel(ChunksPanelMixin):
+            def __init__(self):
+                self.tree_chunks = MagicMock()
+
+        panel = DummyChunksPanel()
+        event = MagicMock()
+        event.width = 1880
+
+        panel._on_tree_chunks_configure(event)
+
+        # Expected column widths:
+        # id: int(1880 * 0.08) = 150
+        # range: int(1880 * 0.34) = 639
+        # size: int(1880 * 0.15) = 282
+        # downloaded: int(1880 * 0.15) = 282
+        # pct: int(1880 * 0.12) = 225
+        # status: int(1880 * 0.16) = 300
+        calls = {call[0][0]: call[1]["width"] for call in panel.tree_chunks.column.call_args_list}
+        self.assertEqual(calls["id"], 150)
+        self.assertEqual(calls["range"], 639)
+        self.assertEqual(calls["size"], 282)
+        self.assertEqual(calls["downloaded"], 282)
+        self.assertEqual(calls["pct"], 225)
+        self.assertEqual(calls["status"], 300)
+
+    def test_safe_modal_dialog_frameless_and_bmp_symbols(self):
+        """Verifies SafeModalDialog sets overrideredirect(True) and uses BMP symbols."""
+        import tkinter as tk
+        from smart_download.ui.components.base_modal import SafeModalDialog
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            for dtype in ["error", "warning", "confirm", "info"]:
+                dlg = SafeModalDialog(
+                    parent=root,
+                    title="Modal Title",
+                    message="Test message",
+                    dialog_type=dtype,
+                )
+                # Verify overrideredirect(True)
+                self.assertTrue(dlg.overrideredirect())
+                # Verify drag handlers
+                self.assertTrue(hasattr(dlg, "_on_drag_press"))
+                self.assertTrue(hasattr(dlg, "_on_drag_motion"))
+                dlg.destroy()
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
 
 if __name__ == "__main__":
     unittest.main()
