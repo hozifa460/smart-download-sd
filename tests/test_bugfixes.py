@@ -2080,12 +2080,13 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
         # pct: int(1880 * 0.12) = 225
         # status: int(1880 * 0.16) = 300
         calls = {call[0][0]: call[1]["width"] for call in panel.tree_chunks.column.call_args_list}
-        self.assertEqual(calls["id"], 150)
-        self.assertEqual(calls["range"], 639)
-        self.assertEqual(calls["size"], 282)
-        self.assertEqual(calls["downloaded"], 282)
-        self.assertEqual(calls["pct"], 225)
-        self.assertEqual(calls["status"], 300)
+        avail_w = 1880 - 4
+        self.assertEqual(calls["id"], max(50, int(avail_w * 0.08)))
+        self.assertEqual(calls["range"], max(200, int(avail_w * 0.34)))
+        self.assertEqual(calls["size"], max(90, int(avail_w * 0.15)))
+        self.assertEqual(calls["downloaded"], max(90, int(avail_w * 0.15)))
+        self.assertEqual(calls["pct"], max(80, int(avail_w * 0.12)))
+        self.assertEqual(calls["status"], max(100, int(avail_w * 0.16)))
 
     def test_tree_history_proportional_column_scaling_maximized(self):
         """Verifies _on_tree_history_configure scales columns proportionally at width=1880."""
@@ -2101,20 +2102,14 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
 
         panel._on_tree_history_configure(event)
 
-        # Expected column widths:
-        # category: int(1880 * 0.10) = 188
-        # filename: int(1880 * 0.25) = 470
-        # size: int(1880 * 0.10) = 188
-        # status: int(1880 * 0.10) = 188
-        # date: int(1880 * 0.15) = 282
-        # path: int(1880 * 0.30) = 564
         calls = {call[0][0]: call[1]["width"] for call in panel.tree_history.column.call_args_list}
-        self.assertEqual(calls["category"], 188)
-        self.assertEqual(calls["filename"], 470)
-        self.assertEqual(calls["size"], 188)
-        self.assertEqual(calls["status"], 188)
-        self.assertEqual(calls["date"], 282)
-        self.assertEqual(calls["path"], 564)
+        avail_w = 1880 - 4
+        self.assertEqual(calls["category"], max(80, int(avail_w * 0.10)))
+        self.assertEqual(calls["filename"], max(180, int(avail_w * 0.25)))
+        self.assertEqual(calls["size"], max(80, int(avail_w * 0.10)))
+        self.assertEqual(calls["status"], max(80, int(avail_w * 0.10)))
+        self.assertEqual(calls["date"], max(120, int(avail_w * 0.15)))
+        self.assertEqual(calls["path"], max(220, int(avail_w * 0.30)))
 
     def test_safe_modal_dialog_frameless_and_bmp_symbols(self):
         """Verifies SafeModalDialog sets overrideredirect(True) and uses BMP symbols."""
@@ -2202,6 +2197,259 @@ class TestWindowMaximizeAndTikTokDirectFixes(unittest.TestCase):
             self.assertEqual(info["title"], "#tag")
             self.assertEqual(info["formats"][0]["url"], "https://www.tikwm.com/play/hd.mp4")
             self.assertEqual(info["formats"][1]["url"], "https://www.tikwm.com/play/sd.mp4")
+
+
+
+class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
+    """
+    Verifies:
+    1. SafeModalDialog and WindowChromeMixin / WindowControllerMixin format negative coordinates without '+-'.
+    2. sanitize_filename strips 4-byte non-BMP emojis (ord > 0xFFFF) and \ufffd.
+    3. extract_format_options invokes _extract_tiktok_direct at most once on failure.
+    4. _extract_tiktok_via_tikwm falls back to music_info duration when main duration is 0.
+    """
+
+    def test_format_geometry_negative_coordinates(self):
+        from smart_download.ui.controllers.window_controller import WindowChromeMixin, WindowControllerMixin
+
+        self.assertIs(WindowControllerMixin, WindowChromeMixin)
+        geo1 = WindowChromeMixin._format_geometry(800, 600, -150, 200)
+        self.assertEqual(geo1, "800x600-150+200")
+        self.assertNotIn("+-", geo1)
+
+        geo2 = WindowChromeMixin._format_geometry(800, 600, 150, -200)
+        self.assertEqual(geo2, "800x600+150-200")
+        self.assertNotIn("+-", geo2)
+
+        geo3 = WindowChromeMixin._format_geometry(None, None, -50, -100)
+        self.assertEqual(geo3, "-50-100")
+        self.assertNotIn("+-", geo3)
+
+        geo4 = WindowChromeMixin._format_geometry(None, None, 50, 100)
+        self.assertEqual(geo4, "+50+100")
+        self.assertNotIn("+-", geo4)
+
+    def test_window_drag_motion_and_resize_drag_negative_coords(self):
+        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+
+        class DummyWindow(WindowChromeMixin):
+            def __init__(self):
+                self.root = MagicMock()
+                self._is_maximized = False
+                self._drag_offset_x = 200
+                self._drag_offset_y = 50
+                self._resize_state = {
+                    "start_x_root": 100, "start_y_root": 100,
+                    "start_x": -100, "start_y": -50,
+                    "start_w": 800, "start_h": 600,
+                    "mode": "w", "min_w": 400, "min_h": 300,
+                    "dpi_scale": 1.0
+                }
+                self.width = 800
+                self.height = 600
+
+        dw = DummyWindow()
+        # Drag into negative coordinates
+        event_drag = MagicMock()
+        event_drag.x_root = 50
+        event_drag.y_root = 10
+        dw._on_drag_motion(event_drag)
+        dw.root.geometry.assert_called_with("-150-40")
+        self.assertNotIn("+-", dw.root.geometry.call_args[0][0])
+
+        # Resize from west edge into negative x
+        event_resize = MagicMock()
+        event_resize.x_root = 80
+        event_resize.y_root = 100
+        dw._on_resize_drag(event_resize)
+        call_arg = dw.root.geometry.call_args[0][0]
+        self.assertNotIn("+-", call_arg)
+
+    def test_safe_modal_dialog_negative_coords(self):
+        from smart_download.ui.components.base_modal import SafeModalDialog
+        import tkinter as tk
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+        except Exception:
+            self.skipTest("Tkinter display not available")
+
+        try:
+            # Simulate parent on left/top monitor with negative coordinates
+            with patch.object(root, "winfo_x", return_value=-1200), \
+                 patch.object(root, "winfo_y", return_value=-300), \
+                 patch.object(root, "winfo_width", return_value=1000), \
+                 patch.object(root, "winfo_height", return_value=800), \
+                 patch.object(root, "winfo_viewable", return_value=True), \
+                 patch.object(root, "state", return_value="normal"):
+                dlg = SafeModalDialog(
+                    parent=root,
+                    title="Negative Test",
+                    message="Testing negative geometry coordinates",
+                    dialog_type="info"
+                )
+                geo = dlg.geometry()
+                self.assertNotIn("+-", geo)
+                dlg.destroy()
+                root.update_idletasks()
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+    def test_sanitize_filename_strips_non_bmp_and_replacement_chars(self):
+        from smart_download.services.youtube_models import sanitize_filename
+
+        raw_name = "Viral \U0001f680 Video \U0001f3a5 #1 \ufffd Top! \U0001f525"
+        sanitized = sanitize_filename(raw_name)
+        self.assertNotIn("\ufffd", sanitized)
+        self.assertTrue(all(ord(c) <= 0xFFFF for c in sanitized))
+        self.assertEqual(sanitized, "Viral Video #1 Top!")
+
+    def test_extract_format_options_tiktok_deduplicates_direct_call(self):
+        from smart_download.services.youtube_service import YouTubeResolver
+        import yt_dlp
+
+        resolver = YouTubeResolver()
+        resolver.auto_update_on_failure = False
+
+        call_counts = {"direct": 0}
+        def fake_extract_tiktok_direct(url):
+            call_counts["direct"] += 1
+            return None
+
+        with patch.object(yt_dlp.YoutubeDL, "extract_info", side_effect=Exception("slardar error")):
+            with patch.object(resolver, "_extract_tiktok_direct", side_effect=fake_extract_tiktok_direct):
+                with self.assertRaises(RuntimeError):
+                    resolver.extract_format_options("https://www.tiktok.com/@user/video/999888777")
+
+        self.assertEqual(call_counts["direct"], 1)
+
+    def test_extract_tiktok_via_tikwm_duration_fallback_to_music_info(self):
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        mock_payload = {
+            "code": 0,
+            "msg": "success",
+            "data": {
+                "id": "11223344",
+                "title": "Music Clip",
+                "duration": 0,
+                "music_info": {"duration": 58},
+                "play": "/play/sd.mp4",
+                "size": 5000000,
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_payload).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            info = resolver._extract_tiktok_via_tikwm("https://www.tiktok.com/@user/video/11223344")
+            self.assertIsNotNone(info)
+            self.assertEqual(info["duration"], 58)
+
+    def test_extract_tiktok_via_tikwm_malformed_music_info(self):
+        from smart_download.services.youtube_service import YouTubeResolver
+        resolver = YouTubeResolver()
+
+        mock_payload = {
+            "code": 0,
+            "msg": "success",
+            "data": {
+                "id": "11223344",
+                "title": "Music Clip",
+                "duration": 0,
+                "music_info": "not-a-dict",
+                "play": "/play/sd.mp4",
+                "size": 5000000,
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_payload).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            info = resolver._extract_tiktok_via_tikwm("https://www.tiktok.com/@user/video/11223344")
+            self.assertIsNotNone(info)
+            self.assertEqual(info["duration"], 0)
+
+    def test_quality_modal_drag_motion_negative_coords(self):
+        from smart_download.ui.modals.quality_modal import QualitySelectionModal
+
+        modal = MagicMock()
+        modal._drag_offset_x = 200
+        modal._drag_offset_y = 100
+        event = MagicMock()
+        event.x_root = 50
+        event.y_root = 20
+
+        QualitySelectionModal._on_drag_motion(modal, event)
+        modal.geometry.assert_called_with("-150-80")
+        self.assertNotIn("+-", modal.geometry.call_args[0][0])
+
+    def test_confirm_modal_progress_negative_coords(self):
+        from smart_download.ui.modals.confirm_modal_logic import ConfirmModalLogicMixin
+
+        class DummyModal(ConfirmModalLogicMixin):
+            def __init__(self):
+                self.dpi_scale = 1.0
+                self.file_name = "test.zip"
+                self.title = MagicMock()
+                self.frame_confirmation = MagicMock()
+                self.frame_progress = MagicMock()
+                self.lbl_prog_filename = MagicMock()
+                self.lbl_prog_cat = MagicMock()
+                self.lbl_prog_threads = MagicMock()
+                self.get_max_connections = MagicMock(return_value=8)
+                self.geometry = MagicMock()
+                self._draw_modal_progress = MagicMock()
+            def winfo_screenwidth(self): return 1920
+            def winfo_screenheight(self): return 1080
+            def winfo_x(self): return -800
+            def winfo_y(self): return -200
+
+        dm = DummyModal()
+        dm.show_progress_view()
+        dm.geometry.assert_called_once()
+        geo_str = dm.geometry.call_args[0][0]
+        self.assertNotIn("+-", geo_str)
+        self.assertTrue(geo_str.endswith("-800-200"))
+
+    def test_toast_controller_negative_coords_and_bmp_icon(self):
+        from smart_download.ui.controllers.toast_controller import ToastControllerMixin
+        import tkinter as tk
+
+        class DummyToastHost(ToastControllerMixin):
+            def __init__(self):
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self.root.winfo_fpixels.return_value = 96.0
+
+        host = DummyToastHost()
+        mock_toast = MagicMock()
+        mock_toast.winfo_screenwidth.return_value = 100
+        mock_toast.winfo_screenheight.return_value = 50
+
+        with patch("tkinter.Toplevel", return_value=mock_toast), \
+             patch("tkinter.Frame"), \
+             patch("tkinter.Label") as mock_label:
+            host._show_background_toast("Test message")
+            geo_call = mock_toast.geometry.call_args[0][0]
+            self.assertNotIn("+-", geo_call)
+
+            # Verify rocket emoji was NOT used in label
+            label_texts = [call[1].get("text", "") for call in mock_label.call_args_list]
+            self.assertNotIn("\U0001f680", label_texts)
+            self.assertIn("⚡", label_texts)
+
+    def test_locales_have_no_supplementary_characters(self):
+        for path in ["src/smart_download/locales/en.json", "src/smart_download/locales/ar.json"]:
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+            non_bmp = [c for c in content if ord(c) > 0xFFFF]
+            self.assertEqual(non_bmp, [], f"Found non-BMP characters in {path}: {non_bmp}")
 
 
 if __name__ == "__main__":

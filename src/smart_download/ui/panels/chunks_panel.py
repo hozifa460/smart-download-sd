@@ -489,12 +489,13 @@ class ChunksPanelMixin(MetricsPanelMixin):
             if getattr(self, "_last_chunks_configured_w", None) == w:
                 return
             self._last_chunks_configured_w = w
-            self.tree_chunks.column("id", width=max(50, int(w * 0.08)))
-            self.tree_chunks.column("range", width=max(200, int(w * 0.34)))
-            self.tree_chunks.column("size", width=max(90, int(w * 0.15)))
-            self.tree_chunks.column("downloaded", width=max(90, int(w * 0.15)))
-            self.tree_chunks.column("pct", width=max(80, int(w * 0.12)))
-            self.tree_chunks.column("status", width=max(100, int(w * 0.16)))
+            avail_w = w - 4
+            self.tree_chunks.column("id", width=max(50, int(avail_w * 0.08)))
+            self.tree_chunks.column("range", width=max(200, int(avail_w * 0.34)))
+            self.tree_chunks.column("size", width=max(90, int(avail_w * 0.15)))
+            self.tree_chunks.column("downloaded", width=max(90, int(avail_w * 0.15)))
+            self.tree_chunks.column("pct", width=max(80, int(avail_w * 0.12)))
+            self.tree_chunks.column("status", width=max(100, int(avail_w * 0.16)))
         else:
             self._last_chunks_configured_w = None
 
@@ -505,12 +506,13 @@ class ChunksPanelMixin(MetricsPanelMixin):
             if getattr(self, "_last_history_configured_w", None) == w:
                 return
             self._last_history_configured_w = w
-            self.tree_history.column("category", width=max(80, int(w * 0.10)))
-            self.tree_history.column("filename", width=max(180, int(w * 0.25)))
-            self.tree_history.column("size", width=max(80, int(w * 0.10)))
-            self.tree_history.column("status", width=max(80, int(w * 0.10)))
-            self.tree_history.column("date", width=max(120, int(w * 0.15)))
-            self.tree_history.column("path", width=max(220, int(w * 0.30)))
+            avail_w = w - 4
+            self.tree_history.column("category", width=max(80, int(avail_w * 0.10)))
+            self.tree_history.column("filename", width=max(180, int(avail_w * 0.25)))
+            self.tree_history.column("size", width=max(80, int(avail_w * 0.10)))
+            self.tree_history.column("status", width=max(80, int(avail_w * 0.10)))
+            self.tree_history.column("date", width=max(120, int(avail_w * 0.15)))
+            self.tree_history.column("path", width=max(220, int(avail_w * 0.30)))
         else:
             self._last_history_configured_w = None
 

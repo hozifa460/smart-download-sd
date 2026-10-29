@@ -104,7 +104,7 @@ class SafeModalDialog(_BaseToplevel):
                 pw = parent.winfo_width() or dlg_w
                 ph = parent.winfo_height() or dlg_h
                 x = px + (pw - dlg_w) // 2
-                y = max(0, py + (ph - dlg_h) // 2)
+                y = py + (ph - dlg_h) // 2
             except Exception:
                 x = max(0, (sw - dlg_w) // 2)
                 y = max(0, (sh - dlg_h) // 2)
@@ -117,7 +117,9 @@ class SafeModalDialog(_BaseToplevel):
             x = max(0, (sw - dlg_w) // 2)
             y = max(0, (sh - dlg_h) // 2)
 
-        self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        self.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
         self.minsize(min(440, dlg_w), min(240, dlg_h))
 
         # Apply application icon to modal window

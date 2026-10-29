@@ -115,7 +115,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
                 self.transient(parent)
                 px, py = parent.winfo_x(), parent.winfo_y()
                 pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
-                x, y = max(0, px + (pw - dlg_w) // 2), max(0, py + (ph - dlg_h) // 2)
+                x, y = px + (pw - dlg_w) // 2, py + (ph - dlg_h) // 2
             except Exception:
                 x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
         else:
@@ -126,7 +126,9 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
                 pass
             x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
 
-        self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        self.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
         animate_window_open(self)
         self.minsize(min(480, dlg_w), min(270, dlg_h))
 
@@ -183,7 +185,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
         hdr_frame = tk.Frame(self.frame_confirmation, bg=self.c_bg)
         hdr_frame.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_icon = tk.Label(hdr_frame, text="📥", font=("Segoe UI", 16), bg=self.c_bg, fg=self.c_accent)
+        lbl_icon = tk.Label(hdr_frame, text="⬇", font=("Segoe UI", 16), bg=self.c_bg, fg=self.c_accent)
         lbl_icon.pack(side=tk.LEFT, padx=(0, 8))
 
         lbl_title = tk.Label( hdr_frame, text=tr("modal_confirm_title_header", "DOWNLOAD FILE INFO"),
@@ -347,7 +349,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
         )
         self.btn_cancel.pack(side=tk.RIGHT, padx=(8, 0))
 
-        self.btn_open_app = tk.Button( btn_row, text=tr("modal_btn_open_in_main", "📋 Open in Main App"),
+        self.btn_open_app = tk.Button( btn_row, text=tr("modal_btn_open_in_main", "❐ Open in Main App"),
             font=("Segoe UI", 9),
             bg=self.c_panel_light,
             fg=self.c_text_bright,
@@ -462,7 +464,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
         self.prog_btn_row = tk.Frame(self.frame_progress, bg=self.c_bg)
         self.prog_btn_row.pack(fill=tk.X)
 
-        self.btn_open_app_prog = tk.Button( self.prog_btn_row, text=tr("modal_btn_open_in_main", "📋 Open in Main App"),
+        self.btn_open_app_prog = tk.Button( self.prog_btn_row, text=tr("modal_btn_open_in_main", "❐ Open in Main App"),
             font=("Segoe UI", 9),
             bg=self.c_panel_light,
             fg=self.c_text_bright,

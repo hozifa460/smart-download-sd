@@ -92,7 +92,8 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
             media_id = str(d.get("id") or extract_media_id(url) or "tiktok_video")
             raw_title = re.sub(r"[\ufffd\s]+", " ", str(d.get("title") or "")).strip()
             title = (raw_title or f"TikTok_Video_{media_id}")[:180]
-            duration = int(d.get("duration") or 0)
+            music_info = d.get("music_info") if isinstance(d.get("music_info"), dict) else {}
+            duration = int(d.get("duration") or 0) or int(music_info.get("duration") or 0)
             thumbnail = d.get("origin_cover") or d.get("cover") or ""
             formats: List[Dict[str, Any]] = []
             seen_urls = set()
@@ -324,8 +325,7 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         else:
             ydl_opts = self._build_ydl_opts()
 
-        info = None
-        ydl = None
+        info, ydl, tried_tiktok_direct = None, None, False
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as active_ydl:
@@ -341,9 +341,10 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                 "10204", "challenge", "captcha", "slardar"
             ))
 
-            if platform == "TikTok":
+            if platform == "TikTok" and not tried_tiktok_direct:
                 self.log(f"[{tag}] yt-dlp extraction failed ({e}). Attempting direct TikTok extraction...")
                 info = self._extract_tiktok_direct(url)
+                tried_tiktok_direct = True
 
             if not info and self.cookies_from_browser and self.cookies_from_browser.lower() not in ("none", "auto", "off", "") and not (self.cookies_file and os.path.isfile(self.cookies_file)):
                 self.log(f"[{tag}] Cookie extraction from browser '{self.cookies_from_browser}' failed ({e}). Falling back without cookies...")
@@ -389,8 +390,9 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
                                 ydl = ydl2
                     except Exception:
                         pass
-            if not info and platform == "TikTok":
+            if not info and platform == "TikTok" and not tried_tiktok_direct:
                 info = self._extract_tiktok_direct(url)
+                tried_tiktok_direct = True
             if not info:
                 raise RuntimeError(f"Failed to extract {platform} media stream info: {e}")
 
@@ -403,9 +405,10 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         if not info:
             raise RuntimeError("yt-dlp returned empty metadata for the provided URL.")
 
-        if platform == "TikTok" and not (info and info.get("formats")):
+        if platform == "TikTok" and not (info and info.get("formats")) and not tried_tiktok_direct:
             self.log(f"[{tag}] yt-dlp returned no formats for TikTok. Retrying direct extraction...")
             tt_direct = self._extract_tiktok_direct(url)
+            tried_tiktok_direct = True
             if tt_direct and tt_direct.get("formats"):
                 info = tt_direct
 

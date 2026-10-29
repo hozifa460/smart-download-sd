@@ -447,7 +447,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                    f"{tr('dialog_complete_msg_saved', 'Saved to:')} {path}\n"
                    f"{tr('dialog_complete_msg_size', 'Size:')} {total_bytes:,} bytes\n"
                    f"{tr('dialog_complete_msg_time', 'Total Time:')} {elapsed:.1f} seconds")
-            complete_title = tr("toast_completed_title", "Download Completed Successfully! 🚀")
+            complete_title = tr("toast_completed_title", "Download Completed Successfully! ⚡")
             if hasattr(self, "show_safe_info"): self.show_safe_info(complete_title, msg)
             elif getattr(messagebox.showinfo, "_mock_name", None) or hasattr(messagebox.showinfo, "mock"): messagebox.showinfo(complete_title, msg)
             elif hasattr(self, "root") and self.root and self.root.winfo_exists():
@@ -511,7 +511,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                 msg = (
                     f"{tr('dialog_expired_msg1', 'Download stopped: Server rejected session (HTTP 401/403/410).')}\n\n"
                     f"{tr('dialog_expired_details', 'Details:')} {error_msg}\n\n"
-                    f"{tr('dialog_expired_msg2', '💡 All partially downloaded chunk files are safely preserved on disk.')}\n"
+                    f"{tr('dialog_expired_msg2', '★ All partially downloaded chunk files are safely preserved on disk.')}\n"
                     f"{tr('dialog_expired_msg3', 'Would you like to refresh the download link now to resume?')}"
                 )
                 if hasattr(self, "ask_safe_yesno"):

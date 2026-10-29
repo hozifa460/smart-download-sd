@@ -24,6 +24,7 @@ from .quality_modal_helpers import (
     resolve_final_dest,
     build_preview_header_banner,
     resolve_preferred_option_index,
+    build_quality_title_bar,
 )
 
 _BaseToplevel = tk.Toplevel if tk is not None else object
@@ -32,44 +33,31 @@ class QualitySelectionModal(_BaseToplevel):
     """Modern dark-themed modal dialog for choosing video quality, audio dubbing, and subtitle options."""
 
     def __init__(
-        self,
-        parent: Any,
-        video_title: str,
-        duration: int,
-        options: List[VideoFormatOption],
-        default_dest_path: str,
-        theme: Dict[str, str],
-        on_confirm: Callable[[VideoFormatOption, str], None],
+        self, parent: Any, video_title: str, duration: int, options: List[VideoFormatOption],
+        default_dest_path: str, theme: Dict[str, str], on_confirm: Callable[[VideoFormatOption, str], None],
         on_cancel: Optional[Callable[[], None]] = None,
         on_open_in_main: Optional[Callable[[VideoFormatOption, str], None]] = None,
-        parent_app: Optional[Any] = None,
-        audio_tracks: Optional[List[Dict[str, Any]]] = None,
-        subtitle_tracks: Optional[List[Dict[str, Any]]] = None,
-        video_url: str = "",
+        parent_app: Optional[Any] = None, audio_tracks: Optional[List[Dict[str, Any]]] = None,
+        subtitle_tracks: Optional[List[Dict[str, Any]]] = None, video_url: str = "",
         raw_info: Optional[Dict[str, Any]] = None
     ):
         super().__init__(parent)
-        self.video_title = str(video_title or "YouTube Video")
-        self.duration = int(duration or 0)
-        self.options = options or []
-        self.dest_path = str(default_dest_path or "")
-        self.theme = theme
-        self.on_confirm = on_confirm
-        self.on_cancel = on_cancel
-        self.on_open_in_main = on_open_in_main
-        self.parent_app = parent_app
-        self.audio_tracks = audio_tracks or []
-        self.subtitle_tracks = subtitle_tracks or []
-        self.video_url = str(video_url or "")
-        self.raw_info = raw_info or {}
-        self.cb_audio = None
-        self.cb_sub = None
+        self.video_title, self.duration = str(video_title or "YouTube Video"), int(duration or 0)
+        self.options, self.dest_path, self.theme = options or [], str(default_dest_path or ""), theme
+        self.on_confirm, self.on_cancel, self.on_open_in_main = on_confirm, on_cancel, on_open_in_main
+        self.parent_app, self.video_url, self.raw_info = parent_app, str(video_url or ""), raw_info or {}
+        self.audio_tracks, self.subtitle_tracks = audio_tracks or [], subtitle_tracks or []
+        self.cb_audio = self.cb_sub = None
         init_idx = resolve_preferred_option_index(self.options)
         self.selected_option: Optional[VideoFormatOption] = self.options[init_idx] if (self.options and 0 <= init_idx < len(self.options)) else (self.options[0] if self.options else None)
         self._confirmed = False
 
         self.title(tr("modal_quality_title", "Select Video Quality — Smart Download"))
         self.configure(bg=self.theme["c_bg"])
+        try:
+            self.overrideredirect(True)
+        except Exception:
+            pass
 
         try:
             dpi = float(parent.winfo_fpixels('1i')) if parent and parent.winfo_exists() else 96.0
@@ -78,14 +66,25 @@ class QualitySelectionModal(_BaseToplevel):
         dpi_scale = max(1.0, dpi / 96.0)
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         dlg_w, dlg_h = min(int(740 * dpi_scale), max(640, int(sw * 0.92))), min(int(620 * dpi_scale), max(520, int(sh * 0.88)))
-        try:
-            px, py = parent.winfo_x(), parent.winfo_y()
-            pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
-            x, y = max(0, px + (pw - dlg_w) // 2), max(0, py + (ph - dlg_h) // 2)
-            self.transient(parent)
-        except Exception:
+        is_vis = False
+        if parent is not None:
+            try: is_vis = parent.winfo_exists() and parent.winfo_viewable() and parent.state() not in ("withdrawn", "iconic")
+            except Exception: is_vis = False
+        if is_vis:
+            try:
+                self.transient(parent)
+                px, py = parent.winfo_x(), parent.winfo_y()
+                pw, ph = parent.winfo_width() or dlg_w, parent.winfo_height() or dlg_h
+                x, y = px + (pw - dlg_w) // 2, py + (ph - dlg_h) // 2
+            except Exception:
+                x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
+        else:
+            try: self.transient(""); self.deiconify()
+            except Exception: pass
             x, y = max(0, (sw - dlg_w) // 2), max(0, (sh - dlg_h) // 2)
-        self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        self.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
         self.minsize(min(640, dlg_w), min(520, dlg_h))
 
         ico_path, png_path = get_resource_path("app_icon.ico"), get_resource_path("app_icon.png")
@@ -124,10 +123,12 @@ class QualitySelectionModal(_BaseToplevel):
         outer = tk.Frame(self, bg=c_border, padx=1, pady=1)
         outer.pack(fill=tk.BOTH, expand=True)
 
+        self.title_bar = build_quality_title_bar(self, outer, self.theme, self.title(), self._on_close)
+
         body = tk.Frame(outer, bg=c_bg, padx=16, pady=14)
         body.pack(fill=tk.BOTH, expand=True)
 
-        lbl_head = tk.Label(body, text=tr("modal_quality_header", "🎥 SELECT VIDEO RESOLUTION & QUALITY"), font=("Segoe UI", 11, "bold"), bg=c_bg, fg=c_accent)
+        lbl_head = tk.Label(body, text=tr("modal_quality_header", "❖ SELECT VIDEO RESOLUTION & QUALITY"), font=("Segoe UI", 11, "bold"), bg=c_bg, fg=c_accent)
         lbl_head.pack(anchor="w", pady=(0, 6))
 
         # Compact embedded Preview Header Banner
@@ -259,7 +260,7 @@ class QualitySelectionModal(_BaseToplevel):
         if has_audio:
             self.btn_download_mp3 = tk.Button(
                 btn_row,
-                text=tr("modal_download_mp3", "🎵 Download MP3"),
+                text=tr("modal_download_mp3", "♪ Download MP3"),
                 font=("Segoe UI", 9, "bold"),
                 bg=c_accent_dark,
                 fg="white",
@@ -274,7 +275,7 @@ class QualitySelectionModal(_BaseToplevel):
 
         self.btn_preview_video = tk.Button(
             btn_row,
-            text=tr("btn_preview_video", "🎬 Preview Video"),
+            text=tr("btn_preview_video", "▶ Preview Video"),
             font=("Segoe UI", 9, "bold"),
             bg=c_panel_light,
             fg=c_accent,
@@ -289,32 +290,16 @@ class QualitySelectionModal(_BaseToplevel):
         self.btn_preview_video.pack(side=tk.LEFT, padx=(8, 0))
 
         self.btn_cancel = tk.Button(
-            btn_row,
-            text=tr("modal_btn_cancel", "✕ Cancel"),
-            font=("Segoe UI", 9, "bold"),
-            bg=c_panel_light,
-            fg=c_text_muted,
-            relief="flat",
-            activebackground=c_border,
-            cursor="hand2",
-            padx=16,
-            pady=6,
-            command=self._on_close
+            btn_row, text=tr("modal_btn_cancel", "✕ Cancel"), font=("Segoe UI", 9, "bold"),
+            bg=c_panel_light, fg=c_text_muted, relief="flat", activebackground=c_border,
+            cursor="hand2", padx=16, pady=6, command=self._on_close
         )
         self.btn_cancel.pack(side=tk.RIGHT)
 
         self.btn_open_app = tk.Button(
-            btn_row,
-            text=tr("modal_btn_open_in_main", "📋 Open in Main App"),
-            font=("Segoe UI", 9),
-            bg=c_panel_light,
-            fg=c_text_bright,
-            relief="flat",
-            activebackground=c_border,
-            cursor="hand2",
-            padx=14,
-            pady=6,
-            command=self._on_open_in_main
+            btn_row, text=tr("modal_btn_open_in_main", "❐ Open in Main App"),
+            font=("Segoe UI", 9), bg=c_panel_light, fg=c_text_bright, relief="flat",
+            activebackground=c_border, cursor="hand2", padx=14, pady=6, command=self._on_open_in_main
         )
         self.btn_open_app.pack(side=tk.RIGHT, padx=(0, 8))
 
@@ -512,6 +497,17 @@ class QualitySelectionModal(_BaseToplevel):
                 try: target.restore_window()
                 except Exception: pass
 
+    def _on_drag_press(self, event):
+        self._drag_offset_x = event.x_root - self.winfo_x()
+        self._drag_offset_y = event.y_root - self.winfo_y()
+
+    def _on_drag_motion(self, event):
+        x = event.x_root - getattr(self, "_drag_offset_x", 0)
+        y = event.y_root - getattr(self, "_drag_offset_y", 0)
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        self.geometry(f"{pos_x}{pos_y}")
+
     def grab_set(self): pass
     def grab_set_global(self): pass
 
@@ -524,9 +520,10 @@ class QualitySelectionModal(_BaseToplevel):
                 try: self.after_cancel(j)
                 except Exception: pass
                 setattr(self, a, None)
-        if hasattr(self, "_modal_icon_photo"):
-            _detach_photo_tk(self._modal_icon_photo)
-            self._modal_icon_photo = None
+        for p in ("_modal_icon_photo", "_modal_title_photo"):
+            if hasattr(self, p) and getattr(self, p):
+                _detach_photo_tk(getattr(self, p))
+                setattr(self, p, None)
         try: self.grab_release()
         except Exception: pass
         if self.parent_app and getattr(self.parent_app, "_quality_modal", None) is self:

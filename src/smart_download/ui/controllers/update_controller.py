@@ -118,14 +118,14 @@ class UpdateControllerMixin(ToastControllerMixin):
 
                 yt_ver = (yt_res or {}).get("version") or (yt_res or {}).get("new_version") or get_ytdlp_version()
                 if (yt_res or {}).get("updated"):
-                    yt_line = f"🎬 YouTube Engine (yt-dlp): Updated to v{yt_ver} ✅"
+                    yt_line = f"▶ YouTube Engine (yt-dlp): Updated to v{yt_ver} ✅"
                 else:
-                    yt_line = f"🎬 YouTube Engine (yt-dlp): v{yt_ver} (Up to Date ✅)"
+                    yt_line = f"▶ YouTube Engine (yt-dlp): v{yt_ver} (Up to Date ✅)"
 
                 g.show_safe_info(
                     "Up to Date ✅",
                     f"You are running the latest version of Smart Download (SD)!\n\n"
-                    f"🚀 Application Version: v{APP_VERSION}\n"
+                    f"⚡ Application Version: v{APP_VERSION}\n"
                     f"{yt_line}"
                 )
 

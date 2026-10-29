@@ -28,7 +28,7 @@ class FetchingLinkToast(_BaseToplevel):
 
     Features:
     - Displayed in < 50ms with frameless dark styling and High-DPI scaling.
-    - Arabic header: 🔍 جاري جلب وتحليل الرابط...
+    - Arabic header: ⟳ جاري جلب وتحليل الرابط...
     - English subheader: Fetching link information...
     - Extracted domain tag (e.g. [youtube.com]) and truncated URL preview.
     - Animated marquee pulsing progress bar and dynamic status indicator.
@@ -88,7 +88,9 @@ class FetchingLinkToast(_BaseToplevel):
         # Center on screen
         x = max(0, (sw - dlg_w) // 2)
         y = max(0, (sh - dlg_h) // 2)
-        self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        self.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
         animate_window_open(self)
 
         try:
@@ -118,7 +120,7 @@ class FetchingLinkToast(_BaseToplevel):
         hdr_frame = tk.Frame(self.inner, bg=self.c_panel)
         hdr_frame.pack(fill=tk.X, pady=(0, 6))
 
-        lbl_icon = tk.Label(hdr_frame, text="🔍", font=("Segoe UI", 12), bg=self.c_panel, fg=self.c_accent)
+        lbl_icon = tk.Label(hdr_frame, text="⟳", font=("Segoe UI", 12), bg=self.c_panel, fg=self.c_accent)
         lbl_icon.pack(side=tk.LEFT, padx=(0, 6))
 
         title_box = tk.Frame(hdr_frame, bg=self.c_panel)
@@ -126,7 +128,7 @@ class FetchingLinkToast(_BaseToplevel):
 
         self.lbl_ar = tk.Label(
             title_box,
-            text="🔍 جاري جلب وتحليل الرابط...",
+            text="⟳ جاري جلب وتحليل الرابط...",
             font=("Segoe UI", 10, "bold"),
             bg=self.c_panel,
             fg=self.c_accent,

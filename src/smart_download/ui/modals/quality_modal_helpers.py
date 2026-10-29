@@ -11,7 +11,7 @@ except Exception:
     tk = None  # type: ignore
 from typing import Optional, Dict, Any, List
 
-from ...config import get_base_downloads_dir
+from ...config import get_base_downloads_dir, get_resource_path
 from ...locales.i18n import tr
 from ...utils.file_ops import apply_media_filename_tags, generate_unique_destination_path
 from ...services.youtube_models import extract_media_platform, sanitize_filename
@@ -140,7 +140,8 @@ def build_preview_header_banner(
     )
     lbl_plat.pack(side=tk.LEFT, padx=(0, 8))
 
-    disp_title = video_title if len(video_title) <= 75 else video_title[:72] + "..."
+    clean_title = "".join(c for c in (video_title or "") if ord(c) <= 0xFFFF and c != "\ufffd")
+    disp_title = clean_title if len(clean_title) <= 75 else clean_title[:72] + "..."
     lbl_title = tk.Label(title_row, text=disp_title, font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright, anchor="w")
     lbl_title.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -151,7 +152,7 @@ def build_preview_header_banner(
 
     btn_preview = tk.Button(
         banner,
-        text=tr("btn_preview_video", "🎬 Live Video & Dubbing Preview"),
+        text=tr("btn_preview_video", "▶ Live Video & Dubbing Preview"),
         font=("Segoe UI", 9, "bold"),
         bg=c_accent_dark,
         fg="white",
@@ -219,3 +220,57 @@ def resolve_preferred_option_index(options: List[Any]) -> int:
         return 0
 
     return 0
+
+
+def build_quality_title_bar(
+    modal: Any,
+    outer: Any,
+    theme: Dict[str, str],
+    title: str,
+    on_close_cmd: Any
+) -> Any:
+    """Builds a custom dark frameless title bar matching SafeModalDialog."""
+    if tk is None:
+        return None
+    c_panel = theme.get("c_panel", "#1e293b")
+    c_border = theme.get("c_border", "#334155")
+    c_accent = theme.get("c_accent", "#38bdf8")
+    c_text_bright = theme.get("c_text_bright", "#f8fafc")
+    c_text_muted = theme.get("c_text_muted", "#94a3b8")
+    c_danger = theme.get("c_danger", "#ef4444")
+
+    title_bar = tk.Frame(outer, bg=c_panel, height=32)
+    title_bar.pack(fill=tk.X, side=tk.TOP)
+
+    lbl_app_icon = None
+    png_path = get_resource_path("app_icon.png")
+    if os.path.isfile(png_path):
+        try:
+            from PIL import Image, ImageTk
+            resamp = getattr(Image, "Resampling", Image).LANCZOS if hasattr(Image, "Resampling") else getattr(Image, "ANTIALIAS", 1)
+            img = Image.open(png_path).resize((16, 16), resamp)
+            modal._modal_title_photo = ImageTk.PhotoImage(img)
+            lbl_app_icon = tk.Label(title_bar, image=modal._modal_title_photo, bg=c_panel)
+            lbl_app_icon.pack(side=tk.LEFT, padx=(8, 4), pady=4)
+        except Exception:
+            pass
+    if not lbl_app_icon:
+        lbl_app_icon = tk.Label(title_bar, text="⚡", font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_accent)
+        lbl_app_icon.pack(side=tk.LEFT, padx=(8, 4), pady=4)
+
+    lbl_win_title = tk.Label(title_bar, text=title, font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright, anchor="w")
+    lbl_win_title.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 6))
+
+    btn_close = tk.Label(title_bar, text="✕", font=("Segoe UI", 10, "bold"), bg=c_panel, fg=c_text_muted, width=3, cursor="hand2")
+    btn_close.pack(side=tk.RIGHT, fill=tk.Y)
+    btn_close.bind("<Enter>", lambda e: btn_close.configure(bg=c_danger, fg="white"))
+    btn_close.bind("<Leave>", lambda e: btn_close.configure(bg=c_panel, fg=c_text_muted))
+    btn_close.bind("<Button-1>", lambda e: on_close_cmd())
+
+    for w in (title_bar, lbl_win_title, lbl_app_icon):
+        w.bind("<ButtonPress-1>", modal._on_drag_press)
+        w.bind("<B1-Motion>", modal._on_drag_motion)
+
+    sep = tk.Frame(outer, bg=c_border, height=1)
+    sep.pack(fill=tk.X, side=tk.TOP)
+    return title_bar

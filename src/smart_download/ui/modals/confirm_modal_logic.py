@@ -73,13 +73,15 @@ class ConfirmModalLogicMixin:
         try:
             cur_x = self.winfo_x()
             cur_y = self.winfo_y()
-            if cur_x <= 1 and cur_y <= 1:
+            if 0 <= cur_x <= 1 and 0 <= cur_y <= 1:
                 cur_x = max(0, (sw - prog_w) // 2)
                 cur_y = max(0, (sh - prog_h) // 2)
         except Exception:
             cur_x = max(0, (sw - prog_w) // 2)
             cur_y = max(0, (sh - prog_h) // 2)
-        self.geometry(f"{prog_w}x{prog_h}+{cur_x}+{cur_y}")
+        pos_x = f"+{int(cur_x)}" if int(cur_x) >= 0 else f"{int(cur_x)}"
+        pos_y = f"+{int(cur_y)}" if int(cur_y) >= 0 else f"{int(cur_y)}"
+        self.geometry(f"{prog_w}x{prog_h}{pos_x}{pos_y}")
         self._draw_modal_progress(0.0)
 
     def _draw_modal_progress(self, pct: float):

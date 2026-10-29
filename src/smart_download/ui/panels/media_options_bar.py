@@ -65,12 +65,12 @@ class MediaOptionsBarMixin:
         self.lbl_main_quality.pack(side=tk.LEFT); self.cb_main_quality.pack(side=tk.LEFT, padx=(4, 10))
         self.cb_main_quality.bind("<<ComboboxSelected>>", self._on_main_quality_changed)
 
-        self.lbl_main_audio = tk.Label(row1, text=tr("lbl_main_audio", "🎙️ Audio:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=8, anchor="w")
+        self.lbl_main_audio = tk.Label(row1, text=tr("lbl_main_audio", "♪ Audio:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=8, anchor="w")
         self.cb_main_audio = ttk.Combobox(row1, state="readonly", font=("Segoe UI", 8), width=20)
         self.lbl_main_audio.pack(side=tk.LEFT); self.cb_main_audio.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_audio.bind("<<ComboboxSelected>>", self._on_main_audio_changed)
 
-        self.btn_main_preview = tk.Button(row1, text=tr("btn_preview_short", "🎬 Preview"), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._open_main_media_preview)
+        self.btn_main_preview = tk.Button(row1, text=tr("btn_preview_short", "▶ Preview"), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._open_main_media_preview)
         self.btn_main_preview.pack(side=tk.RIGHT, padx=(4, 0))
         self.btn_reopen_quality = tk.Button(row1, text=tr("btn_media_quality_options", "⚙ Options..."), font=("Segoe UI", 8, "bold"), bg=self.c_panel_light, fg=self.c_accent, relief="flat", activebackground=self.c_accent_dark, activeforeground="white", cursor="hand2", padx=8, pady=2, command=self._reopen_media_quality_modal)
         self.btn_reopen_quality.pack(side=tk.RIGHT, padx=(0, 4))
@@ -78,7 +78,7 @@ class MediaOptionsBarMixin:
         # Row 2: Subtitles (Combobox), Subtitle Delivery Mode (Combobox), Subtitle Position (Combobox)
         row2 = tk.Frame(self.media_options_frame, bg=self.c_panel)
         row2.pack(fill=tk.X, pady=(2, 2))
-        self.lbl_main_sub = tk.Label(row2, text=tr("lbl_main_sub", "💬 Subtitles:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
+        self.lbl_main_sub = tk.Label(row2, text=tr("lbl_main_sub", "≡ Subtitles:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=10, anchor="w")
         self.cb_main_sub = ttk.Combobox(row2, state="readonly", font=("Segoe UI", 8), width=22)
         self.lbl_main_sub.pack(side=tk.LEFT); self.cb_main_sub.pack(side=tk.LEFT, padx=(4, 10))
         self.cb_main_sub.bind("<<ComboboxSelected>>", self._on_main_sub_changed)
@@ -90,7 +90,7 @@ class MediaOptionsBarMixin:
         self.lbl_main_sub_mode.pack(side=tk.LEFT); self.cb_main_sub_mode.pack(side=tk.LEFT, padx=(4, 8))
         self.cb_main_sub_mode.bind("<<ComboboxSelected>>", self._on_main_sub_mode_changed)
 
-        self.lbl_main_sub_pos = tk.Label(row2, text=tr("lbl_main_sub_pos", "📍 Pos:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=6, anchor="w")
+        self.lbl_main_sub_pos = tk.Label(row2, text=tr("lbl_main_sub_pos", "● Pos:"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_text_bright, width=6, anchor="w")
         self._main_sub_pos_codes = ["bottom", "middle", "top"]
         pos_labels = [tr("sub_pos_bottom", "أسفل (Bottom)"), tr("sub_pos_middle", "وسط (Middle)"), tr("sub_pos_top", "أعلى (Top)")]
         self.cb_main_sub_pos = ttk.Combobox(row2, values=pos_labels, state="readonly", font=("Segoe UI", 8), width=13)

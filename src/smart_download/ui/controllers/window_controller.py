@@ -3,6 +3,7 @@ Window management, title bar chrome, and geometry controller mixin for Smart Dow
 """
 import os
 import ctypes
+from typing import Optional
 
 try:
     import tkinter as tk
@@ -14,17 +15,8 @@ from smart_download.config import get_resource_path, APP_VERSION
 from smart_download.ui.components.tooltip import ToolTip
 from smart_download.utils.dpi import get_windows_work_area
 from smart_download.services import (
-    IS_WINDOWS,
-    GWL_STYLE,
-    GWL_EXSTYLE,
-    WS_EX_APPWINDOW,
-    WS_EX_TOOLWINDOW,
-    WS_MINIMIZEBOX,
-    WS_SYSMENU,
-    SW_HIDE,
-    SW_MINIMIZE,
-    SW_RESTORE,
-    SW_SHOW,
+    IS_WINDOWS, GWL_STYLE, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    WS_MINIMIZEBOX, WS_SYSMENU, SW_HIDE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
 )
 
 from .lifecycle_controller import WindowLifecycleMixin
@@ -35,6 +27,14 @@ from .dispatch_controller import DispatchControllerMixin
 class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLifecycleMixin):
     """Provides window setup, custom frameless title bar dragging, and window geometry."""
 
+    @staticmethod
+    def _format_geometry(w: Optional[int], h: Optional[int], x: int, y: int) -> str:
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        if w is not None and h is not None:
+            return f"{int(w)}x{int(h)}{pos_x}{pos_y}"
+        return f"{pos_x}{pos_y}"
+
     def _setup_window(self):
         """Configures frameless window, centering, and dragging."""
         self.root.overrideredirect(True)
@@ -44,9 +44,10 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         sh = self.root.winfo_screenheight()
         x = max(0, (sw - self.width) // 2)
         y = max(0, (sh - self.height) // 2)
-        self.root.geometry(f"{self.width}x{self.height}+{x}+{y}")
+        geo = self._format_geometry(self.width, self.height, x, y)
+        self.root.geometry(geo)
         self._is_maximized = False
-        self._normal_geometry = f"{self.width}x{self.height}+{x}+{y}"
+        self._normal_geometry = geo
         self._min_width = max(820, int(820 * getattr(self, "dpi_scale", 1.0)))
         self._min_height = max(620, int(620 * getattr(self, "dpi_scale", 1.0)))
         self._resize_state = {}
@@ -290,12 +291,14 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
             self._drag_offset_y = max(10, min(30, getattr(event, "y", 20)))
             x = event.x_root - self._drag_offset_x
             y = event.y_root - self._drag_offset_y
-            self.root.geometry(f"{restored_w}x{restored_h}+{x}+{y}")
+            self.root.geometry(self._format_geometry(restored_w, restored_h, x, y))
             return
 
         x = event.x_root - self._drag_offset_x
         y = event.y_root - self._drag_offset_y
-        self.root.geometry(f"+{x}+{y}")
+        self.root.geometry(self._format_geometry(None, None, x, y))
+
+    _on_drag_motion = _on_title_drag
 
     def toggle_maximize(self, event=None):
         """Toggles between maximized work area and restored normal window geometry."""
@@ -322,7 +325,7 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 work_w, work_h = sw, max(getattr(self, "_min_height", 620), sh - 40)
 
             try:
-                self.root.geometry(f"{work_w}x{work_h}+{work_x}+{work_y}")
+                self.root.geometry(self._format_geometry(work_w, work_h, work_x, work_y))
             except Exception:
                 pass
             self._is_maximized = True
@@ -450,8 +453,9 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 y = y + (h - new_h)
                 h = new_h
 
-            self.root.geometry(f"{w}x{h}+{x}+{y}")
-            self._normal_geometry = f"{w}x{h}+{x}+{y}"
+            geo = self._format_geometry(w, h, x, y)
+            self.root.geometry(geo)
+            self._normal_geometry = geo
             self.width, self.height = w, h
         except Exception:
             pass
@@ -528,9 +532,9 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         return False
 
 
+WindowControllerMixin = WindowChromeMixin
+
 __all__ = [
-    'WindowChromeMixin',
-    'WindowLifecycleMixin',
-    'ThemeControllerMixin',
-    'DispatchControllerMixin',
+    'WindowChromeMixin', 'WindowControllerMixin',
+    'WindowLifecycleMixin', 'ThemeControllerMixin', 'DispatchControllerMixin',
 ]

@@ -113,9 +113,11 @@ class RefreshLinkModal(_BaseToplevel):
         except Exception:
             px, py, pw, ph = 100, 100, dlg_w, dlg_h
 
-        x = max(0, px + (pw - dlg_w) // 2)
-        y = max(0, py + (ph - dlg_h) // 2)
-        self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        x = px + (pw - dlg_w) // 2
+        y = py + (ph - dlg_h) // 2
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        self.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
         self.minsize(min(480, dlg_w), min(320, dlg_h))
 
         # Icons
@@ -266,7 +268,7 @@ class RefreshLinkModal(_BaseToplevel):
             prog_txt = f"{self.downloaded_bytes / (1024*1024):.2f} MB of {self.total_size / (1024*1024):.2f} MB ({pct:.1f}%) saved on disk"
         else:
             prog_txt = f"{self.downloaded_bytes / (1024*1024):.2f} MB downloaded"
-        tk.Label(row_prog, text=f"🛡️ {prog_txt}", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success, anchor="w").pack(side=tk.LEFT)
+        tk.Label(row_prog, text=f"✓ {prog_txt}", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success, anchor="w").pack(side=tk.LEFT)
 
         # Old URL row
         row_old = tk.Frame(info_card, bg=self.c_panel)

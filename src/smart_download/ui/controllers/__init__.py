@@ -16,7 +16,7 @@ from .dialog_controller import DialogControllerMixin
 from .lifecycle_controller import WindowLifecycleMixin
 from .theme_controller import ThemeControllerMixin
 from .dispatch_controller import DispatchControllerMixin
-from .window_controller import WindowChromeMixin
+from .window_controller import WindowChromeMixin, WindowControllerMixin
 from .browser_controller import BrowserControllerMixin
 
 __all__ = [
@@ -36,5 +36,6 @@ __all__ = [
     "ThemeControllerMixin",
     "DispatchControllerMixin",
     "WindowChromeMixin",
+    "WindowControllerMixin",
     "BrowserControllerMixin",
 ]

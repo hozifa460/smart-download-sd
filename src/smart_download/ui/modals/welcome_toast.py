@@ -85,7 +85,9 @@ class StartupWelcomeToast(_BaseToplevel):
             x = max(0, sw - w - int(24 * self.dpi_scale))
             y = max(0, sh - h - int(60 * self.dpi_scale))
 
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        self.geometry(f"{w}x{h}{pos_x}{pos_y}")
 
         # Non-activating extended window styles (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
         if sys.platform == "win32":
@@ -143,7 +145,7 @@ class StartupWelcomeToast(_BaseToplevel):
 
         self.lbl_ar = tk.Label(
             self.text_frame,
-            text="جاهز لالتقاط أي رابط تحميل 🚀",
+            text="جاهز لالتقاط أي رابط تحميل ⚡",
             font=("Segoe UI", int(8 * self.dpi_scale), "bold"),
             bg=self.c_panel,
             fg=self.c_text_bright,

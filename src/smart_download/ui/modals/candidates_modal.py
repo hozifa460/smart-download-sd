@@ -112,9 +112,11 @@ class MultipleCandidatesModal(_BaseToplevel):
                 py = parent.winfo_y()
                 pw = parent.winfo_width() or dlg_w
                 ph = parent.winfo_height() or dlg_h
-                x = max(0, px + (pw - dlg_w) // 2)
-                y = max(0, py + (ph - dlg_h) // 2)
-                self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+                x = px + (pw - dlg_w) // 2
+                y = py + (ph - dlg_h) // 2
+                pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+                pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+                self.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
             except Exception:
                 self.geometry(f"{dlg_w}x{dlg_h}")
         else:
@@ -125,7 +127,9 @@ class MultipleCandidatesModal(_BaseToplevel):
                 pass
             x = max(0, (sw - dlg_w) // 2)
             y = max(0, (sh - dlg_h) // 2)
-            self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+            pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+            pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+            self.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
 
         self.protocol("WM_DELETE_WINDOW", self._on_cancel_clicked)
         self.bind("<Escape>", lambda e: self._on_cancel_clicked())
@@ -145,7 +149,7 @@ class MultipleCandidatesModal(_BaseToplevel):
         hdr_frame = tk.Frame(body, bg=self.c_bg)
         hdr_frame.pack(fill=tk.X, pady=(0, 8))
 
-        lbl_icon = tk.Label(hdr_frame, text="📦", font=("Segoe UI", 16), bg=self.c_bg, fg=self.c_accent)
+        lbl_icon = tk.Label(hdr_frame, text="▣", font=("Segoe UI", 16), bg=self.c_bg, fg=self.c_accent)
         lbl_icon.pack(side=tk.LEFT, padx=(0, 8))
 
         title_box = tk.Frame(hdr_frame, bg=self.c_bg)

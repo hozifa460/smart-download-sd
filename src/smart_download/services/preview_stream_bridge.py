@@ -518,8 +518,7 @@ class PreviewBridgeRequestHandler(http.server.BaseHTTPRequestHandler):
                         pos_codes = ["bottom", "middle", "top"]
                         if sub_pos in pos_codes: pos_cb.current(pos_codes.index(sub_pos))
                 if dest_path and hasattr(m, "entry_dest") and m.entry_dest:
-                    import tkinter as tk
-                    m.entry_dest.delete(0, tk.END); m.entry_dest.insert(0, dest_path)
+                    m.entry_dest.delete(0, "end"); m.entry_dest.insert(0, dest_path)
                     if hasattr(m, "dest_path"): m.dest_path = dest_path
             except Exception:
                 pass

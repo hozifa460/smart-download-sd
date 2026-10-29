@@ -327,7 +327,7 @@ def build_audio_subtitle_row(
     row1.pack(fill=tk.X, pady=(0, 6 if subtitle_tracks else 0))
 
     if audio_tracks:
-        tk.Label(row1, text=tr("lbl_audio_track", "🎙️ لغة الصوت:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(row1, text=tr("lbl_audio_track", "♪ لغة الصوت:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 6))
         cb_audio = ttk.Combobox(row1, values=[t.get("label", "") for t in audio_tracks], state="readonly", font=("Segoe UI", 8), width=23)
         pref_a = str(get_setting("preferred_audio_lang", "original") or "").lower()
         a_idx = next((i for i, t in enumerate(audio_tracks) if pref_a in (str(t.get("language") or "").lower(), str(t.get("track_id") or "").lower())), 0)
@@ -341,7 +341,7 @@ def build_audio_subtitle_row(
         cb_audio.pack(side=tk.LEFT, padx=(0, 14))
 
     if subtitle_tracks:
-        tk.Label(row1, text=tr("lbl_subtitle_track", "💬 الترجمة:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(row1, text=tr("lbl_subtitle_track", "≡ الترجمة:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(0, 6))
         cb_sub = ttk.Combobox(row1, values=[s.get("label", "") for s in subtitle_tracks], state="readonly", font=("Segoe UI", 8), width=23)
         pref_s = str(get_setting("preferred_subtitle_lang", "none") or "").lower()
         s_idx = next((i for i, s in enumerate(subtitle_tracks) if pref_s != "none" and pref_s in (str(s.get("language") or "").lower(), str(s.get("sub_id") or "").lower())), 0)
@@ -420,7 +420,7 @@ def build_audio_subtitle_row(
                 pass
 
         # Subtitle Position Combobox
-        tk.Label(row2, text=tr("lbl_subtitle_pos", "📍 الموضع:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(10, 4))
+        tk.Label(row2, text=tr("lbl_subtitle_pos", "● الموضع:"), font=("Segoe UI", 9, "bold"), bg=c_panel, fg=c_text_bright).pack(side=tk.LEFT, padx=(10, 4))
         pos_codes = ["bottom", "middle", "top"]
         pos_labels = [tr("sub_pos_bottom", "أسفل (Bottom)"), tr("sub_pos_middle", "وسط (Middle)"), tr("sub_pos_top", "أعلى (Top)")]
         cb_sub_pos = ttk.Combobox(row2, values=pos_labels, state="readonly", font=("Segoe UI", 8), width=14)

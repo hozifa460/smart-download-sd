@@ -394,6 +394,7 @@ def sanitize_filename(name: str, max_length: int = 180) -> str:
     """
     if not name:
         return "youtube_download"
+    name = "".join(c for c in name if ord(c) <= 0xFFFF and c != "\ufffd")
     cleaned = INVALID_FILENAME_CHARS.sub("_", name)
     cleaned = re.sub(r'[\s_]+', ' ', cleaned).strip(" .")
     if not cleaned:

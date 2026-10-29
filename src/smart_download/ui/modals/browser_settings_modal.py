@@ -51,7 +51,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
 
         dlg = tk.Toplevel(self.root)
         self._browser_integration_dlg = dlg
-        dlg.title(tr("browser_dlg_title", "🌐 Browser Integration & WebExtension Setup"))
+        dlg.title(tr("browser_dlg_title", "❖ Browser Integration & WebExtension Setup"))
         dlg.transient(self.root)
         dlg.grab_set = lambda: None
         dlg.grab_set_global = lambda: None
@@ -75,9 +75,11 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
             ph = self.root.winfo_height() or self.height
         except Exception:
             px, py, pw, ph = 0, 0, self.width, self.height
-        x = max(0, px + (pw - dlg_w) // 2)
-        y = max(0, py + (ph - dlg_h) // 2)
-        dlg.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        x = px + (pw - dlg_w) // 2
+        y = py + (ph - dlg_h) // 2
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        dlg.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
         dlg.minsize(min(580, dlg_w), min(540, dlg_h))
         dlg.configure(bg=self.c_bg)
 
@@ -109,7 +111,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
 
         lbl_head = tk.Label(
             header,
-            text=tr("browser_dlg_header", "🌐 BROWSER INTEGRATION & EXTENSION SETUP"),
+            text=tr("browser_dlg_header", "❖ BROWSER INTEGRATION & EXTENSION SETUP"),
             font=("Segoe UI", 10, "bold"),
             bg=self.c_panel,
             fg=self.c_accent
@@ -140,7 +142,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         card_sniff = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_sniff.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_sniff_t = tk.Label(card_sniff, text=tr("browser_card_sniffer_title", "📋 ZERO-INSTALL CLIPBOARD MONITOR (SD SMART CAPTURE — ALL BROWSERS)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
+        lbl_sniff_t = tk.Label(card_sniff, text=tr("browser_card_sniffer_title", "❐ ZERO-INSTALL CLIPBOARD MONITOR (SD SMART CAPTURE — ALL BROWSERS)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_success)
         lbl_sniff_t.pack(anchor="w")
 
         sniff_row = tk.Frame(card_sniff, bg=self.c_panel)
@@ -271,14 +273,14 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
                 btn_reg.configure(text=tr("browser_btn_reregister", "↻ Re-Register"), bg=self.c_panel_light)
             else:
                 lbl_reg_status.configure(text=tr("browser_reg_inactive", "● Not Registered in Windows Registry"), fg=self.c_warning)
-                btn_reg.configure(text=tr("browser_btn_register", "🔗 1-Click Register (Chrome & Edge)"), bg=self.c_success)
+                btn_reg.configure(text=tr("browser_btn_register", "⚡ 1-Click Register (Chrome & Edge)"), bg=self.c_success)
 
         def _on_register_click():
             res = register_native_host()
             _update_reg_status_label()
             if res.get("success"):
                 self.show_safe_info(
-                    "Registration Successful! 🚀",
+                    "Registration Successful! ⚡",
                     "Native Messaging Host successfully linked in Windows Registry for Google Chrome and Microsoft Edge!\n\n"
                     f"Host Name: com.smartdownload.host\n"
                     f"Manifest: {res.get('manifest_path')}"
@@ -321,7 +323,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         card_boot = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_boot.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_boot_title = tk.Label(card_boot, text=tr("browser_card_boot_title", "🚀 WINDOWS STARTUP AUTO-BOOT (SILENT BACKGROUND MODE)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl_boot_title = tk.Label(card_boot, text=tr("browser_card_boot_title", "⚡ WINDOWS STARTUP AUTO-BOOT (SILENT BACKGROUND MODE)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_boot_title.pack(anchor="w")
 
         boot_row = tk.Frame(card_boot, bg=self.c_panel)
@@ -339,10 +341,10 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
             enabled = is_startup_enabled()
             if enabled:
                 lbl_boot_status.configure(text=tr("browser_boot_enabled", "● Start with Windows: Enabled (Silent Background)"), fg=self.c_success)
-                btn_dlg_boot.configure(text=tr("browser_btn_boot_enabled", "🚀 Start on Boot: Enabled"), fg=self.c_success, bg=self.c_panel_light)
+                btn_dlg_boot.configure(text=tr("browser_btn_boot_enabled", "⚡ Start on Boot: Enabled"), fg=self.c_success, bg=self.c_panel_light)
             else:
                 lbl_boot_status.configure(text=tr("browser_boot_disabled", "● Start with Windows: Disabled"), fg=self.c_warning)
-                btn_dlg_boot.configure(text=tr("browser_btn_boot_disabled", "🚀 Start on Boot: Disabled"), fg=self.c_text_muted, bg=self.c_panel)
+                btn_dlg_boot.configure(text=tr("browser_btn_boot_disabled", "⚡ Start on Boot: Disabled"), fg=self.c_text_muted, bg=self.c_panel)
 
         self._update_dlg_startup_ui = _update_dlg_boot_status
         try:
@@ -370,7 +372,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         card_tray = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_tray.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_tray_title = tk.Label(card_tray, text=tr("browser_card_tray_title", "🔔 WINDOWS SYSTEM TRAY & BACKGROUND MINIMIZATION"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl_tray_title = tk.Label(card_tray, text=tr("browser_card_tray_title", "❖ WINDOWS SYSTEM TRAY & BACKGROUND MINIMIZATION"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_tray_title.pack(anchor="w")
 
         tray_row = tk.Frame(card_tray, bg=self.c_panel)
@@ -419,7 +421,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
         card_unpack = tk.Frame(body, bg=self.c_panel, padx=12, pady=10, highlightbackground=self.c_border, highlightthickness=1)
         card_unpack.pack(fill=tk.X, pady=(0, 10))
 
-        lbl_unpack_title = tk.Label(card_unpack, text=tr("browser_card_unpack_title", "📦 AUTOMATIC ARCHIVE EXTRACTION (AEROARCHIVE ENGINE)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
+        lbl_unpack_title = tk.Label(card_unpack, text=tr("browser_card_unpack_title", "▣ AUTOMATIC ARCHIVE EXTRACTION (AEROARCHIVE ENGINE)"), font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent)
         lbl_unpack_title.pack(anchor="w")
 
         unpack_row = tk.Frame(card_unpack, bg=self.c_panel)

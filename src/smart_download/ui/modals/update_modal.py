@@ -75,7 +75,7 @@ class AppUpdateModal(_BaseToplevel):
         self.c_input_bg = t.get("c_input_bg", "#090d16")
 
         latest_ver = self.update_info.get("latest_version", APP_VERSION)
-        self.title(f"🚀 Update Available — Smart Download (SD) v{latest_ver}")
+        self.title(f"⚡ Update Available — Smart Download (SD) v{latest_ver}")
         self.configure(bg=self.c_bg)
 
         try:
@@ -90,7 +90,9 @@ class AppUpdateModal(_BaseToplevel):
         sh = self.winfo_screenheight()
         x = max(0, (sw - dlg_w) // 2)
         y = max(0, (sh - dlg_h) // 2)
-        self.geometry(f"{dlg_w}x{dlg_h}+{x}+{y}")
+        pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+        pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+        self.geometry(f"{dlg_w}x{dlg_h}{pos_x}{pos_y}")
         self.minsize(int(500 * self.dpi_scale), int(380 * self.dpi_scale))
 
         ico_path = get_resource_path("app_icon.ico")
@@ -124,7 +126,7 @@ class AppUpdateModal(_BaseToplevel):
         # Header
         lbl_title = tk.Label(
             container,
-            text=f"🚀 NEW UPDATE AVAILABLE — v{latest_ver}",
+            text=f"⚡ NEW UPDATE AVAILABLE — v{latest_ver}",
             font=("Segoe UI", 11, "bold"),
             bg=self.c_bg,
             fg=self.c_accent,
@@ -168,7 +170,7 @@ class AppUpdateModal(_BaseToplevel):
         # Release Notes Section
         lbl_notes_hdr = tk.Label(
             container,
-            text="📋 Release Notes & Highlights:",
+            text="❐ Release Notes & Highlights:",
             font=("Segoe UI", 8, "bold"),
             bg=self.c_bg,
             fg=self.c_text_muted,

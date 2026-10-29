@@ -70,14 +70,16 @@ class ToastControllerMixin:
             h = int(76 * scale)
             sw = toast.winfo_screenwidth()
             sh = toast.winfo_screenheight()
-            x = max(0, sw - w - int(24 * scale))
-            y = max(0, sh - h - int(48 * scale))
-            toast.geometry(f"{w}x{h}+{x}+{y}")
+            x = sw - w - int(24 * scale)
+            y = sh - h - int(48 * scale)
+            pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
+            pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
+            toast.geometry(f"{w}x{h}{pos_x}{pos_y}")
 
             inner = tk.Frame(toast, bg=c_panel, padx=12, pady=10)
             inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
 
-            lbl_ico = tk.Label(inner, text="🚀", font=("Segoe UI", 16), bg=c_panel, fg=c_accent)
+            lbl_ico = tk.Label(inner, text="⚡", font=("Segoe UI", 16), bg=c_panel, fg=c_accent)
             lbl_ico.pack(side=tk.LEFT, padx=(0, 10))
 
             text_frame = tk.Frame(inner, bg=c_panel)
