@@ -249,7 +249,7 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
 
         self.btn_check_updates = tk.Button(
             title_bar,
-            text=tr("btn_check_updates", "🔄 Check for Updates"),
+            text=tr("btn_check_updates", "↻ Check for Updates"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,

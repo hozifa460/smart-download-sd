@@ -27,6 +27,7 @@ class ThemeControllerMixin:
         self.c_danger = "#ef4444"      # Red 500
         self.c_text_bright = "#f8fafc" # Slate 50
         self.c_text_muted = "#94a3b8"  # Slate 400
+        self.c_text_main = self.c_text_bright
         self.c_input_bg = "#090e1a"
 
         if hasattr(self, "root") and self.root:
@@ -42,41 +43,83 @@ class ThemeControllerMixin:
 
                 # Treeview styling
                 row_h = max(26, int(26 * getattr(self, "dpi_scale", 1.0)))
-                for tv_name in ("Custom.Treeview", "Treeview"):
+                for tv_name in ("Treeview", "Custom.Treeview"):
                     self.style.configure(
                         tv_name,
-                        background=self.c_panel,
-                        foreground=self.c_text_bright,
-                        fieldbackground=self.c_panel,
+                        background=self.c_input_bg,
+                        foreground=self.c_text_main,
+                        fieldbackground=self.c_input_bg,
+                        bordercolor=self.c_border,
+                        lightcolor=self.c_border,
+                        darkcolor=self.c_border,
                         borderwidth=0,
+                        relief="flat",
                         rowheight=row_h,
-                        font=("Segoe UI", 9)
+                        font=("Segoe UI", 9),
                     )
-                    self.style.map(tv_name, background=[('selected', self.c_accent_dark)])
-                for hd_name in ("Custom.Treeview.Heading", "Treeview.Heading"):
+                    self.style.map(
+                        tv_name,
+                        background=[("selected", self.c_accent_dark)],
+                        foreground=[("selected", "#ffffff")],
+                    )
+                for hd_name in ("Treeview.Heading", "Custom.Treeview.Heading"):
                     self.style.configure(
                         hd_name,
-                        background="#1a2639",
+                        background="#182338",
                         foreground=self.c_accent,
+                        bordercolor=self.c_border,
+                        lightcolor="#182338",
+                        darkcolor="#182338",
+                        relief="flat",
+                        padding=(8, 6),
                         font=("Segoe UI", 9, "bold"),
-                        padding=(6, 5),
-                        relief="flat"
                     )
-                    self.style.map(hd_name, background=[('active', self.c_border)])
+                    self.style.map(
+                        hd_name,
+                        background=[("active", self.c_panel_light)],
+                        lightcolor=[("active", self.c_panel_light)],
+                        darkcolor=[("active", self.c_panel_light)],
+                    )
 
                 # Notebook tabs
-                self.style.configure("Custom.TNotebook", background=self.c_panel, borderwidth=0)
+                for nb_name in ("TNotebook", "Custom.TNotebook"):
+                    self.style.configure(
+                        nb_name,
+                        background=self.c_bg,
+                        bordercolor=self.c_border,
+                        lightcolor=self.c_bg,
+                        darkcolor=self.c_bg,
+                        tabmargins=[0, 2, 0, 0],
+                        borderwidth=0,
+                    )
+                for tab_name in ("TNotebook.Tab", "Custom.TNotebook.Tab"):
+                    self.style.configure(
+                        tab_name,
+                        background=self.c_panel,
+                        foreground=self.c_text_muted,
+                        bordercolor=self.c_border,
+                        lightcolor=self.c_panel,
+                        darkcolor=self.c_panel,
+                        focuscolor=self.c_panel,
+                        padding=[16, 7],
+                        font=("Segoe UI", 9, "bold"),
+                    )
+                    self.style.map(
+                        tab_name,
+                        background=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
+                        foreground=[("selected", "#ffffff"), ("active", self.c_text_bright)],
+                        bordercolor=[("selected", self.c_accent_dark), ("active", self.c_border)],
+                        lightcolor=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
+                        darkcolor=[("selected", self.c_accent_dark), ("active", self.c_panel_light)],
+                    )
+
+                # TFrame styling
                 self.style.configure(
-                    "Custom.TNotebook.Tab",
-                    background=self.c_panel_light,
-                    foreground=self.c_text_bright,
-                    padding=[14, 5],
-                    font=("Segoe UI", 9, "bold")
-                )
-                self.style.map(
-                    "Custom.TNotebook.Tab",
-                    background=[("selected", self.c_accent_dark)],
-                    foreground=[("selected", self.c_text_bright)]
+                    "TFrame",
+                    background=self.c_panel,
+                    bordercolor=self.c_border,
+                    lightcolor=self.c_panel,
+                    darkcolor=self.c_panel,
                 )
 
                 # Dark styling for TCombobox
@@ -145,6 +188,7 @@ class ThemeControllerMixin:
             "c_danger": getattr(self, "c_danger", "#ef4444"),
             "c_text_bright": getattr(self, "c_text_bright", "#f8fafc"),
             "c_text_muted": getattr(self, "c_text_muted", "#94a3b8"),
+            "c_text_main": getattr(self, "c_text_main", "#f8fafc"),
             "c_input_bg": getattr(self, "c_input_bg", "#090e1a")
         }
 

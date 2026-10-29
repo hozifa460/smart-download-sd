@@ -116,7 +116,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
 
         btn_dlg_updates = tk.Button(
             header,
-            text=tr("btn_check_updates", "🔄 Check for Updates"),
+            text=tr("btn_check_updates", "↻ Check for Updates"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,

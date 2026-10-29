@@ -53,6 +53,14 @@ class LocaleControllerMixin:
             self.btn_apply_speed.configure(text=tr("btn_apply_limit"))
         if hasattr(self, "lbl_slider_title") and self.lbl_slider_title.winfo_exists():
             self.lbl_slider_title.configure(text=tr("lbl_live_throttle_slider"))
+        if hasattr(self, "combo_speed") and self.combo_speed and self.combo_speed.winfo_exists():
+            speed_presets = [tr("lbl_unlimited", "Unlimited"), "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s"]
+            self.combo_speed["values"] = speed_presets
+            cur_preset_var = getattr(self, "speed_preset_var", None) or getattr(self, "limit_preset_var", None)
+            if cur_preset_var:
+                cur_val = cur_preset_var.get()
+                if cur_val in ("Unlimited", "بدون حد", tr("lbl_unlimited", "Unlimited")):
+                    cur_preset_var.set(tr("lbl_unlimited", "Unlimited"))
 
         # Actions card
         if hasattr(self, "btn_start") and self.btn_start.winfo_exists():

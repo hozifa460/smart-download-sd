@@ -72,7 +72,7 @@ class LinkRefreshControllerMixin:
                 if hasattr(self, "btn_start"):
                     self.btn_start.configure(state="disabled")
                 if hasattr(self, "btn_pause"):
-                    self.btn_pause.configure(state="normal", text=tr("btn_pause", "⏸ Pause"), bg=c_panel_light)
+                    self.btn_pause.configure(state="normal", text=tr("btn_pause", "❚❚ Pause"), bg=c_panel_light)
                 if hasattr(self, "btn_cancel"):
                     self.btn_cancel.configure(state="normal")
                 if hasattr(self, "btn_refresh_link"):

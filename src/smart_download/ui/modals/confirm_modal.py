@@ -307,13 +307,13 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, tk.Toplevel):
         )
         lbl_spd.pack(anchor="w", pady=(0, 2))
 
-        self.combo_speed = ttk.Combobox( spd_frame, values=["Unlimited", "256 KB/s", "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s"], width=16, font=("Segoe UI", 9)
+        self.combo_speed = ttk.Combobox( spd_frame, values=[tr("lbl_unlimited", "Unlimited"), "256 KB/s", "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s"], width=16, font=("Segoe UI", 9)
         )
         if self.default_speed_limit > 0:
             spd_str = f"{self.default_speed_limit / (1024*1024):.0f} MB/s" if self.default_speed_limit >= 1024*1024 else f"{self.default_speed_limit / 1024:.0f} KB/s"
             self.combo_speed.set(spd_str)
         else:
-            self.combo_speed.set("Unlimited")
+            self.combo_speed.set(tr("lbl_unlimited", "Unlimited"))
         self.combo_speed.pack(anchor="w")
 
         # Confirmation Bottom Buttons Row
@@ -482,7 +482,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, tk.Toplevel):
         )
         self.btn_cancel_prog.pack(side=tk.RIGHT, padx=(6, 0))
 
-        self.btn_pause_resume = tk.Button( self.prog_btn_row, text=tr("btn_pause", "⏸ Pause"),
+        self.btn_pause_resume = tk.Button( self.prog_btn_row, text=tr("btn_pause", "❚❚ Pause"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
             fg=self.c_text_bright,

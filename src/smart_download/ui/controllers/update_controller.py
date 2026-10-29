@@ -101,7 +101,7 @@ class UpdateControllerMixin(ToastControllerMixin):
                 if hasattr(g, "btn_check_updates") and g.btn_check_updates:
                     try:
                         if g.btn_check_updates.winfo_exists():
-                            g.btn_check_updates.configure(text=tr("btn_check_updates", "🔄 Check for Updates"), state="normal")
+                            g.btn_check_updates.configure(text=tr("btn_check_updates", "↻ Check for Updates"), state="normal")
                     except Exception:
                         pass
 

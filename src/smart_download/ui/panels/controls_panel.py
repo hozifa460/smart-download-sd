@@ -80,25 +80,37 @@ class ControlsPanelMixin:
         self.lbl_limit = tk.Label(row1, text=tr("lbl_speed_limiter"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
         self.lbl_limit.pack(side=tk.LEFT)
 
+        unlimited_val = tr("lbl_unlimited", "Unlimited")
+        presets = [unlimited_val, "512 KB/s", "1 MB/s", "2 MB/s", "5 MB/s", "10 MB/s", "20 MB/s"]
         self.preset_options = [
-            "Unlimited",
+            unlimited_val,
             "128 KB/s",
             "256 KB/s",
             "512 KB/s",
+            "1 MB/s",
             "1.0 MB/s",
+            "2 MB/s",
             "2.0 MB/s",
+            "5 MB/s",
             "5.0 MB/s",
+            "10 MB/s",
             "10.0 MB/s",
+            "20 MB/s",
             "20.0 MB/s",
             "Custom"
         ]
         saved_preset = str(get_setting("speed_limit_preset", "Unlimited") or "Unlimited")
-        if saved_preset not in self.preset_options:
-            saved_preset = "Unlimited"
-        self.limit_preset_var = tk.StringVar(value=saved_preset)
-        preset_combo = ttk.Combobox(row1, textvariable=self.limit_preset_var, values=self.preset_options, width=12, state="readonly")
+        if saved_preset in ("Unlimited", "بدون حد"):
+            saved_preset = unlimited_val
+        elif saved_preset not in self.preset_options:
+            saved_preset = unlimited_val
+        self.speed_preset_var = tk.StringVar(value=saved_preset)
+        self.limit_preset_var = self.speed_preset_var
+        self.combo_speed = ttk.Combobox(row1, textvariable=self.speed_preset_var, values=presets, width=12, state="readonly")
+        preset_combo = self.combo_speed
+        self.preset_combo = preset_combo
         preset_combo.pack(side=tk.LEFT, padx=(4, 8))
-        preset_combo.bind("<<ComboboxSelected>>", self._on_preset_selected)
+        preset_combo.bind("<<ComboboxSelected>>", self._on_speed_preset_change)
 
         # Custom entry
         self.lbl_custom = tk.Label(row1, text=tr("lbl_custom_speed"), font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
@@ -140,7 +152,7 @@ class ControlsPanelMixin:
         self.lbl_slider_title.pack(side=tk.LEFT, padx=(0, 8))
 
         slider_len = max(20, int(22 * getattr(self, "dpi_scale", 1.0)))
-        slider_w = max(14, int(16 * getattr(self, "dpi_scale", 1.0)))
+        slider_w = max(12, int(12 * getattr(self, "dpi_scale", 1.0)))
         self.slider_speed = tk.Scale(
             row_slider,
             from_=0,
@@ -148,10 +160,15 @@ class ControlsPanelMixin:
             orient=tk.HORIZONTAL,
             showvalue=False,
             bg=self.c_panel,
+            fg=self.c_text_bright,
             troughcolor=self.c_input_bg,
             activebackground=self.c_accent,
-            highlightthickness=0,
+            highlightthickness=1,
+            highlightbackground=self.c_border,
+            highlightcolor=self.c_accent,
+            bd=0,
             relief="flat",
+            sliderrelief="flat",
             sliderlength=slider_len,
             width=slider_w,
             command=self._on_slider_moved
@@ -162,11 +179,13 @@ class ControlsPanelMixin:
         self.lbl_slider_val = tk.Label(row_slider, text=f"{tr('lbl_unlimited', 'Unlimited')} (0 KB/s)", font=("Segoe UI", 8, "bold"), bg=self.c_panel, fg=self.c_accent, width=18, anchor="w")
         self.lbl_slider_val.pack(side=tk.RIGHT)
 
-        if saved_kbps > 0 or saved_preset != "Unlimited":
+        if saved_kbps > 0 or saved_preset not in ("Unlimited", "بدون حد", unlimited_val):
             preset_map = {
-                "Unlimited": 0, "128 KB/s": 128, "256 KB/s": 256, "512 KB/s": 512,
-                "1.0 MB/s": 1024, "2.0 MB/s": 2048, "5.0 MB/s": 5120,
-                "10.0 MB/s": 10240, "20.0 MB/s": 20480,
+                "Unlimited": 0, "بدون حد": 0, unlimited_val: 0,
+                "128 KB/s": 128, "256 KB/s": 256, "512 KB/s": 512,
+                "1 MB/s": 1024, "1.0 MB/s": 1024, "2 MB/s": 2048, "2.0 MB/s": 2048,
+                "5 MB/s": 5120, "5.0 MB/s": 5120, "10 MB/s": 10240, "10.0 MB/s": 10240,
+                "20 MB/s": 20480, "20.0 MB/s": 20480,
             }
             if saved_kbps == 0 and saved_preset in preset_map and preset_map[saved_preset] > 0:
                 saved_kbps = preset_map[saved_preset]
@@ -208,7 +227,7 @@ class ControlsPanelMixin:
 
         self.btn_pause = _StateButton(
             row_transfers,
-            text=tr("btn_pause", "⏸ Pause"),
+            text=tr("btn_pause", "❚❚ Pause"),
             font=("Segoe UI", 9, "bold"),
             active_bg=self.c_panel_light,
             disabled_bg="#182234",
@@ -225,7 +244,7 @@ class ControlsPanelMixin:
 
         self.btn_cancel = _StateButton(
             row_transfers,
-            text=tr("btn_cancel", "⏹ Cancel"),
+            text=tr("btn_cancel", "✕ Cancel"),
             font=("Segoe UI", 9, "bold"),
             active_bg=self.c_danger,
             disabled_bg="#182234",
@@ -242,7 +261,7 @@ class ControlsPanelMixin:
 
         self.btn_refresh_link = tk.Button(
             row_transfers,
-            text=tr("btn_refresh_url", "🔄 Refresh Link"),
+            text=tr("btn_refresh_url", "↻ Refresh Link"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,
@@ -258,7 +277,7 @@ class ControlsPanelMixin:
 
         self.btn_quality_main = tk.Button(
             row_transfers,
-            text=tr("btn_quality_reopen", "🎞️ Quality / Dubbing & Subtitles"),
+            text=tr("btn_quality_reopen", "⚙ Quality / Audio & Subs"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_panel_light,
             fg=self.c_accent,
@@ -382,6 +401,11 @@ class ControlsPanelMixin:
             set_setting("max_connections", val)
         except Exception:
             pass
+
+    def _on_speed_preset_change(self, event=None):
+        """Handler for speed preset combobox changes."""
+        if hasattr(self, "_on_preset_selected") and callable(self._on_preset_selected):
+            return self._on_preset_selected(event)
 
 
 __all__ = ["ControlsPanelMixin"]

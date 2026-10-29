@@ -292,5 +292,10 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
             except Exception:
                 pass
 
+    def _on_speed_preset_change(self, event=None):
+        """Delegates speed preset changes to speed limiter controller if available."""
+        if hasattr(self, "_on_preset_selected") and callable(self._on_preset_selected):
+            return self._on_preset_selected(event)
+
 
 __all__ = ["SettingsControllerMixin", "LocaleControllerMixin", "SpeedLimiterControllerMixin"]

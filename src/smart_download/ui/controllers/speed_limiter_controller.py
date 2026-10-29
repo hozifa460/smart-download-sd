@@ -24,12 +24,15 @@ class SpeedLimiterControllerMixin:
         c_warning = getattr(self, "c_warning", "#f59e0b")
 
         if kb_val <= 0:
+            unlimited_label = tr("lbl_unlimited", "Unlimited")
             if hasattr(self, "lbl_slider_val") and self.lbl_slider_val:
-                self.lbl_slider_val.configure(text=f"{tr('lbl_unlimited', 'Unlimited')} (0 KB/s)", fg=c_success)
+                self.lbl_slider_val.configure(text=f"{unlimited_label} (0 KB/s)", fg=c_success)
             if hasattr(self, "lbl_active_limit") and self.lbl_active_limit:
                 self.lbl_active_limit.configure(text=tr("lbl_current_unlimited", "● Current: Unlimited"), fg=c_success)
             if hasattr(self, "limit_preset_var") and self.limit_preset_var:
-                self.limit_preset_var.set("Unlimited")
+                self.limit_preset_var.set(unlimited_label)
+            if hasattr(self, "speed_preset_var") and self.speed_preset_var:
+                self.speed_preset_var.set(unlimited_label)
             bytes_sec = 0.0
             try:
                 set_setting("speed_limit_preset", "Unlimited")
@@ -56,6 +59,8 @@ class SpeedLimiterControllerMixin:
                     preset_name = reverse_mapping[kb_val]
                 if hasattr(self, "limit_preset_var") and self.limit_preset_var:
                     self.limit_preset_var.set(preset_name)
+                if hasattr(self, "speed_preset_var") and self.speed_preset_var:
+                    self.speed_preset_var.set(preset_name)
                 set_setting("speed_limit_preset", preset_name)
             except Exception:
                 pass
@@ -72,26 +77,35 @@ class SpeedLimiterControllerMixin:
             engine.set_speed_limit(bytes_sec)
 
     def _on_preset_selected(self, event=None):
-        if not hasattr(self, "limit_preset_var") or not self.limit_preset_var:
+        var = getattr(self, "speed_preset_var", None) or getattr(self, "limit_preset_var", None)
+        if not var:
             return
-        val = self.limit_preset_var.get()
-        try:
-            set_setting("speed_limit_preset", val)
-        except Exception:
-            pass
+        val = var.get()
         mapping = {
             "Unlimited": 0,
+            "بدون حد": 0,
+            tr("lbl_unlimited", "Unlimited"): 0,
             "128 KB/s": 128,
             "256 KB/s": 256,
             "512 KB/s": 512,
+            "1 MB/s": 1024,
             "1.0 MB/s": 1024,
+            "2 MB/s": 2048,
             "2.0 MB/s": 2048,
+            "5 MB/s": 5120,
             "5.0 MB/s": 5120,
+            "10 MB/s": 10240,
             "10.0 MB/s": 10240,
+            "20 MB/s": 20480,
             "20.0 MB/s": 20480,
         }
         if val in mapping:
             target_kb = mapping[val]
+            saved_name = "Unlimited" if target_kb == 0 else val
+            try:
+                set_setting("speed_limit_preset", saved_name)
+            except Exception:
+                pass
             if hasattr(self, "entry_custom_speed") and tk:
                 self.entry_custom_speed.delete(0, tk.END)
                 self.entry_custom_speed.insert(0, str(target_kb))
@@ -99,8 +113,15 @@ class SpeedLimiterControllerMixin:
                 self.slider_speed.set(target_kb)
             self._apply_speed_limit()
         elif val == "Custom":
+            try:
+                set_setting("speed_limit_preset", "Custom")
+            except Exception:
+                pass
             if hasattr(self, "entry_custom_speed"):
                 self.entry_custom_speed.focus_set()
+
+    def _on_speed_preset_change(self, event=None):
+        return self._on_preset_selected(event)
 
     def _apply_speed_limit(self):
         """Applies speed limit dynamically to active engine."""
@@ -116,12 +137,15 @@ class SpeedLimiterControllerMixin:
         self.speed_limit = bytes_sec
 
         if bytes_sec <= 0:
+            unlimited_label = tr("lbl_unlimited", "Unlimited")
             if hasattr(self, "lbl_active_limit"):
                 self.lbl_active_limit.configure(text=tr("lbl_current_unlimited", "● Current: Unlimited"), fg=self.c_success)
             if hasattr(self, "lbl_slider_val"):
-                self.lbl_slider_val.configure(text=f"{tr('lbl_unlimited', 'Unlimited')} (0 KB/s)", fg=self.c_success)
+                self.lbl_slider_val.configure(text=f"{unlimited_label} (0 KB/s)", fg=self.c_success)
             if hasattr(self, "limit_preset_var"):
-                self.limit_preset_var.set("Unlimited")
+                self.limit_preset_var.set(unlimited_label)
+            if hasattr(self, "speed_preset_var"):
+                self.speed_preset_var.set(unlimited_label)
             if hasattr(self, "slider_speed"):
                 self.slider_speed.set(0)
             try:

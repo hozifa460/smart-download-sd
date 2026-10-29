@@ -31,7 +31,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         header_row = tk.Frame(card, bg=self.c_panel)
         header_row.pack(fill=tk.X, pady=(0, 4))
 
-        self.lbl_chunk_vis_title = tk.Label(header_row, text=tr("lbl_chunk_vis_title", "📊 خريطة قطاعات التحميل المباشرة"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
+        self.lbl_chunk_vis_title = tk.Label(header_row, text=tr("lbl_chunk_vis_title", "▦ خريطة قطاعات التحميل المباشرة (توزيع البايتات)"), font=("Segoe UI", 9, "bold"), bg=self.c_panel, fg=self.c_accent)
         self.lbl_chunk_vis_title.pack(side=tk.LEFT)
 
         self.lbl_chunk_vis_legend = tk.Label(header_row, text=tr("lbl_chunk_vis_legend", "■ نشط (سماوي)   ■ مكتمل (أخضر)   ■ متبقي (داكن)"), font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted)
@@ -131,7 +131,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         # Tab 1: Chunk Details Table
         tab_chunks = tk.Frame(notebook, bg=self.c_panel)
-        notebook.add(tab_chunks, text=tr("tab_chunks", "  📊 Chunk Segments  "))
+        notebook.add(tab_chunks, text=tr("tab_chunks", "  ▦ Chunk Segments  "))
 
         cols = ("id", "range", "size", "downloaded", "pct", "status")
         self.tree_chunks = ttk.Treeview(tab_chunks, columns=cols, show="headings", style="Custom.Treeview")
@@ -161,7 +161,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         # Tab 2: Activity Console Log
         tab_logs = tk.Frame(notebook, bg=self.c_panel)
-        notebook.add(tab_logs, text=tr("tab_logs", "  📜 Activity Log  "))
+        notebook.add(tab_logs, text=tr("tab_logs", "  ▤ Live Activity Log  "))
 
         self.txt_log = tk.Text(
             tab_logs,
@@ -183,7 +183,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         # Tab 3: Download History Manager
         tab_history = tk.Frame(notebook, bg=self.c_panel)
-        notebook.add(tab_history, text=tr("tab_history", "  📂 Download History  "))
+        notebook.add(tab_history, text=tr("tab_history", "  ☰ Download History  "))
 
         # Top Toolbar
         hist_toolbar = tk.Frame(tab_history, bg=self.c_panel, padx=8, pady=6)
@@ -445,7 +445,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         elif self.engine and not self.engine.is_running:
             self.engine.resume_transfer()
             self.btn_start.configure(state="disabled")
-            self.btn_pause.configure(state="normal", text=tr("btn_pause", "⏸ Pause"), bg=self.c_panel_light)
+            self.btn_pause.configure(state="normal", text=tr("btn_pause", "❚❚ Pause"), bg=self.c_panel_light)
             self.btn_cancel.configure(state="normal")
             if hasattr(self, "btn_refresh_link"):
                 self.btn_refresh_link.configure(state="normal")

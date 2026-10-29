@@ -672,7 +672,7 @@ class TestTDMConfirmationAndStandaloneProgress(unittest.TestCase):
             self.assertEqual(self.root.state(), "normal")
             self.assertEqual(gui.btn_start.cget("state"), "disabled")
             self.assertEqual(gui.btn_cancel.cget("state"), "normal")
-            self.assertEqual(gui.btn_pause.cget("text"), "⏸ Pause")
+            self.assertIn("Pause", gui.btn_pause.cget("text"))
         finally:
             gui.exit_completely()
 

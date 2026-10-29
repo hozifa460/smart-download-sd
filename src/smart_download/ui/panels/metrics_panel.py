@@ -44,17 +44,21 @@ class MetricsPanelMixin:
         self.lbl_t_threads = self.card_threads.master.lbl_t
 
     def _create_metric_box(self, parent, col, title, initial_value):
-        frame = tk.Frame(parent, bg=self.c_bg, padx=10, pady=8, highlightbackground=self.c_border, highlightthickness=1)
+        box_bg = "#0d1526"
+        frame = tk.Frame(parent, bg=box_bg, padx=12, pady=8, highlightbackground=self.c_border, highlightthickness=1)
         frame.grid(row=0, column=col, padx=4, sticky="nsew")
 
-        lbl_t = tk.Label(frame, text=title, font=("Segoe UI", 8, "bold"), bg=self.c_bg, fg=self.c_text_muted)
+        lbl_t = tk.Label(frame, text=title, font=("Segoe UI", 8, "bold"), bg=box_bg, fg=self.c_text_muted)
         lbl_t.pack(anchor="w")
         frame.lbl_t = lbl_t
 
-        lbl_v = tk.Label(frame, text=initial_value, font=("Segoe UI", 11, "bold"), bg=self.c_bg, fg=self.c_text_bright)
+        val_fg = self.c_accent if col == 0 else self.c_text_bright
+        lbl_v = tk.Label(frame, text=initial_value, font=("Segoe UI", 12, "bold"), bg=box_bg, fg=val_fg)
         lbl_v.pack(anchor="w", pady=(2, 0))
         frame.lbl_v = lbl_v
         return lbl_v
+
+    _make_metric = _create_metric_box
 
     def _draw_main_progress(self, pct: float):
         if not hasattr(self, "canvas_prog") or not self.canvas_prog:

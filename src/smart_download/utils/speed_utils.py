@@ -13,7 +13,7 @@ def parse_speed_limit(val_str: Any) -> float:
     if not val_str:
         return 0.0
     s = str(val_str).strip().lower()
-    if s in ("unlimited", "0", "0.0", "none", "off", "max", ""):
+    if s in ("unlimited", "بدون حد", "0", "0.0", "none", "off", "max", ""):
         return 0.0
 
     # 1. Gigabytes per second
