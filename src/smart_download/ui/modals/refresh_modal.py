@@ -316,7 +316,7 @@ class RefreshLinkModal(_BaseToplevel):
 
         btn_paste = tk.Button(
             new_url_row,
-            text=tr("btn_paste", "📋 Paste"),
+            text=tr("btn_paste", "⎘ Paste"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_panel_light,
             fg=self.c_text_bright,

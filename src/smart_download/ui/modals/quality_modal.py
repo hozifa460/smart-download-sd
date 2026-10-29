@@ -223,7 +223,7 @@ class QualitySelectionModal(_BaseToplevel):
 
         btn_browse = tk.Button(
             card_dest,
-            text=tr("modal_btn_browse", "📁 Browse..."),
+            text=tr("modal_btn_browse", "⋯ Browse..."),
             font=("Segoe UI", 8),
             bg=c_panel_light,
             fg=c_text_bright,

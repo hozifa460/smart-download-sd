@@ -105,7 +105,7 @@ class ThemeControllerMixin:
                     tabmargins=[0, 2, 0, 0],
                     borderwidth=0,
                 )
-            for cl_name in ("TNotebook.client", "Custom.TNotebook.client"):
+            for cl_name in ("TNotebook.client", "Custom.TNotebook.client", "Notebook.client"):
                 self.style.configure(
                     cl_name,
                     background=self.c_panel,

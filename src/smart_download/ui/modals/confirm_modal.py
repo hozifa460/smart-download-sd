@@ -267,7 +267,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
         self.entry_dest.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8), ipady=3)
         self.entry_dest.bind("<KeyRelease>", self._on_dest_key_release)
 
-        self.btn_browse = tk.Button( dest_frame, text=tr("modal_btn_browse", "📁 Browse..."),
+        self.btn_browse = tk.Button( dest_frame, text=tr("modal_btn_browse", "⋯ Browse..."),
             font=("Segoe UI", 9),
             bg=self.c_panel_light,
             fg=self.c_text_bright,
@@ -513,7 +513,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
             command=self.destroy
         )
 
-        self.btn_open_folder = tk.Button( self.prog_btn_row, text=tr("btn_hist_folder", "📁 Open Folder"),
+        self.btn_open_folder = tk.Button( self.prog_btn_row, text=tr("btn_hist_folder", "⋯ Open Folder"),
             font=("Segoe UI", 9),
             bg=self.c_panel_light,
             fg=self.c_text_bright,
@@ -527,7 +527,7 @@ class DownloadConfirmationModal(ConfirmModalLogicMixin, _BaseToplevel):
 
         self.btn_open_file = tk.Button(
             self.prog_btn_row,
-            text=tr("btn_hist_open", "📂 Open File"),
+            text=tr("btn_hist_open", "↗ Open File"),
             font=("Segoe UI", 9, "bold"),
             bg=self.c_success,
             fg="white",

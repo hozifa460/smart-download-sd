@@ -38,16 +38,16 @@ class HistoryPanelMixin:
             bd=1
         )
         self.history_context_menu.add_command(
-            label=tr("ctx_open_file", "📂 Open File"),
+            label=tr("ctx_open_file", "↗ Open File"),
             command=self._history_open_selected_file
         )
         self.history_context_menu.add_command(
-            label=tr("ctx_open_folder", "📁 Open Containing Folder"),
+            label=tr("ctx_open_folder", "⋯ Open Containing Folder"),
             command=self._history_open_selected_folder
         )
         self.history_context_menu.add_separator()
         self.history_context_menu.add_command(
-            label=tr("ctx_copy_url", "📋 Copy URL"),
+            label=tr("ctx_copy_url", "⎘ Copy URL"),
             command=self._history_copy_selected_url
         )
         self.history_context_menu.add_command(
@@ -60,7 +60,7 @@ class HistoryPanelMixin:
         )
         self.history_context_menu.add_separator()
         self.history_context_menu.add_command(
-            label=tr("ctx_remove_history", "🗑️ Remove from History"),
+            label=tr("ctx_remove_history", "✕ Remove from History"),
             command=self._history_remove_selected
         )
 

@@ -71,16 +71,28 @@ class TestVisualDefectsFix(unittest.TestCase):
             self.assertEqual(tf_conf.get("lightcolor"), gui.c_panel)
             self.assertEqual(tf_conf.get("darkcolor"), gui.c_panel)
 
-            # Check TNotebook.client
+            # Check TNotebook.client and Notebook.client
             cl_conf = gui.style.configure("TNotebook.client")
             self.assertEqual(cl_conf.get("background"), gui.c_panel)
             self.assertEqual(cl_conf.get("bordercolor"), gui.c_border)
             self.assertEqual(cl_conf.get("lightcolor"), gui.c_panel)
             self.assertEqual(cl_conf.get("darkcolor"), gui.c_panel)
 
+            cl_base = gui.style.configure("Notebook.client")
+            self.assertEqual(cl_base.get("background"), gui.c_panel)
+            self.assertEqual(cl_base.get("bordercolor"), gui.c_border)
+
             # Check Treeview layout (stripped 3D field border)
             tv_layout = gui.style.layout("Treeview")
             self.assertEqual(tv_layout, [("Treeview.treearea", {"sticky": "nswe"})])
+            tv_custom_layout = gui.style.layout("Custom.Treeview")
+            self.assertEqual(tv_custom_layout, [("Custom.Treeview.treearea", {"sticky": "nswe"})])
+
+            # Check notebook tab frame 1px border
+            tab0 = gui.root.nametowidget(gui.notebook.tabs()[0])
+            self.assertEqual(tab0.cget("highlightthickness"), 1)
+            self.assertEqual(tab0.cget("highlightbackground"), gui.c_border)
+            self.assertEqual(tab0.cget("bd"), 0)
 
             # Check inputs panel label widths (Part 1 fix)
             self.assertEqual(gui.lbl_url.cget("width"), 14)
@@ -124,6 +136,13 @@ class TestVisualDefectsFix(unittest.TestCase):
             "btn_pause",
             "btn_pause_all",
             "ctx_pause_download",
+            "btn_hist_open",
+            "btn_hist_folder",
+            "btn_hist_remove",
+            "btn_hist_clear",
+            "btn_clear_completed",
+            "ctx_remove_history",
+            "ctx_copy_download_url",
         ]
         for lang, path in [("ar", "src/smart_download/locales/ar.json"), ("en", "src/smart_download/locales/en.json")]:
             with open(path, "r", encoding="utf-8") as f:
@@ -236,10 +255,24 @@ class TestVisualDefectsFix(unittest.TestCase):
 
     def test_part6_headless_guard(self):
         """Verifies tk_helpers and controls_panel gracefully handle headless tk=None environments."""
+        import sys
+        import subprocess
         import smart_download.utils.tk_helpers as tkh
         import smart_download.ui.panels.controls_panel as cp
         self.assertTrue(hasattr(tkh, "_safe_winfo_exists"))
         self.assertTrue(issubclass(cp._StateButton, (tk.Button, object)))
+
+        cmd = [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['tkinter'] = None; import turbo_downloader; "
+            "from smart_download.utils import tk_helpers; from smart_download.ui.panels import controls_panel; "
+            "assert controls_panel._BaseButton is object; assert tk_helpers._ORIG_MISC_DESTROY is None; "
+            "print('HEADLESS_OK')"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Headless import failed: {res.stderr}")
+        self.assertIn("HEADLESS_OK", res.stdout)
 
 
 if __name__ == "__main__":

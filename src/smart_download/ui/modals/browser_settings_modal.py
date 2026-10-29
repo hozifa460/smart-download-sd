@@ -159,9 +159,9 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
 
         def _update_dlg_sniff_btn():
             if self._clipboard_sniffer_active:
-                btn_dlg_sniff.configure(text=tr("btn_sniffer_active", "📋 Sniffer: Active"), fg=self.c_success, bg=self.c_panel_light)
+                btn_dlg_sniff.configure(text=tr("btn_sniffer_active", "● Sniffer: Active"), fg=self.c_success, bg=self.c_panel_light)
             else:
-                btn_dlg_sniff.configure(text=tr("btn_sniffer_paused", "📋 Sniffer: Paused"), fg=self.c_text_muted, bg=self.c_panel)
+                btn_dlg_sniff.configure(text=tr("btn_sniffer_paused", "○ Sniffer: Paused"), fg=self.c_text_muted, bg=self.c_panel)
 
         def _on_dlg_sniff_toggle():
             self.toggle_clipboard_sniffer()
@@ -498,7 +498,7 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
 
         btn_open = tk.Button(
             e_row,
-            text=tr("browser_btn_open_folder", "📂 Open Folder"),
+            text=tr("browser_btn_open_folder", "⋯ Open Folder"),
             font=("Segoe UI", 8, "bold"),
             bg=self.c_accent_dark,
             fg="white",

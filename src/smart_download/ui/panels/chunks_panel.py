@@ -215,7 +215,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
         btn_font = ("Segoe UI", 8)
         self.btn_hist_open = tk.Button(
             hist_toolbar,
-            text=tr("btn_hist_open", "📂 Open File"),
+            text=tr("btn_hist_open", "↗ Open File"),
             command=self._history_open_selected_file,
             font=btn_font,
             bg=self.c_panel_light,
@@ -231,7 +231,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         self.btn_hist_folder = tk.Button(
             hist_toolbar,
-            text=tr("btn_hist_folder", "📁 Open Folder"),
+            text=tr("btn_hist_folder", "⋯ Open Folder"),
             command=self._history_open_selected_folder,
             font=btn_font,
             bg=self.c_panel_light,
@@ -279,7 +279,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         self.btn_hist_remove = tk.Button(
             hist_toolbar,
-            text=tr("btn_hist_remove", "🗑️ Remove"),
+            text=tr("btn_hist_remove", "✕ Remove"),
             command=self._history_remove_selected,
             font=btn_font,
             bg=self.c_panel_light,
@@ -295,7 +295,7 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         self.btn_hist_clear = tk.Button(
             hist_toolbar,
-            text=tr("btn_hist_clear", "🧹 Clear All"),
+            text=tr("btn_hist_clear", "⌫ Clear All"),
             command=self._history_clear_all,
             font=btn_font,
             bg=self.c_panel_light,
@@ -413,11 +413,11 @@ class ChunksPanelMixin(MetricsPanelMixin):
         )
         self.tree_context_menu.add_separator()
         self.tree_context_menu.add_command(
-            label=tr("ctx_copy_download_url", "📋 Copy Download URL"),
+            label=tr("ctx_copy_download_url", "⎘ Copy Download URL"),
             command=self._copy_current_url
         )
         self.tree_context_menu.add_command(
-            label=tr("ctx_open_folder", "📁 Open Containing Folder"),
+            label=tr("ctx_open_folder", "⋯ Open Containing Folder"),
             command=self._open_download_folder
         )
 
