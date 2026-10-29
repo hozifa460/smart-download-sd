@@ -118,6 +118,17 @@ class SettingsModal(_BaseToplevel):
         self._build_ui()
         self.bind("<Escape>", lambda e: self._on_close())
 
+        self._topmost_job = None
+        self._idle_job = None
+        try:
+            self.lift()
+            self.attributes("-topmost", True)
+            self.focus_force()
+            self._topmost_job = self.after(250, lambda: self.attributes("-topmost", False) if self.winfo_exists() else None)
+            self._idle_job = self.after_idle(lambda: (self.lift(), self.focus_force()) if self.winfo_exists() else None)
+        except Exception:
+            pass
+
     def _on_drag_press(self, event):
         self._drag_offset_x = event.x_root - self.winfo_x()
         self._drag_offset_y = event.y_root - self.winfo_y()
@@ -132,6 +143,24 @@ class SettingsModal(_BaseToplevel):
     def grab_set(self): pass
     def grab_set_global(self): pass
 
+    def _sync_dir_to_parent_app(self, new_dir: str):
+        try:
+            if not new_dir or not self.parent_app or not hasattr(self.parent_app, "entry_dest") or not self.parent_app.entry_dest:
+                return
+            eng = getattr(self.parent_app, "engine", None)
+            if eng and (getattr(eng, "is_running", False)() if callable(getattr(eng, "is_running", False)) else getattr(eng, "is_running", False)):
+                return
+            cur_dest = self.parent_app.entry_dest.get().strip()
+            if not cur_dest or os.path.isdir(cur_dest):
+                target = new_dir
+            else:
+                fn = os.path.basename(cur_dest)
+                target = os.path.join(new_dir, fn) if fn else new_dir
+            self.parent_app.entry_dest.delete(0, tk.END if tk is not None else "end")
+            self.parent_app.entry_dest.insert(0, target)
+        except Exception:
+            pass
+
     def _save_manual_dir_if_valid(self):
         if hasattr(self, "entry_dir") and self.entry_dir:
             try:
@@ -140,6 +169,7 @@ class SettingsModal(_BaseToplevel):
                     set_setting("last_download_dir", typed)
                     if self.parent_app and hasattr(self.parent_app, "log") and callable(self.parent_app.log):
                         self.parent_app.log(f"[SETTINGS] Default download directory set to: {typed}")
+                    self._sync_dir_to_parent_app(typed)
             except Exception: pass
 
     def _on_close(self):
@@ -149,6 +179,12 @@ class SettingsModal(_BaseToplevel):
     def destroy(self):
         try: self.withdraw()
         except Exception: pass
+        for job_attr in ("_topmost_job", "_idle_job"):
+            job = getattr(self, job_attr, None)
+            if job:
+                try: self.after_cancel(job)
+                except Exception: pass
+                setattr(self, job_attr, None)
         if self.parent_app and getattr(self.parent_app, "_settings_modal", None) is self:
             self.parent_app._settings_modal = None
         for p in ("_modal_icon_photo", "_modal_title_photo"):
@@ -168,9 +204,9 @@ class SettingsModal(_BaseToplevel):
         nb = ttk.Notebook(body, style="Custom.TNotebook")
         nb.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        tab_sniffer = tk.Frame(nb, bg=self.c_bg, padx=12, pady=10)
-        tab_downloads = tk.Frame(nb, bg=self.c_bg, padx=12, pady=10)
-        tab_system = tk.Frame(nb, bg=self.c_bg, padx=12, pady=10)
+        tab_sniffer = tk.Frame(nb, bg=self.c_bg, padx=12, pady=10, bd=0, highlightthickness=1, highlightbackground=self.c_border, highlightcolor=self.c_border)
+        tab_downloads = tk.Frame(nb, bg=self.c_bg, padx=12, pady=10, bd=0, highlightthickness=1, highlightbackground=self.c_border, highlightcolor=self.c_border)
+        tab_system = tk.Frame(nb, bg=self.c_bg, padx=12, pady=10, bd=0, highlightthickness=1, highlightbackground=self.c_border, highlightcolor=self.c_border)
 
         nb.add(tab_sniffer, text=tr("settings_tab_sniffer", " ⚙ Clipboard Sniffer "))
         nb.add(tab_downloads, text=tr("settings_tab_downloads", " ❖ Downloads & Media "))
@@ -351,14 +387,18 @@ class SettingsModal(_BaseToplevel):
         self.cb_cookies.bind("<<ComboboxSelected>>", self._on_cookies_changed)
 
     def _browse_save_dir(self):
-        cur = self.entry_dir.get().strip() or get_base_downloads_dir()
-        chosen = filedialog.askdirectory(parent=self, initialdir=cur) if filedialog else ""
-        if chosen and os.path.isdir(chosen):
-            self.entry_dir.delete(0, tk.END)
-            self.entry_dir.insert(0, chosen)
-            set_setting("last_download_dir", chosen)
-            if self.parent_app and hasattr(self.parent_app, "log") and callable(self.parent_app.log):
-                self.parent_app.log(f"[SETTINGS] Default download directory set to: {chosen}")
+        try:
+            cur = self.entry_dir.get().strip() or get_base_downloads_dir()
+            chosen = filedialog.askdirectory(parent=self, initialdir=cur) if filedialog else ""
+            if chosen and os.path.isdir(chosen):
+                self.entry_dir.delete(0, tk.END)
+                self.entry_dir.insert(0, chosen)
+                set_setting("last_download_dir", chosen)
+                if self.parent_app and hasattr(self.parent_app, "log") and callable(self.parent_app.log):
+                    self.parent_app.log(f"[SETTINGS] Default download directory set to: {chosen}")
+                self._sync_dir_to_parent_app(chosen)
+        except Exception:
+            pass
 
     def _toggle_auto_cat(self):
         if self.parent_app and hasattr(self.parent_app, "toggle_auto_categorize"):

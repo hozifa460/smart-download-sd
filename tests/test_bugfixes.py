@@ -2445,7 +2445,9 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
             self.assertIn("⚡", label_texts)
 
     def test_locales_have_no_supplementary_characters(self):
-        for path in ["src/smart_download/locales/en.json", "src/smart_download/locales/ar.json"]:
+        locales_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "smart_download", "locales")
+        for filename in ["en.json", "ar.json"]:
+            path = os.path.join(locales_dir, filename)
             with open(path, encoding="utf-8") as f:
                 content = f.read()
             non_bmp = [c for c in content if ord(c) > 0xFFFF]
@@ -2572,9 +2574,12 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
             self.assertEqual(app.detected_calls[-1], "https://example.com/download/archive.zip")
 
     def test_locales_key_symmetry_and_bmp(self):
-        with open("src/smart_download/locales/en.json", encoding="utf-8") as f:
+        locales_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "smart_download", "locales")
+        en_path = os.path.join(locales_dir, "en.json")
+        ar_path = os.path.join(locales_dir, "ar.json")
+        with open(en_path, encoding="utf-8") as f:
             en_data = json.load(f)
-        with open("src/smart_download/locales/ar.json", encoding="utf-8") as f:
+        with open(ar_path, encoding="utf-8") as f:
             ar_data = json.load(f)
 
         self.assertEqual(set(en_data.keys()), set(ar_data.keys()), "Locales en.json and ar.json must have 100% key symmetry")
@@ -2592,7 +2597,7 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
             self.assertIn(rk, en_data)
             self.assertIn(rk, ar_data)
 
-        for p in ["src/smart_download/locales/en.json", "src/smart_download/locales/ar.json"]:
+        for p in [en_path, ar_path]:
             with open(p, encoding="utf-8") as f:
                 content = f.read()
             non_bmp = [c for c in content if ord(c) > 0xFFFF]
@@ -2783,6 +2788,139 @@ class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
                 modal.entry_dir.insert(0, td)
                 modal._on_close()
                 self.assertEqual(get_setting("last_download_dir"), td)
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+    def test_settings_modal_elevation_focus_and_timer_cleanup(self):
+        import tkinter as tk
+        from smart_download.ui.modals.settings_modal import SettingsModal
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyApp:
+                def __init__(self):
+                    self.root = root
+                    self.dpi_scale = 1.0
+                    self.sniffer_platforms = {}
+                def _theme_dict(self):
+                    return {"c_border": "#283548", "c_bg": "#0f172a"}
+
+            app = DummyApp()
+            modal = SettingsModal(parent=root, parent_app=app)
+
+            # Check timer jobs were created
+            self.assertIsNotNone(modal._topmost_job)
+            self.assertIsNotNone(modal._idle_job)
+
+            # Check notebook tab frames have dark border styling
+            for child in modal.winfo_children():
+                for subchild in child.winfo_children():
+                    from tkinter import ttk
+                    if isinstance(subchild, ttk.Notebook):
+                        for tab_id in subchild.tabs():
+                            tab_widget = subchild.nametowidget(tab_id)
+                            self.assertEqual(int(tab_widget.cget("highlightthickness")), 1)
+                            self.assertEqual(str(tab_widget.cget("highlightbackground")), modal.c_border)
+                            self.assertEqual(str(tab_widget.cget("highlightcolor")), modal.c_border)
+                            self.assertEqual(int(tab_widget.cget("bd")), 0)
+
+            # Check destroy cancels both timer jobs
+            modal.destroy()
+            self.assertIsNone(modal._topmost_job)
+            self.assertIsNone(modal._idle_job)
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+    def test_settings_modal_sync_dir_to_parent_app(self):
+        import tkinter as tk
+        from smart_download.ui.modals.settings_modal import SettingsModal
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyEngine:
+                def __init__(self, is_running=False):
+                    self.is_running = is_running
+
+            class DummyParentApp:
+                def __init__(self):
+                    self.root = root
+                    self.dpi_scale = 1.0
+                    self.entry_dest = tk.Entry(root)
+                    self.engine = None
+                    self.sniffer_platforms = {}
+                    self.logs = []
+                def _theme_dict(self):
+                    return {}
+                def log(self, msg):
+                    self.logs.append(msg)
+
+            app = DummyParentApp()
+            modal = SettingsModal(parent=root, parent_app=app)
+
+            with tempfile.TemporaryDirectory() as td_old, tempfile.TemporaryDirectory() as td_new:
+                # 1. When entry_dest is empty, updates to new_dir
+                app.entry_dest.delete(0, tk.END)
+                modal._sync_dir_to_parent_app(td_new)
+                self.assertEqual(app.entry_dest.get(), td_new)
+
+                # 2. When entry_dest is a directory, updates to new_dir
+                app.entry_dest.delete(0, tk.END)
+                app.entry_dest.insert(0, td_old)
+                modal._sync_dir_to_parent_app(td_new)
+                self.assertEqual(app.entry_dest.get(), td_new)
+
+                # 3. When entry_dest has a filename, preserves filename in new_dir
+                sample_file = os.path.join(td_old, "sample_video.mp4")
+                app.entry_dest.delete(0, tk.END)
+                app.entry_dest.insert(0, sample_file)
+                modal._sync_dir_to_parent_app(td_new)
+                self.assertEqual(app.entry_dest.get(), os.path.join(td_new, "sample_video.mp4"))
+
+                # 4. When engine is running, entry_dest is NOT updated
+                app.engine = DummyEngine(is_running=True)
+                sample_file2 = os.path.join(td_old, "running_download.zip")
+                app.entry_dest.delete(0, tk.END)
+                app.entry_dest.insert(0, sample_file2)
+                modal._sync_dir_to_parent_app(td_new)
+                self.assertEqual(app.entry_dest.get(), sample_file2)
+
+                # Reset engine
+                app.engine = DummyEngine(is_running=False)
+
+                # 5. _save_manual_dir_if_valid calls _sync_dir_to_parent_app
+                modal.entry_dir.delete(0, tk.END)
+                modal.entry_dir.insert(0, td_new)
+                modal._save_manual_dir_if_valid()
+                self.assertEqual(app.entry_dest.get(), os.path.join(td_new, "running_download.zip"))
+
+                # 6. _browse_save_dir calls _sync_dir_to_parent_app
+                with patch("tkinter.filedialog.askdirectory", return_value=td_new):
+                    app.entry_dest.delete(0, tk.END)
+                    modal._browse_save_dir()
+                    self.assertEqual(app.entry_dest.get(), td_new)
+
+                # 7. Robustness: callable is_running returns True
+                app.engine = type("CallableEngine", (), {"is_running": lambda: True})()
+                modal._sync_dir_to_parent_app(td_old)
+                self.assertEqual(app.entry_dest.get(), td_new)
+
+                # 8. Robustness: engine raising exception does not crash
+                class RaisingEngine:
+                    @property
+                    def is_running(self): raise RuntimeError("Engine lock error")
+                app.engine = RaisingEngine()
+                modal._sync_dir_to_parent_app(td_new)
+
+                # 9. Robustness: None / empty new_dir does not crash or corrupt
+                modal._sync_dir_to_parent_app("")
+                modal._sync_dir_to_parent_app(None)
+                self.assertEqual(app.entry_dest.get(), td_new)
+
+            modal.destroy()
         finally:
             try: root.destroy()
             except Exception: pass
