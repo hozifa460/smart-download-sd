@@ -310,5 +310,26 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
             if hasattr(self, "_apply_speed_limit") and callable(self._apply_speed_limit):
                 self._apply_speed_limit()
 
+    def open_settings_dialog(self):
+        """Displays the frameless dark SettingsModal dialog."""
+        if hasattr(self, "_settings_modal") and self._settings_modal:
+            try:
+                if self._settings_modal.winfo_exists():
+                    self._settings_modal.lift()
+                    self._settings_modal.focus_force()
+                    return
+            except Exception:
+                pass
+            self._settings_modal = None
+
+        try:
+            from smart_download.ui.modals.settings_modal import SettingsModal
+            theme = self._theme_dict() if hasattr(self, "_theme_dict") else {}
+            parent_win = getattr(self, "root", None)
+            self._settings_modal = SettingsModal(parent=parent_win, parent_app=self, theme=theme)
+        except Exception as e:
+            if hasattr(self, "log") and callable(self.log):
+                self.log(f"[SETTINGS ERROR] Failed to open settings modal: {e}")
+
 
 __all__ = ["SettingsControllerMixin", "LocaleControllerMixin", "SpeedLimiterControllerMixin"]

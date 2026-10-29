@@ -12,6 +12,7 @@ from .candidates_modal import MultipleCandidatesModal
 from .refresh_modal import RefreshLinkModal, RefreshLinkDialog
 from .update_modal import AppUpdateModal
 from .video_preview_modal import open_video_preview, generate_preview_html
+from .settings_modal import SettingsModal
 
 __all__ = [
     "FetchingLinkToast",
@@ -27,5 +28,5 @@ __all__ = [
     "AppUpdateModal",
     "open_video_preview",
     "generate_preview_html",
+    "SettingsModal",
 ]
-

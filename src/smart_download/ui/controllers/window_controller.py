@@ -107,10 +107,8 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
     def restore_window(self):
         """Restores and brings the main window to foreground if hidden or minimized."""
         self._start_hidden = False
-        try:
-            self.root.deiconify()
-        except Exception:
-            pass
+        try: self.root.deiconify()
+        except Exception: pass
         if IS_WINDOWS:
             try:
                 hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
@@ -119,15 +117,13 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0043)
                 ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0043)
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
+            except Exception: pass
         try:
             self.root.lift()
             self.root.attributes("-topmost", True)
             self._restore_idle_job = self.root.after_idle(lambda: self.root.attributes("-topmost", False) if hasattr(self, "root") and self.root else None)
             self.root.focus_force()
-        except Exception:
-            pass
+        except Exception: pass
 
     def _build_title_bar(self, parent):
         """Constructs the custom dark draggable title bar."""
@@ -231,6 +227,23 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
         self.btn_lang_toggle.pack(side=tk.RIGHT, padx=(4, 6), pady=6)
         ToolTip(self.btn_lang_toggle, "tip_lang_toggle")
 
+        self.btn_settings = tk.Button(
+            title_bar,
+            text=tr("btn_settings", "⚙ Settings"),
+            font=("Segoe UI", 8, "bold"),
+            bg=self.c_panel_light,
+            fg=self.c_accent,
+            relief="flat",
+            activebackground=self.c_accent_dark,
+            activeforeground="white",
+            cursor="hand2",
+            padx=10,
+            pady=2,
+            command=self.open_settings_dialog
+        )
+        self.btn_settings.pack(side=tk.RIGHT, padx=(4, 4), pady=6)
+        ToolTip(self.btn_settings, "tip_settings")
+
         lbl_ver = tk.Label(
             title_bar,
             text=f"v{APP_VERSION}",
@@ -303,51 +316,37 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
     def toggle_maximize(self, event=None):
         """Toggles between maximized work area and restored normal window geometry."""
         if not getattr(self, "_is_maximized", False):
-            try:
-                self._normal_geometry = self.root.geometry()
-            except Exception:
-                pass
+            try: self._normal_geometry = self.root.geometry()
+            except Exception: pass
             hwnd = None
-            try:
-                hwnd = self.root.winfo_id()
-            except Exception:
-                pass
+            try: hwnd = self.root.winfo_id()
+            except Exception: pass
             wa = get_windows_work_area(hwnd) if IS_WINDOWS else None
             if wa:
                 work_x, work_y = wa[0], wa[1]
                 work_w, work_h = wa[2] - wa[0], wa[3] - wa[1]
             else:
                 work_x, work_y = 0, 0
-                try:
-                    sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-                except Exception:
-                    sw, sh = 1920, 1080
+                try: sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+                except Exception: sw, sh = 1920, 1080
                 work_w, work_h = sw, max(getattr(self, "_min_height", 620), sh - 40)
 
-            try:
-                self.root.geometry(self._format_geometry(work_w, work_h, work_x, work_y))
-            except Exception:
-                pass
+            try: self.root.geometry(self._format_geometry(work_w, work_h, work_x, work_y))
+            except Exception: pass
             self._is_maximized = True
             if hasattr(self, "btn_max") and self.btn_max:
-                try:
-                    self.btn_max.configure(text="❐")
-                except Exception:
-                    pass
+                try: self.btn_max.configure(text="❐")
+                except Exception: pass
             self._hide_resize_grips()
         else:
             norm_geo = getattr(self, "_normal_geometry", None)
             if norm_geo:
-                try:
-                    self.root.geometry(norm_geo)
-                except Exception:
-                    pass
+                try: self.root.geometry(norm_geo)
+                except Exception: pass
             self._is_maximized = False
             if hasattr(self, "btn_max") and self.btn_max:
-                try:
-                    self.btn_max.configure(text="□")
-                except Exception:
-                    pass
+                try: self.btn_max.configure(text="□")
+                except Exception: pass
             self._show_resize_grips()
 
     def _setup_resizing(self):
@@ -530,6 +529,10 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 except Exception: pass
         except Exception: pass
         return False
+
+    def open_settings_dialog(self):
+        """Fallback for opening settings dialog; overridden by SettingsControllerMixin."""
+        pass
 
 
 WindowControllerMixin = WindowChromeMixin

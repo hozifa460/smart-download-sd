@@ -540,3 +540,5 @@ class BrowserSettingsModalMixin(BrowserControllerMixin):
             command=dlg.destroy
         )
         btn_close.pack(side=tk.RIGHT)
+
+    open_browser_integration_dialog = _open_browser_integration_dialog

@@ -13,7 +13,7 @@ except Exception:
     tk = None  # type: ignore
 
 from smart_download.i18n import tr
-from smart_download.config import get_setting, set_setting, get_base_downloads_dir
+from smart_download.config import get_setting, set_setting, get_base_downloads_dir, DEFAULT_SNIFFER_PLATFORMS
 from smart_download.utils import (
     get_clipboard_text,
     is_downloadable_url,
@@ -29,22 +29,59 @@ from smart_download.ui.components.base_modal import SafeModalDialog
 IS_WINDOWS = sys.platform == "win32"
 
 
+def get_url_sniffer_platform_key(url: str) -> str:
+    """Resolves the sniffer platform key for a URL (e.g. 'youtube', 'tiktok', 'direct_files')."""
+    if not url or not isinstance(url, str):
+        return "direct_files"
+    clean_url = url.strip()
+    if not clean_url:
+        return "direct_files"
+    try:
+        from smart_download.services.youtube_models import is_youtube_url, SOCIAL_MEDIA_PATTERNS
+        import re
+        if is_youtube_url(clean_url) or re.search(r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:youtube\.com|youtu\.be)(?:/|$)', clean_url, re.IGNORECASE):
+            return "youtube"
+        for name, pat in SOCIAL_MEDIA_PATTERNS.items():
+            if pat.search(clean_url):
+                return name.lower()
+    except Exception:
+        pass
+    try:
+        from smart_download.services import is_media_url
+        if is_media_url(clean_url):
+            return "other_media"
+    except Exception:
+        pass
+    return "direct_files"
+
+
 class ClipboardControllerMixin:
     """Provides automatic clipboard monitoring and candidate download URL interception."""
 
+    def is_clipboard_url_allowed(self, url: str) -> bool:
+        """Determines whether automatic clipboard interception is allowed for this URL's platform."""
+        plat_map = getattr(self, "sniffer_platforms", None)
+        if plat_map is None:
+            plat_map = get_setting("sniffer_platforms", DEFAULT_SNIFFER_PLATFORMS)
+        key = get_url_sniffer_platform_key(url)
+        if isinstance(plat_map, dict):
+            if key in plat_map:
+                return bool(plat_map[key])
+            if key in ("snapchat", "rumble") and "threads" in plat_map:
+                return bool(plat_map["threads"])
+        return True
+
     def _init_clipboard_sniffer(self):
         """Initializes clipboard monitor state to current clipboard content so existing text doesn't trigger."""
+        if not hasattr(self, "sniffer_platforms") or self.sniffer_platforms is None:
+            self.sniffer_platforms = dict(get_setting("sniffer_platforms", DEFAULT_SNIFFER_PLATFORMS) or DEFAULT_SNIFFER_PLATFORMS)
         if IS_WINDOWS:
-            try:
-                self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
-            except Exception:
-                self._last_clipboard_seq = None
+            try: self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
+            except Exception: self._last_clipboard_seq = None
         try:
             cur = get_clipboard_text(self.root)
-            if cur:
-                self._last_clipboard_url = cur.strip()
-        except Exception:
-            pass
+            if cur: self._last_clipboard_url = cur.strip()
+        except Exception: pass
 
         self._fetch_cancel_event = threading.Event()
         self._update_sniffer_btn()
@@ -85,68 +122,54 @@ class ClipboardControllerMixin:
                     try:
                         if m.winfo_exists() and not getattr(m, "is_completed", False) and not getattr(m, "is_closed", False):
                             if IS_WINDOWS:
-                                try:
-                                    self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
-                                except Exception:
-                                    pass
+                                try: self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
+                                except Exception: pass
                             try:
                                 cur = get_clipboard_text(getattr(self, "root", None))
-                                if cur and isinstance(cur, str):
-                                    self._last_clipboard_url = cur.strip()
-                            except Exception:
-                                pass
+                                if cur and isinstance(cur, str): self._last_clipboard_url = cur.strip()
+                            except Exception: pass
                             return
-                    except Exception:
-                        pass
+                    except Exception: pass
 
         seq = None
         if IS_WINDOWS:
-            try:
-                seq = ctypes.windll.user32.GetClipboardSequenceNumber()
-            except Exception:
-                seq = None
+            try: seq = ctypes.windll.user32.GetClipboardSequenceNumber()
+            except Exception: seq = None
             if not force and seq is not None and getattr(self, "_last_clipboard_seq", None) is not None:
-                if seq == self._last_clipboard_seq:
-                    return
+                if seq == self._last_clipboard_seq: return
 
         text = get_clipboard_text(self.root)
         seq_changed = (seq is not None and getattr(self, "_last_clipboard_seq", None) is not None and seq != self._last_clipboard_seq)
-        if seq is not None:
-            self._last_clipboard_seq = seq
-        if not text or not isinstance(text, str):
-            return
+        if seq is not None: self._last_clipboard_seq = seq
+        if not text or not isinstance(text, str): return
 
         url = text.strip()
-        if not url:
-            return
-        if not force and not seq_changed and (url == getattr(self, "_last_clipboard_url", None)):
-            return
-        if not seq_changed and (url == getattr(self, "_last_detected_url", None)):
-            return
+        if not url: return
+        if not force and not seq_changed and (url == getattr(self, "_last_clipboard_url", None)): return
+        if not seq_changed and (url == getattr(self, "_last_detected_url", None)): return
         self._last_clipboard_url = url
         self._last_detected_url = url
         if is_downloadable_url(url):
+            if not self.is_clipboard_url_allowed(url):
+                plat = extract_media_platform(url) if is_media_url(url) else 'Direct'
+                msg = f"[CLIPBOARD] Ignored {plat} link (disabled in Clipboard Sniffer settings): {url}"
+                if hasattr(self, "log") and callable(self.log): self.log(msg)
+                return
             self._on_clipboard_url_detected(url)
 
     def clear_last_clipboard_url(self, url: Optional[str] = None):
         """Marks current clipboard content as already processed so it won't re-trigger unless re-copied."""
         if IS_WINDOWS:
-            try:
-                self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
-            except Exception:
-                pass
+            try: self._last_clipboard_seq = ctypes.windll.user32.GetClipboardSequenceNumber()
+            except Exception: pass
         self._last_detected_url = None
         try:
-            if url:
-                self._last_clipboard_url = url.strip()
+            if url: self._last_clipboard_url = url.strip()
             else:
                 cur = get_clipboard_text(getattr(self, "root", None))
-                if cur and isinstance(cur, str):
-                    self._last_clipboard_url = cur.strip()
-                elif getattr(self, "_last_clipboard_url", None) is None:
-                    self._last_clipboard_url = ""
-        except Exception:
-            pass
+                if cur and isinstance(cur, str): self._last_clipboard_url = cur.strip()
+                elif getattr(self, "_last_clipboard_url", None) is None: self._last_clipboard_url = ""
+        except Exception: pass
 
     def _resolve_real_url_async(
         self,
@@ -268,25 +291,28 @@ class ClipboardControllerMixin:
 
     def _on_clipboard_url_detected(self, url: str):
         """Dispatches an intercepted downloadable URL from the clipboard."""
-        self.log(f"[CLIPBOARD] Intercepted downloadable link from clipboard: {url}")
+        if not self.is_clipboard_url_allowed(url):
+            plat = extract_media_platform(url) if is_media_url(url) else 'Direct'
+            msg = f"[CLIPBOARD] Ignored {plat} link (disabled in Clipboard Sniffer settings): {url}"
+            if hasattr(self, "log") and callable(self.log): self.log(msg)
+            return
+
+        if hasattr(self, "log") and callable(self.log):
+            self.log(f"[CLIPBOARD] Intercepted downloadable link from clipboard: {url}")
 
         # Populate URL entry
         try:
             self.entry_url.delete(0, tk.END)
             self.entry_url.insert(0, url)
-        except Exception:
-            pass
+        except Exception: pass
 
         # Derive and populate destination
         downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
         cur_dest = ""
-        try:
-            cur_dest = self.entry_dest.get().strip()
-        except Exception:
-            pass
+        try: cur_dest = self.entry_dest.get().strip()
+        except Exception: pass
         dest_dir = cur_dest if cur_dest and os.path.isdir(cur_dest) else (os.path.dirname(cur_dest) if cur_dest else downloads_dir)
-        if not os.path.isdir(dest_dir):
-            dest_dir = downloads_dir
+        if not os.path.isdir(dest_dir): dest_dir = downloads_dir
 
         url_fn = derive_download_filename(url)
         if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
@@ -296,16 +322,14 @@ class ClipboardControllerMixin:
         try:
             self.entry_dest.delete(0, tk.END)
             self.entry_dest.insert(0, new_dest)
-        except Exception:
-            pass
+        except Exception: pass
 
         # DO NOT force-restore the main window if hidden or minimized in tray
         if not self.is_window_hidden_or_minimized():
             try:
                 self.root.lift()
                 self.root.focus_force()
-            except Exception:
-                pass
+            except Exception: pass
 
         # Non-blocking TDM-style download handling (no blocking modal dialogs / grab_set traps)
         if is_media_url(url):
@@ -314,14 +338,10 @@ class ClipboardControllerMixin:
                 self.log(f"[CLIPBOARD] Note: Active task is running. {plat} stream queued in URL field.")
             elif getattr(self, "_auto_start_clipboard", True):
                 self.log(f"[CLIPBOARD] {plat} stream detected: {url}. Starting format analysis...")
-                try:
-                    max_conn = int(self.conn_var.get())
-                except Exception:
-                    max_conn = 8
-                try:
-                    kb_limit = float(self.entry_custom_speed.get().strip())
-                except Exception:
-                    kb_limit = 0.0
+                try: max_conn = int(self.conn_var.get())
+                except Exception: max_conn = 8
+                try: kb_limit = float(self.entry_custom_speed.get().strip())
+                except Exception: kb_limit = 0.0
                 bytes_limit = kb_limit * 1024.0 if kb_limit > 0 else 0.0
                 self._start_youtube_download(url, new_dest, max_conn, bytes_limit)
             else:
@@ -331,45 +351,33 @@ class ClipboardControllerMixin:
                 self.log(f"[CLIPBOARD] Note: Active transfer in progress. URL '{url_fn}' populated in inputs.")
             elif is_potential_html_url(url):
                 def _on_clipboard_resolved(info: Dict[str, Any]):
-                    if self.engine and self.engine.is_running:
-                        return
-
+                    if self.engine and self.engine.is_running: return
                     real_url = info.get("url") or url
                     self._last_probed_info = dict(info)
                     if info.get("resolved"):
                         self.log(f"[LINK RESOLVER] Web page detected. Real file found: {real_url}")
-
                     downloads_dir = self._get_base_downloads_dir() if hasattr(self, "_get_base_downloads_dir") else get_base_downloads_dir()
                     cur_d = ""
-                    try:
-                        cur_d = self.entry_dest.get().strip()
-                    except Exception:
-                        pass
+                    try: cur_d = self.entry_dest.get().strip()
+                    except Exception: pass
                     dest_dir = cur_d if cur_d and os.path.isdir(cur_d) else (os.path.dirname(cur_d) if cur_d else downloads_dir)
-                    if not os.path.isdir(dest_dir):
-                        dest_dir = downloads_dir
-
+                    if not os.path.isdir(dest_dir): dest_dir = downloads_dir
                     resolved_fn = info.get("filename") or derive_download_filename(real_url)
                     if getattr(self, "auto_categorize_folders", True) and self._is_downloads_or_category_subfolder(dest_dir, downloads_dir):
                         final_dest = resolve_categorized_path(downloads_dir, resolved_fn, auto_categorize=True)
                     else:
                         final_dest = os.path.join(dest_dir, resolved_fn)
-
                     try:
                         self.entry_url.delete(0, tk.END)
                         self.entry_url.insert(0, real_url)
                         self.entry_dest.delete(0, tk.END)
                         self.entry_dest.insert(0, final_dest)
-                    except Exception:
-                        pass
-
+                    except Exception: pass
                     if not self.is_window_hidden_or_minimized():
                         try:
                             self.root.lift()
                             self.root.focus_force()
-                        except Exception:
-                            pass
-
+                        except Exception: pass
                     if getattr(self, "_auto_start_clipboard", True):
                         self.log(f"[CLIPBOARD] Intercepted link ready: '{resolved_fn}'. Showing TDM confirmation dialog...")
                         self._show_download_confirmation_dialog(real_url, final_dest)
@@ -387,28 +395,22 @@ class ClipboardControllerMixin:
         """Displays the TDM-style download confirmation dialog for intercepted URLs."""
         if threading.current_thread() != threading.main_thread():
             if hasattr(self, "root") and self.root:
-                try:
-                    self.root.after(0, lambda: self._show_download_confirmation_dialog(url, default_dest))
-                except Exception:
-                    pass
+                try: self.root.after(0, lambda: self._show_download_confirmation_dialog(url, default_dest))
+                except Exception: pass
             return
 
         self._close_fetching_toast()
-
         if hasattr(self, "_confirm_modal") and self._confirm_modal:
             try:
                 if self._confirm_modal.winfo_exists():
                     if getattr(self._confirm_modal, "is_in_progress_view", False) or getattr(self._confirm_modal, "is_completed", False):
-                        # Modal is actively downloading or displaying completion actions; keep it intact
                         self.log(f"[CLIPBOARD] Active standalone download in progress; queued '{derive_download_filename(url)}' in inputs.")
                         return
                     self._confirm_modal.destroy()
-            except Exception:
-                pass
+            except Exception: pass
             self._confirm_modal = None
 
         def _on_start_in_window(final_dest: str, max_conn: int, bytes_limit: float, modal: DownloadConfirmationModal):
-            # Keeps the main window hidden/minimized
             def _proceed_start(info: Dict[str, Any]):
                 resolved_url = info.get("url") or url
                 resolved_fn = info.get("filename") or derive_download_filename(resolved_url)
@@ -445,8 +447,7 @@ class ClipboardControllerMixin:
                 self.btn_pause.configure(state="disabled")
                 self.btn_cancel.configure(state="disabled")
                 self.card_size.configure(text=tr("status_ready", "Ready"))
-            except Exception:
-                pass
+            except Exception: pass
             self.log(f"[CLIPBOARD] Download opened in main app: {os.path.basename(final_dest)}")
 
         def _on_confirm(final_dest: str, *args):
@@ -455,8 +456,7 @@ class ClipboardControllerMixin:
             try:
                 self.entry_dest.delete(0, tk.END)
                 self.entry_dest.insert(0, final_dest)
-            except Exception:
-                pass
+            except Exception: pass
             self.log(f"[CLIPBOARD] Download confirmed by user: {os.path.basename(final_dest)}. Starting download...")
             self._on_start_download()
 
@@ -467,16 +467,13 @@ class ClipboardControllerMixin:
 
         try:
             default_conn = 8
-            try:
-                default_conn = int(self.conn_var.get())
-            except Exception:
-                pass
+            try: default_conn = int(self.conn_var.get())
+            except Exception: pass
             default_speed = 0.0
             try:
                 kb = float(self.entry_custom_speed.get().strip())
                 default_speed = kb * 1024.0 if kb > 0 else 0.0
-            except Exception:
-                pass
+            except Exception: pass
 
             self._confirm_modal = DownloadConfirmationModal(
                 parent=self.root,
@@ -497,37 +494,38 @@ class ClipboardControllerMixin:
 
     def _update_sniffer_btn(self):
         """Refreshes the visual state of the clipboard sniffer button."""
-        if not hasattr(self, "btn_clipboard_sniffer"):
-            return
+        if not hasattr(self, "btn_clipboard_sniffer"): return
         try:
-            if not self.btn_clipboard_sniffer.winfo_exists():
-                return
-        except Exception:
-            return
+            if not self.btn_clipboard_sniffer.winfo_exists(): return
+        except Exception: return
         if getattr(self, "_clipboard_sniffer_active", True):
             self.btn_clipboard_sniffer.configure(
-                text=tr("btn_sniffer_active"),
-                fg=self.c_success,
-                bg="#0f292a",
-                highlightbackground="#10b981",
-                highlightthickness=1,
+                text=tr("btn_sniffer_active"), fg=self.c_success, bg="#0f292a",
+                highlightbackground="#10b981", highlightthickness=1,
             )
         else:
             self.btn_clipboard_sniffer.configure(
-                text=tr("btn_sniffer_paused"),
-                fg=self.c_text_muted,
-                bg="#182234",
-                highlightbackground=self.c_border,
-                highlightthickness=1,
+                text=tr("btn_sniffer_paused"), fg=self.c_text_muted, bg="#182234",
+                highlightbackground=self.c_border, highlightthickness=1,
             )
+        if hasattr(self, "_settings_modal") and self._settings_modal:
+            bm = getattr(self._settings_modal, "btn_master_sniffer", None)
+            if bm:
+                try:
+                    act = getattr(self, "_clipboard_sniffer_active", True)
+                    bm.configure(
+                        text=tr("settings_sniffer_master_on") if act else tr("settings_sniffer_master_off"),
+                        bg="#0f292a" if act else "#182234",
+                        fg=getattr(self._settings_modal, "c_success", "#10b981") if act else getattr(self._settings_modal, "c_text_muted", "#94a3b8"),
+                        highlightbackground="#10b981" if act else getattr(self._settings_modal, "c_border", "#475569"),
+                    )
+                except Exception: pass
 
     def toggle_clipboard_sniffer(self):
         """Toggles automatic clipboard URL monitoring on or off."""
         self._clipboard_sniffer_active = not getattr(self, "_clipboard_sniffer_active", True)
-        try:
-            set_setting("clipboard_sniffer_active", self._clipboard_sniffer_active)
-        except Exception:
-            pass
+        try: set_setting("clipboard_sniffer_active", self._clipboard_sniffer_active)
+        except Exception: pass
         self._update_sniffer_btn()
         if self._clipboard_sniffer_active:
             self.log("[CLIPBOARD] Sniffer Active: Monitoring system clipboard for downloadable links.")
@@ -535,13 +533,10 @@ class ClipboardControllerMixin:
                 try:
                     if self.root.winfo_exists():
                         self._clipboard_job = self.root.after(self._clipboard_poll_interval, self._check_clipboard_tick)
-                except Exception:
-                    pass
+                except Exception: pass
         else:
             self.log("[CLIPBOARD] Sniffer Paused: Clipboard monitoring paused.")
 
         if hasattr(self, "tray_manager") and self.tray_manager:
-            try:
-                self.tray_manager.update_menu()
-            except Exception:
-                pass
+            try: self.tray_manager.update_menu()
+            except Exception: pass

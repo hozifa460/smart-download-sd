@@ -2452,6 +2452,342 @@ class TestGeometryAndSanitizationAndTikTokDeduplication(unittest.TestCase):
             self.assertEqual(non_bmp, [], f"Found non-BMP characters in {path}: {non_bmp}")
 
 
+class TestClipboardPlatformFilteringAndSettings(unittest.TestCase):
+    """Verifies per-platform sniffer filtering, settings persistence, and UI integration."""
+
+    def test_get_url_sniffer_platform_key(self):
+        from smart_download.ui.controllers.clipboard_controller import get_url_sniffer_platform_key
+
+        # YouTube URLs
+        self.assertEqual(get_url_sniffer_platform_key("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "youtube")
+        self.assertEqual(get_url_sniffer_platform_key("https://youtu.be/dQw4w9WgXcQ"), "youtube")
+        self.assertEqual(get_url_sniffer_platform_key("https://www.youtube.com/shorts/dQw4w9WgXcQ"), "youtube")
+
+        # TikTok URLs
+        self.assertEqual(get_url_sniffer_platform_key("https://vt.tiktok.com/ZS123456/"), "tiktok")
+        self.assertEqual(get_url_sniffer_platform_key("https://www.tiktok.com/@user/video/1234567890123456789"), "tiktok")
+
+        # Instagram URLs
+        self.assertEqual(get_url_sniffer_platform_key("https://www.instagram.com/p/ABC123xyz/"), "instagram")
+        self.assertEqual(get_url_sniffer_platform_key("https://www.instagram.com/reel/C123456789/"), "instagram")
+
+        # Facebook URLs
+        self.assertEqual(get_url_sniffer_platform_key("https://www.facebook.com/watch/?v=123456789"), "facebook")
+        self.assertEqual(get_url_sniffer_platform_key("https://fb.watch/123456/"), "facebook")
+
+        # Twitter / X URLs
+        self.assertEqual(get_url_sniffer_platform_key("https://x.com/user/status/1234567890"), "twitter")
+        self.assertEqual(get_url_sniffer_platform_key("https://twitter.com/user/status/1234567890"), "twitter")
+
+        # Other platforms
+        self.assertEqual(get_url_sniffer_platform_key("https://vimeo.com/123456789"), "vimeo")
+        self.assertEqual(get_url_sniffer_platform_key("https://www.reddit.com/r/funny/comments/123abc/title/"), "reddit")
+
+        # Direct files & non-media URLs
+        self.assertEqual(get_url_sniffer_platform_key("https://example.com/files/archive.zip"), "direct_files")
+        self.assertEqual(get_url_sniffer_platform_key("https://releases.ubuntu.com/22.04/ubuntu.iso"), "direct_files")
+        self.assertEqual(get_url_sniffer_platform_key(""), "direct_files")
+        self.assertEqual(get_url_sniffer_platform_key(None), "direct_files")
+
+    def test_is_clipboard_url_allowed(self):
+        from smart_download.ui.controllers.clipboard_controller import ClipboardControllerMixin
+        from smart_download.config import DEFAULT_SNIFFER_PLATFORMS
+
+        class DummyHost(ClipboardControllerMixin):
+            def __init__(self):
+                self.sniffer_platforms = dict(DEFAULT_SNIFFER_PLATFORMS)
+
+        host = DummyHost()
+        yt_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        tiktok_url = "https://vt.tiktok.com/ZS123456/"
+        direct_url = "https://example.com/file.zip"
+
+        # By default all are allowed
+        self.assertTrue(host.is_clipboard_url_allowed(yt_url))
+        self.assertTrue(host.is_clipboard_url_allowed(tiktok_url))
+        self.assertTrue(host.is_clipboard_url_allowed(direct_url))
+
+        # Disable youtube
+        host.sniffer_platforms["youtube"] = False
+        self.assertFalse(host.is_clipboard_url_allowed(yt_url))
+        self.assertTrue(host.is_clipboard_url_allowed(tiktok_url))
+        self.assertTrue(host.is_clipboard_url_allowed(direct_url))
+
+        # Disable tiktok
+        host.sniffer_platforms["tiktok"] = False
+        self.assertFalse(host.is_clipboard_url_allowed(tiktok_url))
+        self.assertTrue(host.is_clipboard_url_allowed(direct_url))
+
+        # Disable direct_files
+        host.sniffer_platforms["direct_files"] = False
+        self.assertFalse(host.is_clipboard_url_allowed(direct_url))
+
+    def test_check_clipboard_ignores_disabled_platforms(self):
+        from smart_download.ui.controllers.clipboard_controller import ClipboardControllerMixin
+        from smart_download.config import DEFAULT_SNIFFER_PLATFORMS
+
+        class DummyClipboardApp(ClipboardControllerMixin):
+            def __init__(self):
+                self.root = MagicMock()
+                self.root.winfo_exists.return_value = True
+                self.sniffer_platforms = dict(DEFAULT_SNIFFER_PLATFORMS)
+                self.sniffer_platforms["youtube"] = False
+                self.sniffer_platforms["tiktok"] = False
+                self._last_clipboard_url = None
+                self._last_detected_url = None
+                self._last_clipboard_seq = None
+                self.detected_calls = []
+                self.logs = []
+
+            def _on_clipboard_url_detected(self, url):
+                self.detected_calls.append(url)
+
+            def log(self, msg):
+                self.logs.append(msg)
+
+        app = DummyClipboardApp()
+
+        # 1. Copied YouTube link (disabled)
+        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://www.youtube.com/watch?v=dQw4w9WgXcQ"):
+            app._check_clipboard_now(force=True)
+            self.assertEqual(len(app.detected_calls), 0)
+            self.assertTrue(any("Ignored" in m and "youtube" in m.lower() for m in app.logs))
+
+        # 2. Copied TikTok link (disabled)
+        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://vt.tiktok.com/ZS123456/"):
+            app._check_clipboard_now(force=True)
+            self.assertEqual(len(app.detected_calls), 0)
+            self.assertTrue(any("Ignored" in m and "tiktok" in m.lower() for m in app.logs))
+
+        # 3. Copied Instagram link (enabled by default)
+        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://www.instagram.com/reel/C123456/"):
+            app._check_clipboard_now(force=True)
+            self.assertEqual(len(app.detected_calls), 1)
+            self.assertEqual(app.detected_calls[-1], "https://www.instagram.com/reel/C123456/")
+
+        # 4. Copied Direct File link (enabled by default)
+        with patch("smart_download.ui.controllers.clipboard_controller.get_clipboard_text", return_value="https://example.com/download/archive.zip"):
+            app._check_clipboard_now(force=True)
+            self.assertEqual(len(app.detected_calls), 2)
+            self.assertEqual(app.detected_calls[-1], "https://example.com/download/archive.zip")
+
+    def test_locales_key_symmetry_and_bmp(self):
+        with open("src/smart_download/locales/en.json", encoding="utf-8") as f:
+            en_data = json.load(f)
+        with open("src/smart_download/locales/ar.json", encoding="utf-8") as f:
+            ar_data = json.load(f)
+
+        self.assertEqual(set(en_data.keys()), set(ar_data.keys()), "Locales en.json and ar.json must have 100% key symmetry")
+
+        required_keys = [
+            "btn_settings", "tip_settings", "settings_modal_title",
+            "settings_tab_sniffer", "settings_tab_downloads", "settings_tab_system",
+            "settings_sniffer_hint", "settings_btn_enable_all_platforms",
+            "settings_btn_disable_all_platforms", "plat_youtube", "plat_tiktok",
+            "plat_instagram", "plat_facebook", "plat_twitter", "plat_direct_files",
+            "plat_reddit", "plat_twitch", "plat_vimeo", "plat_dailymotion",
+            "plat_pinterest", "plat_threads"
+        ]
+        for rk in required_keys:
+            self.assertIn(rk, en_data)
+            self.assertIn(rk, ar_data)
+
+        for p in ["src/smart_download/locales/en.json", "src/smart_download/locales/ar.json"]:
+            with open(p, encoding="utf-8") as f:
+                content = f.read()
+            non_bmp = [c for c in content if ord(c) > 0xFFFF]
+            self.assertEqual(non_bmp, [], f"Non-BMP characters found in {p}")
+
+    def test_settings_modal_tabs_and_toggles(self):
+        import tkinter as tk
+        from smart_download.ui.modals.settings_modal import SettingsModal
+        from smart_download.config import DEFAULT_SNIFFER_PLATFORMS
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyParentApp:
+                def __init__(self):
+                    self.root = root
+                    self.dpi_scale = 1.0
+                    self._clipboard_sniffer_active = True
+                    self.sniffer_platforms = dict(DEFAULT_SNIFFER_PLATFORMS)
+                    self.auto_categorize_folders = True
+                    self.minimize_to_tray = True
+                    self.logs = []
+                def _theme_dict(self):
+                    return {
+                        "c_bg": "#0f172a", "c_panel": "#1e293b", "c_panel_light": "#334155",
+                        "c_border": "#475569", "c_accent": "#38bdf8", "c_accent_dark": "#0284c7",
+                        "c_text_bright": "#f8fafc", "c_text_muted": "#94a3b8", "c_success": "#10b981",
+                        "c_danger": "#ef4444", "c_input_bg": "#0b1220"
+                    }
+                def toggle_clipboard_sniffer(self):
+                    self._clipboard_sniffer_active = not self._clipboard_sniffer_active
+                def toggle_auto_categorize(self):
+                    self.auto_categorize_folders = not self.auto_categorize_folders
+                def toggle_minimize_to_tray_setting(self):
+                    self.minimize_to_tray = not self.minimize_to_tray
+                    return self.minimize_to_tray
+                def toggle_startup_setting(self):
+                    return False
+                def log(self, msg):
+                    self.logs.append(msg)
+
+            app = DummyParentApp()
+            modal = SettingsModal(parent=root, parent_app=app)
+
+            # Test toggling individual platform (e.g. YouTube)
+            self.assertTrue(modal.sniffer_platforms["youtube"])
+            modal._toggle_platform("youtube", "YouTube")
+            self.assertFalse(modal.sniffer_platforms["youtube"])
+            self.assertFalse(app.sniffer_platforms["youtube"])
+
+            # Test toggling linked group threads/snapchat/rumble
+            self.assertTrue(modal.sniffer_platforms["threads"])
+            modal._toggle_platform("threads", "Threads")
+            self.assertFalse(modal.sniffer_platforms["threads"])
+            self.assertFalse(modal.sniffer_platforms["snapchat"])
+            self.assertFalse(modal.sniffer_platforms["rumble"])
+
+            # Test disable all
+            modal._set_all_platforms(False)
+            for k in DEFAULT_SNIFFER_PLATFORMS:
+                self.assertFalse(modal.sniffer_platforms[k])
+
+            # Test enable all
+            modal._set_all_platforms(True)
+            for k in DEFAULT_SNIFFER_PLATFORMS:
+                self.assertTrue(modal.sniffer_platforms[k])
+
+            # Test master sniffer toggle
+            modal._toggle_master_sniffer()
+            self.assertFalse(app._clipboard_sniffer_active)
+
+            modal.destroy()
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+    def test_settings_button_in_title_bar_and_locale_refresh(self):
+        import tkinter as tk
+        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+        from smart_download.ui.controllers.locale_controller import LocaleControllerMixin
+        from smart_download.i18n import LocalizationManager
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyMainApp(WindowChromeMixin, LocaleControllerMixin):
+                def __init__(self, r):
+                    self.root = r
+                    self.width = 850
+                    self.height = 650
+                    self.dpi_scale = 1.0
+                    self._init_theme()
+                    self._setup_window()
+                    self._build_title_bar(r)
+                def check_for_updates_manual(self): pass
+                def open_settings_dialog(self): self.opened_settings = True
+
+            app = DummyMainApp(root)
+            self.assertTrue(hasattr(app, "btn_settings"))
+            self.assertTrue(app.btn_settings.winfo_exists())
+
+            # Verify clicking settings button calls open_settings_dialog
+            app.btn_settings.invoke()
+            self.assertTrue(getattr(app, "opened_settings", False))
+
+            # Test locale refresh updates btn_settings text
+            LocalizationManager.get_instance().set_language("en")
+            app._refresh_ui_texts()
+            self.assertEqual(app.btn_settings.cget("text"), "⚙ Settings")
+
+            LocalizationManager.get_instance().set_language("ar")
+            app._refresh_ui_texts()
+            self.assertEqual(app.btn_settings.cget("text"), "⚙ الإعدادات")
+
+            # Restore to ar
+            LocalizationManager.get_instance().set_language("ar")
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+    def test_config_sniffer_platforms_defaults_and_merge(self):
+        from smart_download.config import load_settings, save_settings, DEFAULT_SNIFFER_PLATFORMS, _clear_settings_cache
+
+        _clear_settings_cache()
+        s = load_settings()
+        self.assertIn("sniffer_platforms", s)
+        self.assertEqual(set(s["sniffer_platforms"].keys()), set(DEFAULT_SNIFFER_PLATFORMS.keys()))
+
+        # Save partial sniffer_platforms dictionary missing some keys
+        save_settings({"sniffer_platforms": {"youtube": False}})
+        _clear_settings_cache()
+        reloaded = load_settings()
+        self.assertFalse(reloaded["sniffer_platforms"]["youtube"])
+        # Missing keys must still default to True
+        self.assertTrue(reloaded["sniffer_platforms"]["tiktok"])
+        self.assertTrue(reloaded["sniffer_platforms"]["direct_files"])
+
+    def test_youtube_url_variants_and_threads_subplatforms(self):
+        from smart_download.ui.controllers.clipboard_controller import get_url_sniffer_platform_key, ClipboardControllerMixin
+
+        # All YouTube URL forms map to 'youtube'
+        self.assertEqual(get_url_sniffer_platform_key("https://youtube.com"), "youtube")
+        self.assertEqual(get_url_sniffer_platform_key("https://www.youtube.com/playlist?list=PL12345"), "youtube")
+        self.assertEqual(get_url_sniffer_platform_key("https://www.youtube.com/@mkbhd"), "youtube")
+        self.assertEqual(get_url_sniffer_platform_key("https://m.youtube.com/watch?v=12345678901"), "youtube")
+        self.assertEqual(get_url_sniffer_platform_key("https://youtu.be/12345678901"), "youtube")
+
+        # Snapchat and Rumble
+        self.assertEqual(get_url_sniffer_platform_key("https://www.snapchat.com/spotlight/123456789"), "snapchat")
+        self.assertEqual(get_url_sniffer_platform_key("https://www.rumble.com/v123abc-video.html"), "rumble")
+
+        # Test fallback to threads when threads is disabled
+        class Host(ClipboardControllerMixin):
+            def __init__(self):
+                self.sniffer_platforms = {"threads": False}
+
+        h = Host()
+        self.assertFalse(h.is_clipboard_url_allowed("https://www.snapchat.com/spotlight/123456789"))
+        self.assertFalse(h.is_clipboard_url_allowed("https://www.rumble.com/v123abc-video.html"))
+
+    def test_settings_modal_cookies_file_and_manual_save(self):
+        import tkinter as tk
+        import tempfile
+        from smart_download.ui.modals.settings_modal import SettingsModal
+        from smart_download.config import set_setting, get_setting
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyApp:
+                def __init__(self):
+                    self.root = root
+                    self.dpi_scale = 1.0
+                    self.sniffer_platforms = {}
+                def _theme_dict(self):
+                    return {}
+
+            # Test cookies_browser = 'file' loads 'file...' in combobox
+            set_setting("cookies_browser", "file")
+            set_setting("cookies_file", "C:/fake/cookies.txt")
+            app = DummyApp()
+            modal = SettingsModal(parent=root, parent_app=app)
+            self.assertEqual(modal.cb_cookies.get(), "file...")
+
+            # Test typing a valid directory path into entry_dir and closing
+            with tempfile.TemporaryDirectory() as td:
+                modal.entry_dir.delete(0, tk.END)
+                modal.entry_dir.insert(0, td)
+                modal._on_close()
+                self.assertEqual(get_setting("last_download_dir"), td)
+        finally:
+            try: root.destroy()
+            except Exception: pass
+
+
 if __name__ == "__main__":
     unittest.main()
 

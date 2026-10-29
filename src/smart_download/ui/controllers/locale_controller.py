@@ -80,6 +80,8 @@ class LocaleControllerMixin:
             self.btn_quality_main.configure(text=tr("btn_quality_reopen"))
         if hasattr(self, "btn_check_updates") and self.btn_check_updates.winfo_exists():
             self.btn_check_updates.configure(text=tr("btn_check_updates"))
+        if hasattr(self, "btn_settings") and self.btn_settings.winfo_exists():
+            self.btn_settings.configure(text=tr("btn_settings"))
 
         if hasattr(self, "_update_sniffer_btn") and callable(self._update_sniffer_btn):
             self._update_sniffer_btn()
@@ -210,6 +212,8 @@ class LocaleControllerMixin:
                 self.tray_manager.update_menu()
             except Exception:
                 pass
+
+    _refresh_ui_texts = _update_ui_language
 
 
 __all__ = ["LocaleControllerMixin"]

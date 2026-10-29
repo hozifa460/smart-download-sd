@@ -26,6 +26,23 @@ DEFAULT_CHUNKS = 8
 MIN_CHUNK_BYTES = 512 * 1024
 BUFFER_SIZE = 64 * 1024
 
+DEFAULT_SNIFFER_PLATFORMS: Dict[str, bool] = {
+    "youtube": True,
+    "tiktok": True,
+    "instagram": True,
+    "facebook": True,
+    "twitter": True,
+    "reddit": True,
+    "vimeo": True,
+    "dailymotion": True,
+    "pinterest": True,
+    "threads": True,
+    "snapchat": True,
+    "twitch": True,
+    "rumble": True,
+    "direct_files": True,
+}
+
 def get_resource_path(relative_path: str) -> str:
     """Resolve absolute path for bundled assets in development or PyInstaller frozen bundle."""
     if hasattr(sys, "_MEIPASS"):
@@ -145,6 +162,7 @@ def load_settings() -> Dict[str, Any]:
         "preferred_subtitle_lang": "none",
         "subtitle_embed_mode": "hard_burn",
         "subtitle_position": "bottom",
+        "sniffer_platforms": dict(DEFAULT_SNIFFER_PLATFORMS),
     }
 
     with _settings_lock:
@@ -164,6 +182,12 @@ def load_settings() -> Dict[str, Any]:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, dict):
+                        if isinstance(data.get("sniffer_platforms"), dict):
+                            merged_platforms = dict(DEFAULT_SNIFFER_PLATFORMS)
+                            merged_platforms.update(data["sniffer_platforms"])
+                            data["sniffer_platforms"] = merged_platforms
+                        elif "sniffer_platforms" in data:
+                            data["sniffer_platforms"] = dict(DEFAULT_SNIFFER_PLATFORMS)
                         cur.update(data)
             except Exception:
                 pass

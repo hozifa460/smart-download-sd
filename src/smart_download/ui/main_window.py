@@ -60,6 +60,7 @@ from ..config import (
     DEFAULT_CHUNKS,
     MIN_CHUNK_BYTES,
     BUFFER_SIZE,
+    DEFAULT_SNIFFER_PLATFORMS,
 )
 from ..locales.i18n import (
     LocalizationManager,
@@ -254,6 +255,7 @@ class ModernFramelessGUI(
 
         # Clipboard URL Sniffer (Automatic clipboard monitor)
         self._clipboard_sniffer_active: bool = bool(get_setting("clipboard_sniffer_active", True))
+        self.sniffer_platforms: Dict[str, bool] = dict(get_setting("sniffer_platforms", DEFAULT_SNIFFER_PLATFORMS) or DEFAULT_SNIFFER_PLATFORMS)
         self._auto_start_clipboard: bool = True
         self._last_clipboard_url: Optional[str] = None
         self._last_clipboard_seq: Optional[int] = None
@@ -521,3 +523,4 @@ TurboDownloaderGUI = ModernFramelessGUI
 DownloaderApp = ModernFramelessGUI
 SmartDownloadGUI = ModernFramelessGUI
 SmartDownloadApp = ModernFramelessGUI
+DEFAULT_SNIFFER_PLATFORMS = DEFAULT_SNIFFER_PLATFORMS
