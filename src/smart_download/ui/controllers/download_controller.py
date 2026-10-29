@@ -423,7 +423,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
             self._draw_main_progress(100.0)
             self._refresh_chunk_displays()
             self.btn_start.configure(state="normal")
-            self.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"), bg=self.c_panel_light)
+            self.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"))
             self.btn_cancel.configure(state="disabled")
             if hasattr(self, "btn_refresh_link"):
                 self.btn_refresh_link.configure(state="disabled", bg=self.c_panel_light, fg=self.c_text_muted)
@@ -473,7 +473,7 @@ class DownloadControllerMixin(MediaDownloadControllerMixin):
                 try: self.btn_start.configure(state="normal")
                 except Exception: pass
             if hasattr(self, "btn_pause"):
-                try: self.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"), bg=getattr(self, "c_panel_light", "#334155"))
+                try: self.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"))
                 except Exception: pass
             if hasattr(self, "btn_cancel"):
                 try: self.btn_cancel.configure(state="disabled")

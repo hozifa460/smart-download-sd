@@ -31,8 +31,12 @@ class _StateButton(tk.Button):
         super().__init__(master, **kwargs)
 
     def configure(self, cnf=None, **kwargs):
-        if cnf is not None and isinstance(cnf, dict):
-            kwargs = {**cnf, **kwargs}
+        if cnf is not None:
+            if isinstance(cnf, dict):
+                kwargs = {**cnf, **kwargs}
+                cnf = None
+            else:
+                return super().configure(cnf, **kwargs)
         if "state" in kwargs:
             st = kwargs["state"]
             if "bg" not in kwargs:

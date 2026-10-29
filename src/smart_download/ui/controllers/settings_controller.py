@@ -125,7 +125,7 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
         else:
             cb = (getattr(self, "cookies_browser", "auto") or "auto").lower()
             if cb in ("none", "off"):
-                display_val = tr("lbl_cookies_off", "Off")
+                display_val = tr("lbl_cookies_off", "معطل")
             else:
                 display_names = {
                     "auto": "Auto",
@@ -137,7 +137,7 @@ class SettingsControllerMixin(LocaleControllerMixin, SpeedLimiterControllerMixin
                     "vivaldi": "Vivaldi",
                 }
                 display_val = display_names.get(cb, cb.capitalize())
-        prefix = tr("btn_cookies_prefix", "🍪 Cookies:").strip()
+        prefix = tr("btn_cookies_prefix", "🍪 الكوكيز:").strip()
         return f"{prefix} {display_val}"
 
     def _update_cookies_btn(self):

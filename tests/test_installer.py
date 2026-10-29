@@ -299,6 +299,31 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             self.assertEqual(un_progress[-1][0], 1.0)
             self.assertFalse(os.path.exists(install_target))
 
+    def test_installer_purges_legacy_turbodownloader_binaries(self):
+        """Verifies that install_application actively deletes existing TurboDownloader.exe and turbo_downloader.exe."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            install_target = os.path.join(tmp_dir, "TargetFolder")
+            os.makedirs(install_target, exist_ok=True)
+            legacy1 = os.path.join(install_target, "TurboDownloader.exe")
+            legacy2 = os.path.join(install_target, "turbo_downloader.exe")
+            with open(legacy1, "wb") as f:
+                f.write(b"legacy1")
+            with open(legacy2, "wb") as f:
+                f.write(b"legacy2")
+
+            self.assertTrue(os.path.isfile(legacy1))
+
+            res = installer.install_application(
+                target_dir=install_target,
+                create_desktop=False,
+                create_start_menu=False,
+                register_browser=False,
+            )
+            self.assertTrue(res.get("success"))
+            self.assertTrue(os.path.isfile(os.path.join(install_target, "SmartDownload.exe")))
+            self.assertFalse(os.path.isfile(legacy1))
+            self.assertFalse(os.path.isfile(legacy2))
+
     def test_installer_startup_registration_and_uninstallation(self):
         """Verifies that install_application registers auto-start entries (Run registry, Scheduled Task, Startup shortcut) and uninstall_application removes them."""
         if not sys.platform.startswith("win"):

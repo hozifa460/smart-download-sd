@@ -42,25 +42,27 @@ class ThemeControllerMixin:
 
                 # Treeview styling
                 row_h = max(26, int(26 * getattr(self, "dpi_scale", 1.0)))
-                self.style.configure(
-                    "Custom.Treeview",
-                    background=self.c_panel,
-                    foreground=self.c_text_bright,
-                    fieldbackground=self.c_panel,
-                    borderwidth=0,
-                    rowheight=row_h,
-                    font=("Segoe UI", 9)
-                )
-                self.style.configure(
-                    "Custom.Treeview.Heading",
-                    background="#1a2639",
-                    foreground=self.c_accent,
-                    font=("Segoe UI", 9, "bold"),
-                    padding=(6, 5),
-                    relief="flat"
-                )
-                self.style.map("Custom.Treeview.Heading", background=[('active', self.c_border)])
-                self.style.map("Custom.Treeview", background=[('selected', self.c_accent_dark)])
+                for tv_name in ("Custom.Treeview", "Treeview"):
+                    self.style.configure(
+                        tv_name,
+                        background=self.c_panel,
+                        foreground=self.c_text_bright,
+                        fieldbackground=self.c_panel,
+                        borderwidth=0,
+                        rowheight=row_h,
+                        font=("Segoe UI", 9)
+                    )
+                    self.style.map(tv_name, background=[('selected', self.c_accent_dark)])
+                for hd_name in ("Custom.Treeview.Heading", "Treeview.Heading"):
+                    self.style.configure(
+                        hd_name,
+                        background="#1a2639",
+                        foreground=self.c_accent,
+                        font=("Segoe UI", 9, "bold"),
+                        padding=(6, 5),
+                        relief="flat"
+                    )
+                    self.style.map(hd_name, background=[('active', self.c_border)])
 
                 # Notebook tabs
                 self.style.configure("Custom.TNotebook", background=self.c_panel, borderwidth=0)
@@ -145,6 +147,10 @@ class ThemeControllerMixin:
             "c_text_muted": getattr(self, "c_text_muted", "#94a3b8"),
             "c_input_bg": getattr(self, "c_input_bg", "#090e1a")
         }
+
+    def _setup_styles(self):
+        """Public alias configuring theme color palette and TTK widgets."""
+        self._init_theme()
 
 
 __all__ = ["ThemeControllerMixin"]

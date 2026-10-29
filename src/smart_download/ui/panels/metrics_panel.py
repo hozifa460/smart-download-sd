@@ -72,8 +72,8 @@ class MetricsPanelMixin:
         self._last_main_prog_sig = sig
         self.canvas_prog.delete("all")
 
-        c_input_bg = getattr(self, "c_input_bg", "#090d16")
-        c_border = getattr(self, "c_border", "#475569")
+        c_input_bg = getattr(self, "c_input_bg", "#090e1a")
+        c_border = getattr(self, "c_border", "#283548")
         c_accent_dark = getattr(self, "c_accent_dark", "#0284c7")
         c_accent = getattr(self, "c_accent", "#38bdf8")
         c_text_bright = getattr(self, "c_text_bright", "#f8fafc")

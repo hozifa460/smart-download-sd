@@ -515,7 +515,7 @@ class ConfirmModalLogicMixin:
                 if was_running:
                     self.parent_app.engine = None
                     self.parent_app.btn_start.configure(state="normal")
-                    self.parent_app.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"), bg=getattr(self.parent_app, "c_panel_light", "#334155"))
+                    self.parent_app.btn_pause.configure(state="disabled", text=tr("btn_pause", "⏸ Pause"))
                     self.parent_app.btn_cancel.configure(state="disabled")
                     self.parent_app.card_size.configure(text=tr("status_cancelled", "Cancelled"))
                     self.parent_app.log(f"[CLIPBOARD] Standalone download cancelled: {self.file_name}")

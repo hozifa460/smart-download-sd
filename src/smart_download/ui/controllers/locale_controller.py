@@ -100,6 +100,7 @@ class LocaleControllerMixin:
         if hasattr(self, "lbl_chunk_vis_legend") and self.lbl_chunk_vis_legend.winfo_exists():
             self.lbl_chunk_vis_legend.configure(text=tr("lbl_chunk_vis_legend"))
         if hasattr(self, "_draw_chunk_segments") and callable(self._draw_chunk_segments):
+            self._last_chunk_canvas_sig = None
             self._draw_chunk_segments(getattr(self.engine, "chunks", []) if getattr(self, "engine", None) else [])
 
         # Notebook tabs

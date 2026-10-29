@@ -1466,6 +1466,130 @@ class TestPart1To4CriticalBugfixes(unittest.TestCase):
             self.assertEqual(kwargs.get("subtitle_tracks"), subs)
             self.assertEqual(kwargs.get("selected_sub_track"), subs[0])
 
+    def test_state_button_behavior(self):
+        """Verifies _StateButton switches bg/fg based on state and preserves standard configure queries."""
+        import tkinter as tk
+        from smart_download.ui.panels.controls_panel import _StateButton
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            btn = _StateButton(root, active_bg="#059669", disabled_bg="#1e293b", state="disabled")
+            self.assertEqual(btn.cget("bg"), "#1e293b")
+            btn.configure(state="normal")
+            self.assertEqual(btn.cget("bg"), "#059669")
+            btn.configure(state="disabled")
+            self.assertEqual(btn.cget("bg"), "#1e293b")
+            # Explicit bg should not be overridden
+            btn.configure(state="normal", bg="#f59e0b")
+            self.assertEqual(btn.cget("bg"), "#f59e0b")
+            # Query configure works
+            info = btn.configure("text")
+            self.assertTrue(isinstance(info, tuple))
+        finally:
+            root.destroy()
+
+    def test_canvas_draw_fallbacks(self):
+        """Verifies _draw_main_progress and _draw_chunk_segments fallback to safe dimensions when canvas unmapped."""
+        import tkinter as tk
+        from smart_download.ui.panels.metrics_panel import MetricsPanelMixin
+        from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyApp(ChunksPanelMixin):
+                def __init__(self, r):
+                    self.root = r
+                    self.dpi_scale = 1.0
+                    self.c_bg = "#0b1120"
+                    self.c_panel = "#131c31"
+                    self.c_border = "#283548"
+                    self.c_input_bg = "#090e1a"
+                    self.c_accent = "#38bdf8"
+                    self.c_text_muted = "#94a3b8"
+                    self.c_panel_light = "#1e293b"
+                    self.c_text_bright = "#f8fafc"
+                    self._build_metrics_card(r)
+                    self._build_chunk_visualizer_card(r)
+
+            app = DummyApp(root)
+            self.assertLessEqual(app.canvas_prog.winfo_width(), 10)
+            self.assertLessEqual(app.canvas_chunks.winfo_width(), 10)
+            app._draw_main_progress(50.0)
+            items = app.canvas_prog.find_all()
+            self.assertTrue(len(items) >= 2)
+            app._draw_chunk_segments([])
+            items_c = app.canvas_chunks.find_all()
+            self.assertTrue(len(items_c) >= 2)
+        finally:
+            root.destroy()
+
+    def test_stale_spec_and_dist_artifacts_cleanup(self):
+        """Verifies build_installer.clean_stale_dist_artifacts cleans up legacy spec files and dist artifacts."""
+        import build_installer
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            orig_root = build_installer.ROOT_DIR
+            orig_dist = build_installer.DIST_DIR
+            try:
+                build_installer.ROOT_DIR = tmp_dir
+                build_installer.DIST_DIR = os.path.join(tmp_dir, "dist")
+                os.makedirs(build_installer.DIST_DIR, exist_ok=True)
+
+                stale_spec = os.path.join(tmp_dir, "turbo_downloader.spec")
+                with open(stale_spec, "w") as f:
+                    f.write("# stale spec")
+                stale_bin = os.path.join(build_installer.DIST_DIR, "turbo_downloader.exe")
+                with open(stale_bin, "wb") as f:
+                    f.write(b"stale")
+
+                self.assertTrue(os.path.exists(stale_spec))
+                self.assertTrue(os.path.exists(stale_bin))
+
+                build_installer.clean_stale_dist_artifacts()
+
+                self.assertFalse(os.path.exists(stale_spec))
+                self.assertFalse(os.path.exists(stale_bin))
+            finally:
+                build_installer.ROOT_DIR = orig_root
+                build_installer.DIST_DIR = orig_dist
+
+    def test_chunk_canvas_redraws_on_language_change(self):
+        """Verifies _draw_chunk_segments redraws on language switch without getting blocked by cached signature."""
+        import tkinter as tk
+        from smart_download.ui.panels.chunks_panel import ChunksPanelMixin
+        from smart_download.i18n import set_current_language
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            class DummyApp(ChunksPanelMixin):
+                def __init__(self, r):
+                    self.root = r
+                    self.dpi_scale = 1.0
+                    self.c_bg = "#0b1120"
+                    self.c_panel = "#131c31"
+                    self.c_border = "#283548"
+                    self.c_input_bg = "#090e1a"
+                    self.c_accent = "#38bdf8"
+                    self.c_text_muted = "#94a3b8"
+                    self.c_panel_light = "#1e293b"
+                    self.c_text_bright = "#f8fafc"
+                    self.engine = None
+                    self._build_chunk_visualizer_card(r)
+
+            app = DummyApp(root)
+            set_current_language("en")
+            app._last_chunk_canvas_sig = None
+            app._draw_chunk_segments([])
+            text_items_en = [app.canvas_chunks.itemcget(i, "text") for i in app.canvas_chunks.find_all() if app.canvas_chunks.type(i) == "text"]
+            self.assertIn("Waiting to start...", text_items_en)
+
+            set_current_language("ar")
+            app._draw_chunk_segments([])
+            text_items_ar = [app.canvas_chunks.itemcget(i, "text") for i in app.canvas_chunks.find_all() if app.canvas_chunks.type(i) == "text"]
+            self.assertIn("بانتظار بدء التحميل...", text_items_ar)
+        finally:
+            set_current_language("en")
+            root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

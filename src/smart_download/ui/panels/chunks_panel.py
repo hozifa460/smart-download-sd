@@ -13,7 +13,7 @@ except Exception:
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
-from smart_download.i18n import tr
+from smart_download.i18n import tr, get_current_language
 from .metrics_panel import MetricsPanelMixin
 
 
@@ -76,7 +76,8 @@ class ChunksPanelMixin(MetricsPanelMixin):
                     chunk_sig.append((c.chunk_id, c.start_byte, c.end_byte, ratio_int, c.status))
         except Exception:
             chunk_sig = []
-        current_sig = (w, h, tuple(chunk_sig), total_size)
+        current_lang = get_current_language() if callable(get_current_language) else getattr(self, "_current_lang", "")
+        current_sig = (w, h, tuple(chunk_sig), total_size, current_lang)
 
         if getattr(self, "_last_chunk_canvas_sig", None) == current_sig:
             return
@@ -84,8 +85,8 @@ class ChunksPanelMixin(MetricsPanelMixin):
 
         canvas.delete("all")
 
-        c_input_bg = getattr(self, "c_input_bg", "#090d16")
-        c_border = getattr(self, "c_border", "#475569")
+        c_input_bg = getattr(self, "c_input_bg", "#090e1a")
+        c_border = getattr(self, "c_border", "#283548")
         c_text_muted = getattr(self, "c_text_muted", "#94a3b8")
         c_success = getattr(self, "c_success", "#10b981")
         c_accent = getattr(self, "c_accent", "#38bdf8")
