@@ -3069,6 +3069,58 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
                     self.assertEqual(c[0][3], mock_winreg.REG_BINARY)
                     self.assertEqual(c[0][4], b"\x02" + b"\x00" * 11)
 
+    def test_startup_service_fallbacks_when_registry_fails(self):
+        """Verifies enable_startup falls back to Scheduled Task or Startup shortcut when HKCU Run fails."""
+        from smart_download.services.startup_service import enable_startup
+
+        mock_winreg = MagicMock()
+        mock_winreg.CreateKey.side_effect = PermissionError("Access denied")
+
+        # Case 1: Registry fails, Scheduled Task succeeds
+        mock_subproc_ok = MagicMock()
+        mock_subproc_ok.returncode = 0
+        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
+             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
+             patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+             patch("os.path.isfile", return_value=True), \
+             patch("subprocess.run", return_value=mock_subproc_ok):
+            self.assertTrue(enable_startup(minimized=True))
+
+        # Case 2: Registry fails AND Scheduled Task fails -> falls back to shortcut
+        mock_subproc_fail = MagicMock()
+        mock_subproc_fail.returncode = 1
+        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
+             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
+             patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+             patch("os.path.isfile", return_value=True), \
+             patch("subprocess.run", return_value=mock_subproc_fail), \
+             patch("smart_download.services.startup_service._create_startup_shortcut", return_value=True) as mock_lnk:
+            self.assertTrue(enable_startup(minimized=True))
+            mock_lnk.assert_called_once()
+
+        # Case 3: All fail -> returns False
+        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
+             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
+             patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+             patch("os.path.isfile", return_value=True), \
+             patch("subprocess.run", return_value=mock_subproc_fail), \
+             patch("smart_download.services.startup_service._create_startup_shortcut", return_value=False):
+            self.assertFalse(enable_startup(minimized=True))
+
+    def test_is_startup_enabled_detects_fallback_shortcut(self):
+        """Verifies is_startup_enabled detects .lnk in Startup folder when HKCU Run key is absent."""
+        from smart_download.services.startup_service import is_startup_enabled
+
+        mock_winreg = MagicMock()
+        mock_winreg.OpenKey.side_effect = FileNotFoundError("No run key")
+
+        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
+             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
+             patch("smart_download.services.startup_service.get_startup_folder", return_value="C:\\FakeStartup"), \
+             patch("os.path.isdir", return_value=True), \
+             patch("os.path.isfile", side_effect=lambda p: p.endswith("Smart Download (SD).lnk")):
+            self.assertTrue(is_startup_enabled())
+
     def test_startup_welcome_toast_lifecycle_and_actions(self):
         """
         Verifies StartupWelcomeToast:

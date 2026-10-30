@@ -609,6 +609,42 @@ class TestWindowsInstallerLogic(unittest.TestCase):
             del_calls = [c for c in mock_subproc.call_args_list if len(c[0]) > 0 and len(c[0][0]) > 1 and c[0][0][1] == "/Delete"]
             self.assertGreaterEqual(len(del_calls), 1)
 
+    def test_register_startup_entries_fallback_when_run_key_fails(self):
+        """Verifies register_startup_entries falls back to Scheduled Task and Shortcut when HKCU Run fails."""
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows-only test")
+        from smart_download.installer.installer_registry import register_startup_entries
+        from unittest.mock import MagicMock, patch
+
+        mock_winreg = MagicMock()
+        mock_winreg.CreateKey.side_effect = PermissionError("Access denied")
+
+        mock_proc_ok = MagicMock()
+        mock_proc_ok.returncode = 0
+
+        # Scenario 1: Run key fails, Scheduled Task succeeds
+        with patch("smart_download.installer.installer_registry.HAS_WINREG", True), \
+             patch("smart_download.installer.installer_registry.winreg", mock_winreg), \
+             patch("subprocess.run", return_value=mock_proc_ok) as mock_subproc:
+            res = register_startup_entries("C:\\FakePath\\SmartDownload.exe")
+            self.assertFalse(res["run_key"])
+            self.assertTrue(res["scheduled_task"])
+            self.assertFalse(res["startup_shortcut"])
+
+        # Scenario 2: Run key fails AND Scheduled Task fails -> falls back to shortcut
+        mock_proc_fail = MagicMock()
+        mock_proc_fail.returncode = 1
+        with patch("smart_download.installer.installer_registry.HAS_WINREG", True), \
+             patch("smart_download.installer.installer_registry.winreg", mock_winreg), \
+             patch("subprocess.run", return_value=mock_proc_fail), \
+             patch("smart_download.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
+             patch("smart_download.installer.installer_registry.create_windows_shortcut", return_value=True) as mock_shortcut:
+            res = register_startup_entries("C:\\FakePath\\SmartDownload.exe")
+            self.assertFalse(res["run_key"])
+            self.assertFalse(res["scheduled_task"])
+            self.assertTrue(res["startup_shortcut"])
+            mock_shortcut.assert_called_once()
+
 
 class TestStandaloneExeBuild(unittest.TestCase):
     """Verifies that the PyInstaller standalone Windows executable exists and has valid PE structure."""

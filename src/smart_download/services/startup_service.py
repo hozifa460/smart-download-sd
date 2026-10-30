@@ -286,7 +286,18 @@ def is_startup_enabled() -> bool:
                     pass
             return False
     except (FileNotFoundError, OSError):
-        return False
+        pass
+
+    try:
+        startup_dir = get_startup_folder()
+        if os.path.isdir(startup_dir):
+            for sname in ("Smart Download (SD).lnk", "SmartDownload.lnk"):
+                if os.path.isfile(os.path.join(startup_dir, sname)):
+                    return True
+    except Exception:
+        pass
+    return False
+
 
 def enable_startup(minimized: bool = True) -> bool:
     """
@@ -309,32 +320,32 @@ def enable_startup(minimized: bool = True) -> bool:
             except (FileNotFoundError, OSError):
                 pass
         reg_ok = True
-    except (OSError, PermissionError):
-        return False
-
-    # Windows 10/11 StartupApproved binary registration
-    try:
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_RUN_KEY) as key:
-            winreg.SetValueEx(key, STARTUP_REG_KEY_NAME, 0, winreg.REG_BINARY, ENABLED_STARTUP_BINARY)
-            try:
-                winreg.DeleteValue(key, LEGACY_STARTUP_REG_KEY_NAME)
-            except (FileNotFoundError, OSError):
-                pass
     except Exception:
-        pass
-
-    try:
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_FOLDER_KEY) as key:
-            winreg.SetValueEx(key, "Smart Download (SD).lnk", 0, winreg.REG_BINARY, ENABLED_STARTUP_BINARY)
-            for leg in (LEGACY_STARTUP_REG_KEY_NAME, "TurboDownloader.lnk", "Turbo Download Manager Pro.lnk"):
-                try:
-                    winreg.DeleteValue(key, leg)
-                except (FileNotFoundError, OSError):
-                    pass
-    except Exception:
-        pass
+        reg_ok = False
 
     if reg_ok:
+        # Windows 10/11 StartupApproved binary registration
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_RUN_KEY) as key:
+                winreg.SetValueEx(key, STARTUP_REG_KEY_NAME, 0, winreg.REG_BINARY, ENABLED_STARTUP_BINARY)
+                try:
+                    winreg.DeleteValue(key, LEGACY_STARTUP_REG_KEY_NAME)
+                except (FileNotFoundError, OSError):
+                    pass
+        except Exception:
+            pass
+
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_FOLDER_KEY) as key:
+                winreg.SetValueEx(key, "Smart Download (SD).lnk", 0, winreg.REG_BINARY, ENABLED_STARTUP_BINARY)
+                for leg in (LEGACY_STARTUP_REG_KEY_NAME, "TurboDownloader.lnk", "Turbo Download Manager Pro.lnk"):
+                    try:
+                        winreg.DeleteValue(key, leg)
+                    except (FileNotFoundError, OSError):
+                        pass
+        except Exception:
+            pass
+
         # Canonical Run key succeeded: delete duplicate Scheduled Tasks so Windows only launches 1 process
         try:
             for tname in (TASK_NAME, LEGACY_TASK_NAME):

@@ -225,13 +225,20 @@ class TestWindowsStartupRegistryIntegration(unittest.TestCase):
         self.assertFalse(is_startup_enabled())
 
     def test_registry_error_handling(self):
-        with patch("winreg.CreateKey", side_effect=PermissionError("Access denied")):
+        with patch("winreg.CreateKey", side_effect=PermissionError("Access denied")), \
+             patch("smart_download.services.startup_service._create_startup_shortcut", return_value=False):
             self.assertFalse(enable_startup(minimized=True))
 
         with patch("winreg.OpenKey", side_effect=OSError("Registry error")):
             self.assertFalse(disable_startup())
             self.assertFalse(is_startup_enabled())
             self.assertIsNone(get_startup_entry())
+
+    def test_startup_fallback_to_shortcut_when_registry_fails(self):
+        with patch("winreg.CreateKey", side_effect=PermissionError("Access denied")), \
+             patch("smart_download.services.startup_service._create_startup_shortcut", return_value=True) as mock_lnk:
+            self.assertTrue(enable_startup(minimized=True))
+            mock_lnk.assert_called_once()
 
     def test_non_windows_platform_graceful_noops(self):
         with patch("turbo_downloader.IS_WINDOWS", False):

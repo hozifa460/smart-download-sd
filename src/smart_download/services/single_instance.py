@@ -58,6 +58,11 @@ def release_single_instance_mutex() -> None:
         _SINGLE_INSTANCE_MUTEX_HANDLE = None
 
 
+import atexit
+
+atexit.register(release_single_instance_mutex)
+
+
 def early_single_instance_guard() -> None:
     """
     Early exit guard called before heavy UI imports.
@@ -106,9 +111,11 @@ def early_single_instance_guard() -> None:
 
     if start_in_bg:
         if notify_running_instance(url=cli_url, show=False):
+            release_single_instance_mutex()
             sys.exit(0)
     else:
         if notify_running_instance(url=cli_url, show=True):
+            release_single_instance_mutex()
             sys.exit(0)
 
 def notify_running_instance(url: Optional[str] = None, show: bool = True) -> bool:

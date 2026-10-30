@@ -8,8 +8,6 @@ _src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-from smart_download.ui.main_window import main
-
 if __name__ == "__main__":
     if "--preview-html" in sys.argv:
         try:
@@ -23,4 +21,5 @@ if __name__ == "__main__":
             pass
     from smart_download.services.single_instance import early_single_instance_guard
     early_single_instance_guard()
+    from smart_download.ui.main_window import main
     main()
