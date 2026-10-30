@@ -54,6 +54,18 @@ _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
+# Early Single-Instance Mutex Check: import before heavy modules (Tkinter, PIL, pystray, yt-dlp)
+from smart_download.services.single_instance import (
+    acquire_single_instance_mutex,
+    release_single_instance_mutex,
+    notify_running_instance,
+    is_single_instance_mutex_held,
+    early_single_instance_guard,
+)
+
+if __name__ == "__main__":
+    early_single_instance_guard()
+
 # Initialize Dynamic Core Loader (Zero-Rebuild Dev Mode & OTA Hot-Patch Plugin)
 try:
     from smart_download.services.core_patch_updater import init_core_loader
@@ -173,6 +185,12 @@ from smart_download.services.single_instance import (
     notify_running_instance,
     acquire_single_instance_mutex,
     release_single_instance_mutex,
+    is_single_instance_mutex_held,
+    early_single_instance_guard,
+)
+from smart_download.services.media_extractor import (
+    _get_yt_dlp,
+    warmup_yt_dlp_background,
 )
 from smart_download.services.youtube_service import (
     YouTubeResolver,
@@ -290,6 +308,12 @@ import types
 _SYNC_ACTIVE = False
 
 class _TurboDownloaderShim(types.ModuleType):
+    def __getattr__(self, name):
+        if name == "yt_dlp":
+            from smart_download.services.media_extractor import _get_yt_dlp
+            return _get_yt_dlp()
+        return super().__getattr__(name)
+
     def __setattr__(self, name, value):
         super().__setattr__(name, value)
         global _SYNC_ACTIVE

@@ -21,5 +21,6 @@ if __name__ == "__main__":
                 webview.start()
         except Exception:
             pass
-        sys.exit(0)
+    from smart_download.services.single_instance import early_single_instance_guard
+    early_single_instance_guard()
     main()

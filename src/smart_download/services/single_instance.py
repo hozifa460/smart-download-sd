@@ -40,6 +40,12 @@ def acquire_single_instance_mutex(mutex_name: str = "Local\\SmartDownload_Single
         return True
 
 
+def is_single_instance_mutex_held() -> bool:
+    """Returns True if the Win32 Named Mutex is currently held by this process."""
+    global _SINGLE_INSTANCE_MUTEX_HANDLE
+    return _SINGLE_INSTANCE_MUTEX_HANDLE is not None
+
+
 def release_single_instance_mutex() -> None:
     """Releases the Win32 Named Mutex handle if currently held."""
     global _SINGLE_INSTANCE_MUTEX_HANDLE
@@ -50,6 +56,60 @@ def release_single_instance_mutex() -> None:
         except Exception:
             pass
         _SINGLE_INSTANCE_MUTEX_HANDLE = None
+
+
+def early_single_instance_guard() -> None:
+    """
+    Early exit guard called before heavy UI imports.
+    If another instance is already running, notifies it and exits immediately.
+    """
+    special_flags = (
+        "--test-startup", "--preview-html", "--native-host",
+        "--native-messaging-host", "--register-browser", "--unregister-browser"
+    )
+    if any(arg in sys.argv for arg in special_flags):
+        return
+    if any(arg.startswith("chrome-extension://") or arg.startswith("edge-extension://") for arg in sys.argv[1:]):
+        return
+    if any(arg in sys.argv for arg in ("--force-new-instance", "--multi-instance")):
+        return
+
+    try:
+        from ..config import is_test_environment
+        if is_test_environment():
+            return
+    except Exception:
+        pass
+
+    start_in_bg = any(
+        arg.lower() in ("--background", "-background", "/background",
+                        "--minimized", "-minimized", "/minimized")
+        for arg in sys.argv[1:]
+    )
+    cli_url = None
+    for arg in sys.argv[1:]:
+        if not arg.startswith("-") and not arg.startswith("/"):
+            if arg.startswith("http://") or arg.startswith("https://") or arg.startswith("ftp://"):
+                cli_url = arg.strip()
+                break
+
+    if not acquire_single_instance_mutex():
+        if start_in_bg:
+            sys.exit(0)
+        else:
+            import time
+            for _ in range(12):
+                if notify_running_instance(url=cli_url, show=True):
+                    break
+                time.sleep(0.25)
+            sys.exit(0)
+
+    if start_in_bg:
+        if notify_running_instance(url=cli_url, show=False):
+            sys.exit(0)
+    else:
+        if notify_running_instance(url=cli_url, show=True):
+            sys.exit(0)
 
 def notify_running_instance(url: Optional[str] = None, show: bool = True) -> bool:
     """

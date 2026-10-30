@@ -6,7 +6,8 @@ import ctypes
 from smart_download.i18n import LocalizationManager, tr
 from smart_download.utils import _detach_photo_tk
 from smart_download.services import (
-    IS_WINDOWS, SW_HIDE, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW
+    IS_WINDOWS, SW_HIDE, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    release_single_instance_mutex,
 )
 
 from .dialog_controller import DialogControllerMixin
@@ -266,6 +267,10 @@ class WindowLifecycleMixin(DialogControllerMixin):
                 except Exception:
                     pass
             self._cleanup_resources()
+            try:
+                release_single_instance_mutex()
+            except Exception:
+                pass
             try:
                 if hasattr(self, "root") and self.root and self.root.winfo_exists():
                     self.root.destroy()

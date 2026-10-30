@@ -386,8 +386,8 @@ class TestWindowsInstallerLogic(unittest.TestCase):
                     self.assertTrue(res.get("success"))
                     self.assertIn("startup_registered", res)
                     self.assertTrue(res["startup_registered"].get("run_key"))
-                    self.assertTrue(res["startup_registered"].get("scheduled_task"))
-                    self.assertTrue(res["startup_registered"].get("startup_shortcut"))
+                    self.assertFalse(res["startup_registered"].get("scheduled_task"))
+                    self.assertFalse(res["startup_registered"].get("startup_shortcut"))
 
                     # 1. Assert HKCU Run registry value exists and points to installed exe --minimized
                     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, installer.STARTUP_REG_KEY, 0, winreg.KEY_READ) as key:
@@ -396,21 +396,16 @@ class TestWindowsInstallerLogic(unittest.TestCase):
                         self.assertIn(expected_exe.lower(), run_val.lower())
                         self.assertTrue(run_val.endswith(" --minimized"))
 
-                    # 2. Assert silent startup shortcut exists in Startup folder
+                    # 2. Assert silent startup shortcut does not exist (preventing duplicate boot processes)
                     startup_lnk = os.path.join(tmp_startup, f"{installer.APP_NAME}.lnk")
-                    self.assertTrue(os.path.isfile(startup_lnk), "Startup folder shortcut must exist after install")
+                    self.assertFalse(os.path.isfile(startup_lnk), "Startup folder shortcut must not exist when Run key succeeds")
 
-                    # 3. Assert schtasks.exe was invoked to create SmartDownloadAutoStart
+                    # 3. Assert schtasks.exe /Create was NOT called when Run key succeeds
                     schtasks_create_calls = [
                         c for c in recorded_commands
                         if isinstance(c, list) and len(c) > 0 and "schtasks.exe" in str(c[0]) and "/Create" in c
                     ]
-                    self.assertTrue(len(schtasks_create_calls) >= 1, "schtasks.exe /Create must be called during install")
-                    create_cmd = schtasks_create_calls[0]
-                    self.assertIn("/TN", create_cmd)
-                    self.assertIn(installer.TASK_NAME, create_cmd)
-                    self.assertIn("/SC", create_cmd)
-                    self.assertIn("ONLOGON", create_cmd)
+                    self.assertEqual(len(schtasks_create_calls), 0, "schtasks.exe /Create must not be called when Run key succeeds")
 
                     # Now execute uninstallation
                     un_res = installer.uninstall_application(target_dir=tmp_target)
@@ -588,6 +583,31 @@ class TestWindowsInstallerLogic(unittest.TestCase):
         # Patching root installer shim propagates to sub-module
         with patch.object(installer, "find_payload_sources", return_value={"mock_test_2": True}):
             self.assertEqual(ops.find_payload_sources(), {"mock_test_2": True})
+
+    def test_register_startup_entries_canonical_run_key(self):
+        """Verifies register_startup_entries uses HKCU Run as canonical, cleans duplicates, and skips redundant tasks."""
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows-only test")
+        from smart_download.installer.installer_registry import register_startup_entries
+        from unittest.mock import MagicMock, patch
+
+        mock_winreg = MagicMock()
+        mock_key = MagicMock()
+        mock_winreg.CreateKey.return_value.__enter__.return_value = mock_key
+        mock_winreg.REG_SZ = 1
+        mock_winreg.REG_BINARY = 3
+
+        with patch("smart_download.installer.installer_registry.HAS_WINREG", True), \
+             patch("smart_download.installer.installer_registry.winreg", mock_winreg), \
+             patch("smart_download.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
+             patch("subprocess.run") as mock_subproc:
+            res = register_startup_entries("C:\\FakePath\\SmartDownload.exe")
+            self.assertTrue(res["run_key"])
+            self.assertFalse(res["scheduled_task"])
+            self.assertFalse(res["startup_shortcut"])
+            # Verify schtasks /Delete was called to clean up duplicate tasks
+            del_calls = [c for c in mock_subproc.call_args_list if len(c[0]) > 0 and len(c[0][0]) > 1 and c[0][0][1] == "/Delete"]
+            self.assertGreaterEqual(len(del_calls), 1)
 
 
 class TestStandaloneExeBuild(unittest.TestCase):

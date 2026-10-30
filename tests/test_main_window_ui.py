@@ -377,7 +377,7 @@ class TestSystemTrayAndBackgroundMinimization(unittest.TestCase):
         self.assertEqual(len(items), 4)
 
         # 1. Open Turbo Downloader (default action for single / double click)
-        self.assertEqual(items[0].text, "🖥️ Open Smart Download")
+        self.assertEqual(items[0].text, tr("tray_open"))
         self.assertTrue(items[0].default)
 
         # 2. Clipboard Sniffer

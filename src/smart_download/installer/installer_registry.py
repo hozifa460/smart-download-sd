@@ -174,42 +174,71 @@ def register_startup_entries(exe_path: str, icon_path: str = "") -> Dict[str, bo
         except Exception:
             pass
 
-    # 2. Register Windows Scheduled Task (SmartDownloadAutoStart)
-    try:
-        tr_arg = f'"{abs_exe}" --minimized'
-        task_cmd = [
-            "schtasks.exe", "/Create", "/F",
-            "/SC", "ONLOGON",
-            "/TN", TASK_NAME,
-            "/TR", tr_arg
-        ]
-        res = subprocess.run(task_cmd, capture_output=True, text=True, timeout=10)
-        results["scheduled_task"] = (res.returncode == 0)
-    except Exception:
-        pass
+    if results["run_key"]:
+        # Primary mechanism succeeded: delete any duplicate Scheduled Task or Startup shortcut
+        try:
+            for tname in (TASK_NAME, LEGACY_TASK_NAME):
+                subprocess.run(
+                    ["schtasks.exe", "/Delete", "/TN", tname, "/F"],
+                    capture_output=True,
+                    timeout=5
+                )
+        except Exception:
+            pass
 
-    # 3. Create silent startup shortcut in shell:startup
-    try:
-        startup_dir = get_startup_dir()
-        os.makedirs(startup_dir, exist_ok=True)
-        for old_name in ("Turbo Download Manager Pro.lnk", "TurboDownloader.lnk", "SmartDownload.lnk"):
-            old_p = os.path.join(startup_dir, old_name)
-            if os.path.isfile(old_p):
-                try:
-                    os.remove(old_p)
-                except Exception:
-                    pass
-        startup_lnk = os.path.join(startup_dir, f"{APP_NAME}.lnk")
-        ok_lnk = create_windows_shortcut(
-            target_exe=abs_exe,
-            shortcut_path=startup_lnk,
-            icon_path=icon_path,
-            description=f"{APP_NAME} AutoStart",
-            arguments="--minimized"
-        )
-        results["startup_shortcut"] = ok_lnk
-    except Exception:
-        pass
+        try:
+            startup_dir = get_startup_dir()
+            if os.path.isdir(startup_dir):
+                for old_name in (
+                    f"{APP_NAME}.lnk", "Smart Download (SD).lnk",
+                    "Turbo Download Manager Pro.lnk", "TurboDownloader.lnk", "SmartDownload.lnk"
+                ):
+                    old_p = os.path.join(startup_dir, old_name)
+                    if os.path.isfile(old_p):
+                        try:
+                            os.remove(old_p)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+    else:
+        # Fallback 1: Register Windows Scheduled Task (SmartDownloadAutoStart)
+        try:
+            tr_arg = f'"{abs_exe}" --minimized'
+            task_cmd = [
+                "schtasks.exe", "/Create", "/F",
+                "/SC", "ONLOGON",
+                "/TN", TASK_NAME,
+                "/TR", tr_arg
+            ]
+            res = subprocess.run(task_cmd, capture_output=True, text=True, timeout=10)
+            results["scheduled_task"] = (res.returncode == 0)
+        except Exception:
+            pass
+
+        # Fallback 2: If Scheduled Task also failed, create silent startup shortcut in shell:startup
+        if not results["scheduled_task"]:
+            try:
+                startup_dir = get_startup_dir()
+                os.makedirs(startup_dir, exist_ok=True)
+                for old_name in ("Turbo Download Manager Pro.lnk", "TurboDownloader.lnk", "SmartDownload.lnk"):
+                    old_p = os.path.join(startup_dir, old_name)
+                    if os.path.isfile(old_p):
+                        try:
+                            os.remove(old_p)
+                        except Exception:
+                            pass
+                startup_lnk = os.path.join(startup_dir, f"{APP_NAME}.lnk")
+                ok_lnk = create_windows_shortcut(
+                    target_exe=abs_exe,
+                    shortcut_path=startup_lnk,
+                    icon_path=icon_path,
+                    description=f"{APP_NAME} AutoStart",
+                    arguments="--minimized"
+                )
+                results["startup_shortcut"] = ok_lnk
+            except Exception:
+                pass
 
     return results
 

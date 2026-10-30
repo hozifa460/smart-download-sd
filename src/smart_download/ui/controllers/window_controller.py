@@ -35,13 +35,16 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
 
     def _setup_window(self):
         """Configures frameless window, centering, and dragging."""
+        if getattr(self, "_start_hidden", False):
+            try:
+                self.root.withdraw()
+            except Exception:
+                pass
         self.root.overrideredirect(True)
 
         # Center on screen
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        x = max(0, (sw - self.width) // 2)
-        y = max(0, (sh - self.height) // 2)
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        x, y = max(0, (sw - self.width) // 2), max(0, (sh - self.height) // 2)
         geo = self._format_geometry(self.width, self.height, x, y)
         self.root.geometry(geo)
         self._is_maximized = False
@@ -74,15 +77,12 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE) | WS_MINIMIZEBOX | WS_SYSMENU
                 ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
 
-                if getattr(self, "_start_hidden", False):
-                    ex_style = (ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
-                    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
+                is_hidden = getattr(self, "_start_hidden", False)
+                ex_style = (ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & ~(WS_EX_TOOLWINDOW if not is_hidden else WS_EX_APPWINDOW)) | (WS_EX_TOOLWINDOW if is_hidden else WS_EX_APPWINDOW)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
+                ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE if is_hidden else SW_SHOW)
+                if is_hidden:
                     self.root.withdraw()
-                else:
-                    ex_style = (ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
-                    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
 
                 if os.path.isfile(ico_path):
                     try:

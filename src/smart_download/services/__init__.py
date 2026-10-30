@@ -27,6 +27,12 @@ from .single_instance import (
     notify_running_instance,
     acquire_single_instance_mutex,
     release_single_instance_mutex,
+    is_single_instance_mutex_held,
+    early_single_instance_guard,
+)
+from .media_extractor import (
+    _get_yt_dlp,
+    warmup_yt_dlp_background,
 )
 from .updater_service import (
     APP_VERSION,
@@ -132,6 +138,10 @@ __all__ = [
     "notify_running_instance",
     "acquire_single_instance_mutex",
     "release_single_instance_mutex",
+    "is_single_instance_mutex_held",
+    "early_single_instance_guard",
+    "_get_yt_dlp",
+    "warmup_yt_dlp_background",
     "APP_VERSION",
     "parse_version",
     "is_newer_version",

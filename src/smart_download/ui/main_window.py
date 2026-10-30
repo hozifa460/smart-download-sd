@@ -133,6 +133,7 @@ from ..services.startup_service import (
 from ..services.single_instance import (
     notify_running_instance,
     acquire_single_instance_mutex,
+    is_single_instance_mutex_held,
 )
 from ..services.youtube_service import (
     YouTubeResolver,
@@ -365,6 +366,12 @@ class ModernFramelessGUI(
                 self._update_check_job = self.root.after(2500, self._start_auto_update_check)
             except Exception:
                 pass
+        if not is_test_environment():
+            try:
+                from ..services.media_extractor import warmup_yt_dlp_background
+                warmup_yt_dlp_background(3.0)
+            except Exception:
+                pass
 
     def _build_ui(self):
         """Constructs all GUI elements."""
@@ -471,7 +478,7 @@ def main():
 
     # Single-instance check: acquire Win32 Named Mutex and handle IPC forwarding
     if not any(arg in sys.argv for arg in ("--force-new-instance", "--multi-instance")) and not is_test_environment():
-        if not acquire_single_instance_mutex():
+        if not is_single_instance_mutex_held() and not acquire_single_instance_mutex():
             if start_in_background:
                 sys.exit(0)
             else:

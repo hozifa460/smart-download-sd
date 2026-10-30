@@ -334,20 +334,49 @@ def enable_startup(minimized: bool = True) -> bool:
     except Exception:
         pass
 
+    if reg_ok:
+        # Canonical Run key succeeded: delete duplicate Scheduled Tasks so Windows only launches 1 process
+        try:
+            for tname in (TASK_NAME, LEGACY_TASK_NAME):
+                subprocess.run(
+                    ["schtasks.exe", "/Delete", "/TN", tname, "/F"],
+                    capture_output=True,
+                    timeout=5
+                )
+        except Exception:
+            pass
+
+        # Actively clean up / remove duplicate Startup folder shortcuts
+        try:
+            startup_dir = get_startup_folder()
+            if os.path.isdir(startup_dir):
+                for old in ("Smart Download (SD).lnk", "Turbo Download Manager Pro.lnk", "TurboDownloader.lnk", "SmartDownload.lnk"):
+                    old_p = os.path.join(startup_dir, old)
+                    if os.path.isfile(old_p):
+                        try:
+                            os.remove(old_p)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        return True
+
     exe_path, args, script_path, working_dir = _parse_startup_cmd(cmd)
 
-    # Harmonize with Scheduled Task
+    # Fallback 1: Scheduled Task
     try:
         if exe_path and os.path.isfile(exe_path):
-            subprocess.run(
+            res = subprocess.run(
                 ["schtasks.exe", "/Create", "/F", "/SC", "ONLOGON", "/TN", TASK_NAME, "/TR", cmd],
                 capture_output=True,
                 timeout=5
             )
+            if res.returncode == 0:
+                return True
     except Exception:
         pass
 
-    # Harmonize with Startup folder shortcut
+    # Fallback 2: Startup folder shortcut
     try:
         if exe_path and os.path.isfile(exe_path):
             startup_dir = get_startup_folder()
@@ -370,7 +399,7 @@ def enable_startup(minimized: bool = True) -> bool:
                         icon_path = os.path.abspath(ico_cand)
                         break
 
-                _create_startup_shortcut(
+                return _create_startup_shortcut(
                     target_exe=exe_path,
                     shortcut_path=lnk_path,
                     arguments=args,
@@ -381,7 +410,7 @@ def enable_startup(minimized: bool = True) -> bool:
     except Exception:
         pass
 
-    return reg_ok
+    return False
 
 
 def disable_startup() -> bool:

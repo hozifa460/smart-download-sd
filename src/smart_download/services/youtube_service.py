@@ -14,13 +14,11 @@ except ImportError:
 
 from ..core.chunk import get_permissive_ssl_context
 
-# Activate external updated yt-dlp plugin from %APPDATA%\SmartDownload\yt_dlp_plugin if present on disk
 try:
     _default_plugin_dir = get_ytdlp_plugin_dir()
     if os.path.isdir(_default_plugin_dir):
         YtDlpAutoUpdater(plugin_dir=_default_plugin_dir).activate_plugin()
-except Exception:
-    pass
+except Exception: pass
 
 from .youtube_models import (
     YOUTUBE_URL_REGEX, SOCIAL_MEDIA_PATTERNS, INVALID_FILENAME_CHARS,
@@ -314,7 +312,10 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         self.log(f"[{tag}] Extracting formats and stream metadata for {platform} media (ID: {media_id})...")
 
         try:
-            import yt_dlp
+            from .media_extractor import _get_yt_dlp
+            yt_dlp = _get_yt_dlp()
+            if yt_dlp is None:
+                raise ImportError()
         except ImportError:
             raise RuntimeError("yt-dlp Python package is required. Install with 'pip install yt-dlp'.")
 
@@ -541,7 +542,6 @@ class YouTubeResolver(YouTubeFormatBuilderMixin):
         if on_log:
             on_log(f"[FFMPEG SUCCESS] Merged file successfully created ({os.path.getsize(output_path):,} bytes).")
         return True
-
 
 # Backward-compatible alias for universal media resolution
 MediaResolver = YouTubeResolver

@@ -568,7 +568,7 @@ class TestBrowserCookiesAndMP3Extraction(unittest.TestCase):
             )
 
             self.assertTrue(hasattr(modal, "btn_download_mp3"))
-            self.assertEqual(modal.btn_download_mp3.cget("text"), "🎵 Download MP3")
+            self.assertEqual(modal.btn_download_mp3.cget("text"), tr("modal_download_mp3"))
 
             modal._on_download_mp3()
 
