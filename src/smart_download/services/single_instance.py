@@ -10,7 +10,7 @@ from typing import Optional
 from .browser.bridge_server import DEFAULT_BRIDGE_PORT
 from ..utils.url_utils import is_downloadable_url
 
-_SINGLE_INSTANCE_MUTEX_HANDLE = None
+_SINGLE_INSTANCE_MUTEX_HANDLE = getattr(sys, "_sd_single_instance_mutex_handle", None)
 
 
 def acquire_single_instance_mutex(mutex_name: str = "Local\\SmartDownload_SingleInstance_Mutex") -> bool:
@@ -18,10 +18,12 @@ def acquire_single_instance_mutex(mutex_name: str = "Local\\SmartDownload_Single
     Attempts to acquire a Win32 Named Mutex to guarantee that only one instance of the
     application starts up. If another process already holds the mutex, returns False.
     Returns True if successfully acquired or if not on Windows.
-    Stores the mutex handle globally to prevent garbage collection until process exit.
+    Stores the mutex handle globally and on sys to prevent garbage collection and survive module reloads.
     """
     global _SINGLE_INSTANCE_MUTEX_HANDLE
     if not sys.platform.startswith("win"):
+        return True
+    if is_single_instance_mutex_held():
         return True
     try:
         import ctypes
@@ -35,6 +37,7 @@ def acquire_single_instance_mutex(mutex_name: str = "Local\\SmartDownload_Single
             kernel32.CloseHandle(handle)
             return False
         _SINGLE_INSTANCE_MUTEX_HANDLE = handle
+        sys._sd_single_instance_mutex_handle = handle
         return True
     except Exception:
         return True
@@ -43,19 +46,27 @@ def acquire_single_instance_mutex(mutex_name: str = "Local\\SmartDownload_Single
 def is_single_instance_mutex_held() -> bool:
     """Returns True if the Win32 Named Mutex is currently held by this process."""
     global _SINGLE_INSTANCE_MUTEX_HANDLE
-    return _SINGLE_INSTANCE_MUTEX_HANDLE is not None
+    if _SINGLE_INSTANCE_MUTEX_HANDLE is not None:
+        return True
+    handle = getattr(sys, "_sd_single_instance_mutex_handle", None)
+    if handle is not None:
+        _SINGLE_INSTANCE_MUTEX_HANDLE = handle
+        return True
+    return False
 
 
 def release_single_instance_mutex() -> None:
     """Releases the Win32 Named Mutex handle if currently held."""
     global _SINGLE_INSTANCE_MUTEX_HANDLE
-    if _SINGLE_INSTANCE_MUTEX_HANDLE:
+    handle = _SINGLE_INSTANCE_MUTEX_HANDLE or getattr(sys, "_sd_single_instance_mutex_handle", None)
+    if handle:
         try:
             import ctypes
-            ctypes.windll.kernel32.CloseHandle(_SINGLE_INSTANCE_MUTEX_HANDLE)
+            ctypes.windll.kernel32.CloseHandle(handle)
         except Exception:
             pass
         _SINGLE_INSTANCE_MUTEX_HANDLE = None
+        sys._sd_single_instance_mutex_handle = None
 
 
 import atexit
@@ -101,13 +112,12 @@ def early_single_instance_guard() -> None:
     if not acquire_single_instance_mutex():
         if start_in_bg:
             sys.exit(0)
-        else:
-            import time
-            for _ in range(12):
-                if notify_running_instance(url=cli_url, show=True):
-                    break
-                time.sleep(0.25)
-            sys.exit(0)
+        import time
+        for _ in range(8):
+            if notify_running_instance(url=cli_url, show=True):
+                sys.exit(0)
+            time.sleep(0.2)
+        return
 
     if start_in_bg:
         if notify_running_instance(url=cli_url, show=False):

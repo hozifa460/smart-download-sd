@@ -3017,10 +3017,21 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         ok1 = acquire_single_instance_mutex(test_mutex)
         self.assertTrue(ok1, "First mutex acquisition should succeed")
 
-        # Second acquisition on the same named mutex must detect collision (ERROR_ALREADY_EXISTS == 183)
+        # Second acquisition by the same process must not collide with itself (must return True)
         if sys.platform.startswith("win"):
             ok2 = acquire_single_instance_mutex(test_mutex)
-            self.assertFalse(ok2, "Second mutex acquisition on the same name should return False")
+            self.assertTrue(ok2, "Second mutex acquisition by the same process should return True")
+
+            # But when held externally by another handle/process, acquisition must detect collision
+            release_single_instance_mutex()
+            import ctypes
+            ext_handle = ctypes.windll.kernel32.CreateMutexW(None, False, test_mutex)
+            try:
+                ok_ext = acquire_single_instance_mutex(test_mutex)
+                self.assertFalse(ok_ext, "External mutex acquisition should detect collision and return False")
+            finally:
+                if ext_handle:
+                    ctypes.windll.kernel32.CloseHandle(ext_handle)
 
         # Release the held mutex
         release_single_instance_mutex()
@@ -3317,6 +3328,134 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
                 mock_unreg_start.assert_called_once()
                 mock_reg_start.assert_not_called()
                 mock_uninst.assert_called_once()
+
+    def test_single_instance_mutex_persists_across_core_purge_and_reload(self):
+        """
+        Verifies that when acquire_single_instance_mutex() is called, followed by
+        _purge_and_reimport_core() (which purges sys.modules), the reloaded
+        smart_download.services.single_instance module still reports is_single_instance_mutex_held() == True
+        and acquire_single_instance_mutex() == True without self-colliding.
+        """
+        import sys
+        import os
+        import importlib
+        from smart_download.services.single_instance import (
+            acquire_single_instance_mutex,
+            release_single_instance_mutex,
+            is_single_instance_mutex_held,
+        )
+        from smart_download.services.core_patch_updater import _purge_and_reimport_core
+
+        saved_modules = dict(sys.modules)
+        release_single_instance_mutex()
+        try:
+            acquired = acquire_single_instance_mutex()
+            self.assertTrue(acquired, "Initial mutex acquisition should succeed")
+            self.assertTrue(is_single_instance_mutex_held(), "Mutex should be marked held")
+
+            repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            core_root = os.path.join(repo_root, "src")
+            self.assertTrue(_purge_and_reimport_core(core_root), "_purge_and_reimport_core should succeed")
+
+            reloaded_si = importlib.import_module("smart_download.services.single_instance")
+            self.assertTrue(
+                reloaded_si.is_single_instance_mutex_held(),
+                "Reloaded single_instance module should restore held status from sys"
+            )
+            self.assertTrue(
+                reloaded_si.acquire_single_instance_mutex(),
+                "Subsequent acquire on reloaded module should return True without self-collision"
+            )
+        finally:
+            from smart_download.services.single_instance import release_single_instance_mutex as clean_rel
+            clean_rel()
+            sys.modules.clear()
+            sys.modules.update(saved_modules)
+            self.assertIsNone(
+                getattr(sys, "_sd_single_instance_mutex_handle", None),
+                "sys mutex handle should be cleared after release"
+            )
+
+    def test_single_instance_unresponsive_port_does_not_lock_out_interactive_launch(self):
+        """
+        Verifies that if acquire_single_instance_mutex returns False but no instance
+        responds on port 9242, early_single_instance_guard returns instead of sys.exit(0)
+        when launching interactively.
+        """
+        from smart_download.services.single_instance import early_single_instance_guard
+
+        with patch("smart_download.services.single_instance.acquire_single_instance_mutex", return_value=False), \
+             patch("smart_download.services.single_instance.notify_running_instance", return_value=False) as mock_notify, \
+             patch("smart_download.config.is_test_environment", return_value=False), \
+             patch("sys.argv", ["SmartDownload.exe"]), \
+             patch("sys.exit") as mock_exit, \
+             patch("time.sleep"):
+            early_single_instance_guard()
+            mock_exit.assert_not_called()
+            self.assertEqual(mock_notify.call_count, 8)
+
+    def test_single_instance_background_launch_exits_if_mutex_held(self):
+        """
+        Verifies that if acquire_single_instance_mutex returns False and launched with
+        --background, early_single_instance_guard exits immediately with sys.exit(0).
+        """
+        from smart_download.services.single_instance import early_single_instance_guard
+
+        with patch("smart_download.services.single_instance.acquire_single_instance_mutex", return_value=False), \
+             patch("smart_download.config.is_test_environment", return_value=False), \
+             patch("sys.argv", ["SmartDownload.exe", "--background"]), \
+             patch("sys.exit") as mock_exit:
+            early_single_instance_guard()
+            mock_exit.assert_called_once_with(0)
+
+    def test_restore_window_deiconifies_and_updates_before_win32_calls(self):
+        """
+        Verifies that restore_window resets _start_hidden, invokes root.deiconify()
+        and root.update_idletasks() before Win32 ShowWindow and SetForegroundWindow.
+        """
+        from smart_download.ui.controllers.window_controller import WindowChromeMixin
+
+        call_order = []
+        mock_root = MagicMock()
+        mock_root.winfo_width.return_value = 1
+        mock_root.winfo_id.return_value = 12345
+        mock_root.deiconify.side_effect = lambda: call_order.append("deiconify")
+        mock_root.geometry.side_effect = lambda g: call_order.append(f"geometry:{g}")
+        mock_root.update_idletasks.side_effect = lambda: call_order.append("update_idletasks")
+
+        class Host(WindowChromeMixin):
+            def __init__(self):
+                self.root = mock_root
+                self._start_hidden = True
+                self._normal_geometry = "900x600+100+100"
+
+        host = Host()
+        with patch("smart_download.ui.controllers.window_controller.IS_WINDOWS", True), \
+             patch("ctypes.windll.user32.GetParent", return_value=12345), \
+             patch("ctypes.windll.user32.GetWindowLongW", return_value=0), \
+             patch("ctypes.windll.user32.SetWindowLongW", side_effect=lambda *a: call_order.append("SetWindowLongW")), \
+             patch("ctypes.windll.user32.ShowWindow", side_effect=lambda *a: call_order.append("ShowWindow")), \
+             patch("ctypes.windll.user32.SetWindowPos", side_effect=lambda *a: call_order.append("SetWindowPos")), \
+             patch("ctypes.windll.user32.SetForegroundWindow", side_effect=lambda *a: call_order.append("SetForegroundWindow")):
+            host.restore_window()
+
+        self.assertFalse(host._start_hidden)
+        self.assertIn("deiconify", call_order)
+        self.assertIn("geometry:900x600+100+100", call_order)
+        self.assertIn("update_idletasks", call_order)
+        self.assertIn("ShowWindow", call_order)
+        self.assertIn("SetForegroundWindow", call_order)
+
+        deic_idx = call_order.index("deiconify")
+        geom_idx = call_order.index("geometry:900x600+100+100")
+        idle_idx = call_order.index("update_idletasks")
+        show_idx = call_order.index("ShowWindow")
+        fg_idx = call_order.index("SetForegroundWindow")
+
+        self.assertLess(deic_idx, show_idx, "deiconify must happen before Win32 ShowWindow")
+        self.assertLess(geom_idx, show_idx, "geometry must happen before Win32 ShowWindow")
+        self.assertLess(idle_idx, show_idx, "update_idletasks must happen before Win32 ShowWindow")
+        self.assertLess(show_idx, fg_idx, "ShowWindow must happen before SetForegroundWindow")
 
 
 if __name__ == "__main__":

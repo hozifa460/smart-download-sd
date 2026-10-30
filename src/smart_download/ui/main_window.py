@@ -481,20 +481,16 @@ def main():
         if not is_single_instance_mutex_held() and not acquire_single_instance_mutex():
             if start_in_background:
                 sys.exit(0)
-            else:
-                import time
-                for _ in range(12):
-                    if notify_running_instance(url=cli_url, show=True):
-                        break
-                    time.sleep(0.25)
-                sys.exit(0)
-
-        if start_in_background:
+            import time
+            for _ in range(8):
+                if notify_running_instance(url=cli_url, show=True):
+                    sys.exit(0)
+                time.sleep(0.2)
+        elif start_in_background:
             if notify_running_instance(url=cli_url, show=False):
                 sys.exit(0)
-        else:
-            if notify_running_instance(url=cli_url, show=True):
-                sys.exit(0)
+        elif notify_running_instance(url=cli_url, show=True):
+            sys.exit(0)
 
     # Ensure Windows High-DPI Awareness is active before root creation
     enable_high_dpi_awareness()

@@ -113,6 +113,12 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
     def restore_window(self):
         """Restores and brings the main window to foreground if hidden or minimized."""
         self._start_hidden = False
+        try:
+            self.root.deiconify()
+            if getattr(self, "_normal_geometry", None) and self.root.winfo_width() <= 1:
+                self.root.geometry(self._normal_geometry)
+            self.root.update_idletasks()
+        except Exception: pass
         if IS_WINDOWS:
             try:
                 hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
@@ -124,8 +130,6 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0043)
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
             except Exception: pass
-        try: self.root.deiconify()
-        except Exception: pass
         try:
             self.root.lift()
             self.root.attributes("-topmost", True)
@@ -538,8 +542,4 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
 
 
 WindowControllerMixin = WindowChromeMixin
-
-__all__ = [
-    'WindowChromeMixin', 'WindowControllerMixin',
-    'WindowLifecycleMixin', 'ThemeControllerMixin', 'DispatchControllerMixin',
-]
+__all__ = ['WindowChromeMixin', 'WindowControllerMixin', 'WindowLifecycleMixin', 'ThemeControllerMixin', 'DispatchControllerMixin']

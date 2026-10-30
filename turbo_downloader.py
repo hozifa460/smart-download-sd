@@ -54,6 +54,13 @@ _src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 if os.path.isdir(_src_dir) and _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
+# Initialize Dynamic Core Loader (Zero-Rebuild Dev Mode & OTA Hot-Patch Plugin)
+try:
+    from smart_download.services.core_patch_updater import init_core_loader
+    init_core_loader()
+except Exception:
+    pass
+
 # Early Single-Instance Mutex Check: import before heavy modules (Tkinter, PIL, pystray, yt-dlp)
 from smart_download.services.single_instance import (
     acquire_single_instance_mutex,
@@ -65,13 +72,6 @@ from smart_download.services.single_instance import (
 
 if __name__ == "__main__":
     early_single_instance_guard()
-
-# Initialize Dynamic Core Loader (Zero-Rebuild Dev Mode & OTA Hot-Patch Plugin)
-try:
-    from smart_download.services.core_patch_updater import init_core_loader
-    init_core_loader()
-except Exception:
-    pass
 
 # Initialize DPI awareness
 from smart_download.utils.dpi import enable_high_dpi_awareness, get_windows_work_area
