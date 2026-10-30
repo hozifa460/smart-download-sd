@@ -3159,6 +3159,96 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         loaded_modules = [m.strip() for m in res.stdout.strip().split(",") if m.strip()]
         self.assertEqual(loaded_modules, [], f"Unexpected eager modules loaded: {loaded_modules}")
 
+    def test_clean_subprocess_import_single_instance_with_plugin_dir_on_disk_no_ytdlp(self):
+        """
+        Verifies that even if %APPDATA%\\SmartDownload\\yt_dlp_plugin exists on disk,
+        importing smart_download.services.single_instance in a clean subprocess does
+        NOT activate the plugin or eagerly load yt_dlp into sys.modules.
+        """
+        import subprocess
+        import tempfile
+        import shutil
+
+        temp_appdata = tempfile.mkdtemp()
+        try:
+            fake_plugin = os.path.join(temp_appdata, "SmartDownload", "yt_dlp_plugin")
+            os.makedirs(fake_plugin, exist_ok=True)
+            with open(os.path.join(fake_plugin, "marker.txt"), "w") as f:
+                f.write("fake_plugin_active")
+
+            code = (
+                "import sys, os; "
+                "src = os.path.join(os.getcwd(), 'src'); "
+                "sys.path.insert(0, src); "
+                "from smart_download.services.single_instance import early_single_instance_guard; "
+                "loaded = [m for m in sys.modules if m == 'yt_dlp' or m.startswith('yt_dlp.') or m == 'smart_download.ui.main_window']; "
+                "print(','.join(loaded))"
+            )
+            env = dict(os.environ)
+            env["APPDATA"] = temp_appdata
+            res = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+            loaded_modules = [m.strip() for m in res.stdout.strip().split(",") if m.strip()]
+            self.assertEqual(loaded_modules, [], f"yt_dlp prematurely loaded with plugin on disk: {loaded_modules}")
+        finally:
+            shutil.rmtree(temp_appdata, ignore_errors=True)
+
+    def test_lazy_module_dir_and_attributes_no_duplicates(self):
+        """
+        Verifies that __dir__() in smart_download and smart_download.utils returns
+        unique entries without duplicates and properly includes lazy-loaded symbols.
+        """
+        import smart_download
+        import smart_download.utils as sd_utils
+
+        # Verify initial dir() has no duplicates
+        dir_sd = dir(smart_download)
+        self.assertEqual(len(dir_sd), len(set(dir_sd)), f"Duplicates in dir(smart_download): {dir_sd}")
+        self.assertIn("ModernFramelessGUI", dir_sd)
+        self.assertIn("main", dir_sd)
+
+        # Access attributes
+        _ = smart_download.ModernFramelessGUI
+        _ = smart_download.main
+
+        # Verify post-access dir() has no duplicates
+        dir_sd_post = dir(smart_download)
+        self.assertEqual(len(dir_sd_post), len(set(dir_sd_post)), f"Duplicates after access: {dir_sd_post}")
+
+        # Verify smart_download.utils dir() includes lazy tk_helpers and has no duplicates
+        dir_utils = dir(sd_utils)
+        self.assertEqual(len(dir_utils), len(set(dir_utils)), f"Duplicates in dir(sd_utils): {dir_utils}")
+        self.assertIn("animate_window_open", dir_utils)
+        self.assertIn("animate_window_close", dir_utils)
+        self.assertIn("_detach_photo_tk", dir_utils)
+
+    def test_get_yt_dlp_synchronization_and_mocking(self):
+        """
+        Verifies that _get_yt_dlp() stays synchronized with sys.modules and honors test mocks.
+        """
+        from smart_download.services.media_extractor import _get_yt_dlp, _reset_plugin_state
+
+        try:
+            _reset_plugin_state()
+            # 1. When sys.modules has a mock, _get_yt_dlp returns that mock
+            mock_yt = MagicMock()
+            mock_yt.__name__ = "mock_yt_dlp"
+            with patch.dict(sys.modules, {"yt_dlp": mock_yt}):
+                self.assertIs(_get_yt_dlp(), mock_yt)
+
+            # 2. When sys.modules has no yt_dlp and a mock is assigned to media_extractor.yt_dlp directly
+            import smart_download.services.media_extractor as me
+            orig_yt = me.yt_dlp
+            try:
+                me.yt_dlp = mock_yt
+                with patch.dict(sys.modules, {}):
+                    sys.modules.pop("yt_dlp", None)
+                    self.assertIs(_get_yt_dlp(), mock_yt)
+            finally:
+                me.yt_dlp = orig_yt
+        finally:
+            _reset_plugin_state()
+
+
 
     def test_startup_welcome_toast_lifecycle_and_actions(self):
         """

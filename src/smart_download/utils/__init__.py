@@ -50,6 +50,10 @@ def __getattr__(name: str):
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
+def __dir__():
+    return sorted(set(globals().keys()) | _TK_HELPER_NAMES)
+
+
 __all__ = [
     "enable_high_dpi_awareness",
     "get_windows_work_area",

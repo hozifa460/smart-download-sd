@@ -39,7 +39,7 @@ def __getattr__(name: str):
 
 
 def __dir__():
-    return sorted(list(globals().keys()) + ["ModernFramelessGUI", "main"])
+    return sorted(set(globals().keys()) | {"ModernFramelessGUI", "main"})
 
 __all__ = [
     "__version__",

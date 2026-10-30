@@ -4,6 +4,7 @@ Media extractor service providing lazy loading and background warmup for yt_dlp.
 import os
 import sys
 import threading
+import types
 from typing import Any, Optional
 
 yt_dlp: Any = None
@@ -17,11 +18,25 @@ def _get_yt_dlp() -> Any:
     Thread-safe and keeps module-level yt_dlp updated for mock compatibility.
     """
     global yt_dlp, _plugin_activated
-    if yt_dlp is not None:
+    # 1. Fast path: check sys.modules first for dynamic reloads, mocks, or deactivations
+    mod_sys = sys.modules.get("yt_dlp")
+    if mod_sys is not None:
+        yt_dlp = mod_sys
         return yt_dlp
-    with _yt_dlp_lock:
-        if yt_dlp is not None:
+    if yt_dlp is not None:
+        if not isinstance(yt_dlp, types.ModuleType) or hasattr(yt_dlp, "_mock_name"):
             return yt_dlp
+        yt_dlp = None
+
+    with _yt_dlp_lock:
+        mod_sys = sys.modules.get("yt_dlp")
+        if mod_sys is not None:
+            yt_dlp = mod_sys
+            return yt_dlp
+        if yt_dlp is not None:
+            if not isinstance(yt_dlp, types.ModuleType) or hasattr(yt_dlp, "_mock_name"):
+                return yt_dlp
+            yt_dlp = None
 
         if not _plugin_activated:
             _plugin_activated = True
@@ -50,6 +65,14 @@ def _get_yt_dlp() -> Any:
             return None
 
 
+def _reset_plugin_state() -> None:
+    """Resets internal plugin activation and yt_dlp cache for clean testing."""
+    global yt_dlp, _plugin_activated
+    with _yt_dlp_lock:
+        yt_dlp = None
+        _plugin_activated = False
+
+
 def warmup_yt_dlp_background(delay_seconds: float = 3.0) -> None:
     """
     Kicks off a lightweight daemon thread that pre-warms yt_dlp extractors in the background
@@ -67,4 +90,4 @@ def warmup_yt_dlp_background(delay_seconds: float = 3.0) -> None:
     t.start()
 
 
-__all__ = ["_get_yt_dlp", "warmup_yt_dlp_background", "yt_dlp"]
+__all__ = ["_get_yt_dlp", "warmup_yt_dlp_background", "yt_dlp", "_reset_plugin_state"]
