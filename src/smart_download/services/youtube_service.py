@@ -14,12 +14,6 @@ except ImportError:
 
 from ..core.chunk import get_permissive_ssl_context
 
-try:
-    _default_plugin_dir = get_ytdlp_plugin_dir()
-    if os.path.isdir(_default_plugin_dir):
-        YtDlpAutoUpdater(plugin_dir=_default_plugin_dir).activate_plugin()
-except Exception: pass
-
 from .youtube_models import (
     YOUTUBE_URL_REGEX, SOCIAL_MEDIA_PATTERNS, INVALID_FILENAME_CHARS,
     SUPPORTED_COOKIE_BROWSERS, detect_installed_cookie_browsers,

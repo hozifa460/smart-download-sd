@@ -7,12 +7,7 @@ import re
 import sys
 from typing import Dict, List, Optional, Tuple, Callable, Any
 
-try:
-    import tkinter as tk
-    from tkinter import ttk
-except ImportError:
-    tk = None  # type: ignore
-    ttk = None  # type: ignore
+
 
 try:
     from ...locales.i18n import tr
@@ -309,7 +304,12 @@ def build_audio_subtitle_row(
     audio_tracks: List[Dict[str, Any]], subtitle_tracks: List[Dict[str, Any]]
 ) -> Tuple[Optional[Any], Optional[Any]]:
     """Renders spacious themed 2-row Audio Track, Subtitles, and Delivery Mode card for QualitySelectionModal."""
-    if tk is None or ttk is None or (not audio_tracks and not subtitle_tracks):
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+    except ImportError:
+        return None, None
+    if not audio_tracks and not subtitle_tracks:
         return None, None
     c_panel = theme.get("c_panel", "#1e293b")
     c_border = theme.get("c_border", "#475569")

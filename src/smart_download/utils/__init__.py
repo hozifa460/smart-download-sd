@@ -23,25 +23,32 @@ from .file_ops import (
     get_base_downloads_dir,
 )
 
-try:
-    from .tk_helpers import (
-        _detach_photo_tk,
-        _detach_widget_tk_refs,
-        _drain_bg_tk_callbacks,
-        animate_window_open,
-        animate_window_close,
-    )
-except Exception:
-    def _detach_photo_tk(photo=None):  # type: ignore
-        pass
-    def _detach_widget_tk_refs(widget=None):  # type: ignore
-        pass
-    def _drain_bg_tk_callbacks():  # type: ignore
-        pass
-    def animate_window_open(win=None, duration_ms=140):  # type: ignore
-        pass
-    def animate_window_close(win=None, on_done=None, duration_ms=110):  # type: ignore
-        if on_done: on_done()
+_TK_HELPER_NAMES = {
+    "_detach_photo_tk",
+    "_detach_widget_tk_refs",
+    "_drain_bg_tk_callbacks",
+    "animate_window_open",
+    "animate_window_close",
+}
+
+
+def __getattr__(name: str):
+    if name in _TK_HELPER_NAMES:
+        try:
+            from . import tk_helpers
+            val = getattr(tk_helpers, name)
+            globals()[name] = val
+            return val
+        except Exception:
+            def _dummy(*args, **kwargs):
+                if name == "animate_window_close":
+                    on_done = kwargs.get("on_done") or (args[1] if len(args) > 1 else None)
+                    if on_done:
+                        on_done()
+            globals()[name] = _dummy
+            return _dummy
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 
 __all__ = [
     "enable_high_dpi_awareness",

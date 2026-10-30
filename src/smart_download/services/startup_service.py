@@ -284,7 +284,6 @@ def is_startup_enabled() -> bool:
                             return True
                 except FileNotFoundError:
                     pass
-            return False
     except (FileNotFoundError, OSError):
         pass
 

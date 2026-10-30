@@ -3121,6 +3121,45 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
              patch("os.path.isfile", side_effect=lambda p: p.endswith("Smart Download (SD).lnk")):
             self.assertTrue(is_startup_enabled())
 
+    def test_is_startup_enabled_fallback_when_openkey_succeeds_and_value_missing(self):
+        """
+        Verifies that when winreg.OpenKey succeeds but QueryValueEx raises FileNotFoundError,
+        is_startup_enabled() does NOT prematurely return False; it falls through to check the
+        Startup folder .lnk and returns True when Smart Download (SD).lnk exists.
+        """
+        from smart_download.services.startup_service import is_startup_enabled
+
+        mock_winreg = MagicMock()
+        mock_key = MagicMock()
+        mock_winreg.OpenKey.return_value.__enter__.return_value = mock_key
+        mock_winreg.QueryValueEx.side_effect = FileNotFoundError("Registry value not present")
+
+        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
+             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
+             patch("smart_download.services.startup_service.get_startup_folder", return_value="C:\\FakeStartup"), \
+             patch("os.path.isdir", return_value=True), \
+             patch("os.path.isfile", side_effect=lambda p: p.endswith("Smart Download (SD).lnk")):
+            self.assertTrue(is_startup_enabled())
+
+    def test_clean_subprocess_import_single_instance_no_ui_or_ytdlp(self):
+        """
+        Verifies that importing smart_download.services.single_instance in a clean subprocess
+        does NOT eagerly load smart_download.ui.main_window or yt_dlp into sys.modules.
+        """
+        import subprocess
+        code = (
+            "import sys, os; "
+            "src = os.path.join(os.getcwd(), 'src'); "
+            "sys.path.insert(0, src); "
+            "from smart_download.services.single_instance import early_single_instance_guard; "
+            "loaded = [m for m in sys.modules if m == 'smart_download.ui.main_window' or m == 'yt_dlp' or m.startswith('yt_dlp.') or m == 'tkinter']; "
+            "print(','.join(loaded))"
+        )
+        res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+        loaded_modules = [m.strip() for m in res.stdout.strip().split(",") if m.strip()]
+        self.assertEqual(loaded_modules, [], f"Unexpected eager modules loaded: {loaded_modules}")
+
+
     def test_startup_welcome_toast_lifecycle_and_actions(self):
         """
         Verifies StartupWelcomeToast:

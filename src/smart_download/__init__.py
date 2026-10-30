@@ -21,14 +21,25 @@ from .config import (
 from .locales.i18n import LocalizationManager, tr, get_current_language, set_current_language
 from .core.engine import TurboDownloadEngine
 from .core.chunk import DownloadChunk, get_permissive_ssl_context
-try:
-    import tkinter as tk
-    if tk is None:
-        raise ImportError("Tkinter not available")
-    from .ui.main_window import ModernFramelessGUI, main
-except Exception:
-    ModernFramelessGUI = None  # type: ignore
-    main = None  # type: ignore
+def __getattr__(name: str):
+    if name in ("ModernFramelessGUI", "main"):
+        try:
+            import tkinter as tk
+            if tk is None:
+                raise ImportError("Tkinter not available")
+            from .ui.main_window import ModernFramelessGUI as _ModernFramelessGUI, main as _main
+            globals()["ModernFramelessGUI"] = _ModernFramelessGUI
+            globals()["main"] = _main
+            return globals()[name]
+        except Exception:
+            globals()["ModernFramelessGUI"] = None
+            globals()["main"] = None
+            return None
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
+def __dir__():
+    return sorted(list(globals().keys()) + ["ModernFramelessGUI", "main"])
 
 __all__ = [
     "__version__",
