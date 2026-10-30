@@ -3679,7 +3679,8 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
             return "job_id_123"
         mock_root.after.side_effect = fake_after
 
-        with patch("smart_download.ui.main_window.SystemTrayManager"), \
+        with patch.dict(os.environ, {"SD_DISABLE_STARTUP_TOAST": "0"}), \
+             patch("smart_download.ui.main_window.SystemTrayManager"), \
              patch("smart_download.ui.main_window.BrowserBridgeServer"), \
              patch("smart_download.ui.main_window.is_startup_enabled", return_value=True), \
              patch.object(ModernFramelessGUI, "_setup_window"), \
