@@ -175,6 +175,7 @@ def register_startup_entries(exe_path: str, icon_path: str = "") -> Dict[str, bo
         except Exception:
             pass
 
+    if results["run_key"]:
         # Disable Windows 10/11 Explorer's 10-second artificial startup delay
         try:
             reg_dword = getattr(winreg, "REG_DWORD", 4)
@@ -184,7 +185,6 @@ def register_startup_entries(exe_path: str, icon_path: str = "") -> Dict[str, bo
         except Exception:
             pass
 
-    if results["run_key"]:
         # Primary mechanism succeeded: delete any duplicate Scheduled Task or Startup shortcut
         try:
             for tname in (TASK_NAME, LEGACY_TASK_NAME):

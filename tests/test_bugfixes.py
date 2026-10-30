@@ -3649,6 +3649,84 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
                 self.assertIsNotNone(found)
                 self.assertEqual(os.path.abspath(found), os.path.abspath(fake_ffmpeg))
 
+    def test_find_ffmpeg_bin_checks_executable_dir_directly(self):
+        """Verifies find_ffmpeg_bin checks executable adjacent directory directly."""
+        from smart_download.services.youtube_models import find_ffmpeg_bin
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_ffmpeg = os.path.join(tmpdir, "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg")
+            with open(fake_ffmpeg, "wb") as f:
+                f.write(b"fake ffmpeg adjacent")
+
+            with patch("sys.executable", os.path.join(tmpdir, "SmartDownload.exe")), \
+                 patch("shutil.which", return_value=None):
+                found = find_ffmpeg_bin()
+                self.assertIsNotNone(found)
+                self.assertEqual(os.path.abspath(found), os.path.abspath(fake_ffmpeg))
+
+    def test_main_window_schedules_bg_notify_at_80ms_when_started_hidden(self):
+        """Verifies ModernFramelessGUI schedules _show_background_startup_notification at 80ms when start_hidden=True."""
+        from smart_download.ui.main_window import ModernFramelessGUI
+
+        mock_root = MagicMock()
+        mock_root.winfo_screenwidth.return_value = 1920
+        mock_root.winfo_screenheight.return_value = 1080
+        mock_root.winfo_fpixels.return_value = 96.0
+
+        scheduled_after = []
+        def fake_after(delay_ms, callback, *args):
+            scheduled_after.append((delay_ms, callback))
+            return "job_id_123"
+        mock_root.after.side_effect = fake_after
+
+        with patch("smart_download.ui.main_window.SystemTrayManager"), \
+             patch("smart_download.ui.main_window.BrowserBridgeServer"), \
+             patch("smart_download.ui.main_window.is_startup_enabled", return_value=True), \
+             patch.object(ModernFramelessGUI, "_setup_window"), \
+             patch.object(ModernFramelessGUI, "_init_theme"), \
+             patch.object(ModernFramelessGUI, "_build_ui"), \
+             patch.object(ModernFramelessGUI, "_init_clipboard_sniffer"):
+            app = ModernFramelessGUI(mock_root, start_hidden=True)
+            self.assertEqual(app._bg_notify_job, "job_id_123")
+            delays = [item[0] for item in scheduled_after if item[1] == app._show_background_startup_notification]
+            self.assertIn(80, delays, "Expected _show_background_startup_notification to be scheduled at 80ms")
+
+    def test_main_window_async_startup_registration_when_setting_enabled(self):
+        """Verifies enable_startup is dispatched in a daemon thread when startup setting is enabled but not yet registered."""
+        from smart_download.ui.main_window import ModernFramelessGUI
+
+        mock_root = MagicMock()
+        mock_root.winfo_screenwidth.return_value = 1920
+        mock_root.winfo_screenheight.return_value = 1080
+        mock_root.winfo_fpixels.return_value = 96.0
+
+        threads_started = []
+
+        class FakeThread:
+            def __init__(self, target=None, daemon=None):
+                self.target = target
+                self.daemon = daemon
+            def start(self):
+                threads_started.append(self)
+                if self.target:
+                    self.target()
+
+        with patch("smart_download.ui.main_window.SystemTrayManager"), \
+             patch("smart_download.ui.main_window.BrowserBridgeServer"), \
+             patch("smart_download.ui.main_window.is_startup_enabled", return_value=False), \
+             patch("smart_download.ui.main_window.get_setting", side_effect=lambda k, d=None: True if k == "startup_enabled" else d), \
+             patch("smart_download.ui.main_window.enable_startup") as mock_enable_startup, \
+             patch("threading.Thread", side_effect=FakeThread), \
+             patch.object(ModernFramelessGUI, "_setup_window"), \
+             patch.object(ModernFramelessGUI, "_init_theme"), \
+             patch.object(ModernFramelessGUI, "_build_ui"), \
+             patch.object(ModernFramelessGUI, "_init_clipboard_sniffer"):
+            app = ModernFramelessGUI(mock_root, start_hidden=False)
+            self.assertEqual(len(threads_started), 1)
+            self.assertTrue(threads_started[0].daemon)
+            mock_enable_startup.assert_called_once_with(minimized=True)
+            self.assertTrue(app._startup_enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

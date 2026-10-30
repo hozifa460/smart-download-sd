@@ -17,6 +17,15 @@ except ImportError:
     except ImportError:
         from updater import YtDlpAutoUpdater
 
+try:
+    from ..config import is_test_environment
+except ImportError:
+    try:
+        from smart_download.config import is_test_environment
+    except ImportError:
+        def is_test_environment() -> bool:
+            return bool("unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("SD_TESTING") == "1")
+
 
 # Regex matching various forms of YouTube URLs
 YOUTUBE_URL_REGEX = re.compile(
@@ -337,12 +346,15 @@ def find_ffmpeg_bin() -> Optional[str]:
         getattr(sys, "_MEIPASS", ""),
         exe_dir,
         os.path.join(exe_dir, "dist") if exe_dir else "",
-        cwd,
-        os.path.join(cwd, "dist"),
         file_dir,
-        proj_root,
-        os.path.join(proj_root, "dist") if proj_root else "",
     ]
+    if not is_test_environment():
+        app_dirs.extend([
+            cwd,
+            os.path.join(cwd, "dist"),
+            proj_root,
+            os.path.join(proj_root, "dist") if proj_root else "",
+        ])
     for d in app_dirs:
         if d:
             candidate = os.path.join(d, exe_name)

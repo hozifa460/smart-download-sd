@@ -513,9 +513,10 @@ def main():
             pass
     if os.path.isfile(png_path):
         try:
-            from PIL import ImageTk
-            _ico_img = ImageTk.PhotoImage(file=png_path)
-            root.iconphoto(True, _ico_img)
+            from PIL import Image, ImageTk
+            with Image.open(png_path) as _im:
+                _ico_img = ImageTk.PhotoImage(_im)
+                root.iconphoto(True, _ico_img)
         except Exception:
             pass
 
@@ -526,12 +527,6 @@ def main():
             pass
 
     app = ModernFramelessGUI(root, start_hidden=start_in_background, initial_url=cli_url)
-    if start_in_background:
-        try:
-            root.withdraw()
-        except Exception:
-            pass
-
     root.mainloop()
 
 
