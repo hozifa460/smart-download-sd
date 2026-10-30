@@ -23,7 +23,7 @@ def acquire_single_instance_mutex(mutex_name: str = "Local\\SmartDownload_Single
     global _SINGLE_INSTANCE_MUTEX_HANDLE
     if not sys.platform.startswith("win"):
         return True
-    if is_single_instance_mutex_held():
+    if is_single_instance_mutex_held(mutex_name):
         return True
     try:
         import ctypes
@@ -38,21 +38,25 @@ def acquire_single_instance_mutex(mutex_name: str = "Local\\SmartDownload_Single
             return False
         _SINGLE_INSTANCE_MUTEX_HANDLE = handle
         sys._sd_single_instance_mutex_handle = handle
+        sys._sd_single_instance_mutex_name = mutex_name
         return True
     except Exception:
         return True
 
 
-def is_single_instance_mutex_held() -> bool:
+def is_single_instance_mutex_held(mutex_name: Optional[str] = None) -> bool:
     """Returns True if the Win32 Named Mutex is currently held by this process."""
     global _SINGLE_INSTANCE_MUTEX_HANDLE
-    if _SINGLE_INSTANCE_MUTEX_HANDLE is not None:
-        return True
-    handle = getattr(sys, "_sd_single_instance_mutex_handle", None)
-    if handle is not None:
-        _SINGLE_INSTANCE_MUTEX_HANDLE = handle
-        return True
-    return False
+    sys_handle = getattr(sys, "_sd_single_instance_mutex_handle", None)
+    if sys_handle is None:
+        _SINGLE_INSTANCE_MUTEX_HANDLE = None
+        return False
+    if mutex_name is not None:
+        held_name = getattr(sys, "_sd_single_instance_mutex_name", None)
+        if held_name is not None and held_name != mutex_name:
+            return False
+    _SINGLE_INSTANCE_MUTEX_HANDLE = sys_handle
+    return True
 
 
 def release_single_instance_mutex() -> None:
@@ -65,8 +69,10 @@ def release_single_instance_mutex() -> None:
             ctypes.windll.kernel32.CloseHandle(handle)
         except Exception:
             pass
-        _SINGLE_INSTANCE_MUTEX_HANDLE = None
-        sys._sd_single_instance_mutex_handle = None
+    _SINGLE_INSTANCE_MUTEX_HANDLE = None
+    sys._sd_single_instance_mutex_handle = None
+    sys._sd_single_instance_mutex_name = None
+    sys._sd_early_guard_checked = False
 
 
 import atexit
@@ -117,16 +123,14 @@ def early_single_instance_guard() -> None:
             if notify_running_instance(url=cli_url, show=True):
                 sys.exit(0)
             time.sleep(0.2)
+        sys._sd_early_guard_checked = True
         return
 
-    if start_in_bg:
-        if notify_running_instance(url=cli_url, show=False):
-            release_single_instance_mutex()
-            sys.exit(0)
-    else:
-        if notify_running_instance(url=cli_url, show=True):
-            release_single_instance_mutex()
-            sys.exit(0)
+    if notify_running_instance(url=cli_url, show=not start_in_bg):
+        release_single_instance_mutex()
+        sys.exit(0)
+
+    sys._sd_early_guard_checked = True
 
 def notify_running_instance(url: Optional[str] = None, show: bool = True) -> bool:
     """

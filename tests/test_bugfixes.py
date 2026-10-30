@@ -3457,6 +3457,113 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
         self.assertLess(idle_idx, show_idx, "update_idletasks must happen before Win32 ShowWindow")
         self.assertLess(show_idx, fg_idx, "ShowWindow must happen before SetForegroundWindow")
 
+    def test_single_instance_held_status_cleared_when_sys_handle_released(self):
+        """
+        Verifies that if sys._sd_single_instance_mutex_handle is cleared,
+        is_single_instance_mutex_held() immediately returns False and clears
+        any stale cached handle in the caller module.
+        """
+        import sys
+        import uuid
+        from smart_download.services.single_instance import (
+            acquire_single_instance_mutex,
+            release_single_instance_mutex,
+            is_single_instance_mutex_held,
+        )
+        test_mutex = f"Local\\SD_TestCleared_{uuid.uuid4().hex}"
+        release_single_instance_mutex()
+        try:
+            self.assertTrue(acquire_single_instance_mutex(test_mutex), "Initial acquisition should succeed")
+            self.assertTrue(is_single_instance_mutex_held(test_mutex), "Should be reported held")
+            # Close real OS handle first so it doesn't leak into next tests, then clear sys handle
+            real_handle = getattr(sys, "_sd_single_instance_mutex_handle", None)
+            if real_handle and sys.platform.startswith("win"):
+                import ctypes
+                ctypes.windll.kernel32.CloseHandle(real_handle)
+            sys._sd_single_instance_mutex_handle = None
+            self.assertFalse(
+                is_single_instance_mutex_held(test_mutex),
+                "is_single_instance_mutex_held must return False when sys handle is None"
+            )
+        finally:
+            release_single_instance_mutex()
+
+    def test_acquire_single_instance_mutex_checks_mutex_name(self):
+        """
+        Verifies that acquiring Mutex_A does not falsely report Mutex_B as held
+        by this process.
+        """
+        import uuid
+        from smart_download.services.single_instance import (
+            acquire_single_instance_mutex,
+            release_single_instance_mutex,
+            is_single_instance_mutex_held,
+        )
+        mutex_a = f"Local\\SD_TestA_{uuid.uuid4().hex}"
+        mutex_b = f"Local\\SD_TestB_{uuid.uuid4().hex}"
+        release_single_instance_mutex()
+        try:
+            acquire_single_instance_mutex(mutex_a)
+            self.assertTrue(is_single_instance_mutex_held(mutex_a))
+            self.assertFalse(is_single_instance_mutex_held(mutex_b))
+        finally:
+            release_single_instance_mutex()
+
+    def test_early_guard_checked_avoids_duplicate_retry_loop_in_main(self):
+        """
+        Verifies that when early_single_instance_guard has already run, main()
+        skips repeating the 8-retry polling cycle on an unresponsive port.
+        """
+        import sys
+        from unittest.mock import patch
+        from smart_download.services.single_instance import early_single_instance_guard
+        from smart_download.ui.main_window import main
+
+        guard_notify_calls = []
+        main_notify_calls = []
+
+        with patch("smart_download.services.single_instance.acquire_single_instance_mutex", return_value=False), \
+             patch("smart_download.ui.main_window.acquire_single_instance_mutex", return_value=False), \
+             patch("smart_download.ui.main_window.is_single_instance_mutex_held", return_value=False), \
+             patch("smart_download.services.single_instance.notify_running_instance", side_effect=lambda *a, **k: [guard_notify_calls.append(1), False][1]), \
+             patch("smart_download.ui.main_window.notify_running_instance", side_effect=lambda *a, **k: [main_notify_calls.append(1), False][1]), \
+             patch("smart_download.ui.main_window.is_test_environment", return_value=False), \
+             patch("smart_download.config.is_test_environment", return_value=False), \
+             patch("sys.argv", ["SmartDownload.exe"]), \
+             patch("time.sleep"), \
+             patch("tkinter.Tk"), \
+             patch("smart_download.ui.main_window.ModernFramelessGUI"):
+            early_single_instance_guard()
+            self.assertEqual(len(guard_notify_calls), 8)
+            self.assertTrue(getattr(sys, "_sd_early_guard_checked", False))
+
+            main()
+            self.assertEqual(len(main_notify_calls), 0, "main() must not duplicate the 8 retries when early guard already checked")
+
+    def test_main_single_instance_unresponsive_port_does_not_lock_out_interactive_launch(self):
+        """
+        Verifies that main() alone (when early_single_instance_guard has not run)
+        does not exit when port 9242 does not respond to interactive launch.
+        """
+        import sys
+        from unittest.mock import patch
+        from smart_download.ui.main_window import main
+
+        with patch("smart_download.ui.main_window.acquire_single_instance_mutex", return_value=False), \
+             patch("smart_download.ui.main_window.is_single_instance_mutex_held", return_value=False), \
+             patch("smart_download.ui.main_window.notify_running_instance", return_value=False) as mock_notify, \
+             patch("smart_download.ui.main_window.is_test_environment", return_value=False), \
+             patch("smart_download.config.is_test_environment", return_value=False), \
+             patch("sys.argv", ["SmartDownload.exe"]), \
+             patch("sys.exit") as mock_exit, \
+             patch("time.sleep"), \
+             patch("tkinter.Tk"), \
+             patch("smart_download.ui.main_window.ModernFramelessGUI"):
+            sys._sd_early_guard_checked = False
+            main()
+            mock_exit.assert_not_called()
+            self.assertEqual(mock_notify.call_count, 8)
+
 
 if __name__ == "__main__":
     unittest.main()

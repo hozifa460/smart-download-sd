@@ -134,6 +134,7 @@ from ..services.single_instance import (
     notify_running_instance,
     acquire_single_instance_mutex,
     is_single_instance_mutex_held,
+    release_single_instance_mutex,
 )
 from ..services.youtube_service import (
     YouTubeResolver,
@@ -471,13 +472,15 @@ def main():
                 cli_url = arg.strip()
                 break
 
-    # Check for background / minimized startup (case-insensitive)
-    start_in_background = any(arg.lower() in ("--background", "-background", "/background",
-                                              "--minimized", "-minimized", "/minimized")
-                              for arg in sys.argv[1:])
+    bg_flags = ("--background", "-background", "/background", "--minimized", "-minimized", "/minimized")
+    start_in_background = any(arg.lower() in bg_flags for arg in sys.argv[1:])
 
     # Single-instance check: acquire Win32 Named Mutex and handle IPC forwarding
-    if not any(arg in sys.argv for arg in ("--force-new-instance", "--multi-instance")) and not is_test_environment():
+    if (
+        not getattr(sys, "_sd_early_guard_checked", False)
+        and not any(arg in sys.argv for arg in ("--force-new-instance", "--multi-instance"))
+        and not is_test_environment()
+    ):
         if not is_single_instance_mutex_held() and not acquire_single_instance_mutex():
             if start_in_background:
                 sys.exit(0)
@@ -486,10 +489,8 @@ def main():
                 if notify_running_instance(url=cli_url, show=True):
                     sys.exit(0)
                 time.sleep(0.2)
-        elif start_in_background:
-            if notify_running_instance(url=cli_url, show=False):
-                sys.exit(0)
-        elif notify_running_instance(url=cli_url, show=True):
+        elif notify_running_instance(url=cli_url, show=not start_in_background):
+            release_single_instance_mutex()
             sys.exit(0)
 
     # Ensure Windows High-DPI Awareness is active before root creation
