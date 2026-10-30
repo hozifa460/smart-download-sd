@@ -2999,6 +2999,145 @@ class TestMainToolbarCleanup(unittest.TestCase):
         self.assertEqual(UPD_VER, "2.0.2")
 
 
+class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
+    """
+    Tests for Windows background startup, single-instance mutex,
+    StartupApproved binary registry keys, StartupWelcomeToast lifecycle,
+    and test-isolation of installer ops.
+    """
+
+    def test_acquire_single_instance_mutex_behavior(self):
+        """Verifies acquire_single_instance_mutex acquires, detects collision, and releases cleanly."""
+        from smart_download.services.single_instance import (
+            acquire_single_instance_mutex,
+            release_single_instance_mutex,
+        )
+        test_mutex = "Local\\SmartDownload_Test_SingleInstance_Mutex"
+        # Initial acquisition must succeed
+        ok1 = acquire_single_instance_mutex(test_mutex)
+        self.assertTrue(ok1, "First mutex acquisition should succeed")
+
+        # Second acquisition on the same named mutex must detect collision (ERROR_ALREADY_EXISTS == 183)
+        if sys.platform.startswith("win"):
+            ok2 = acquire_single_instance_mutex(test_mutex)
+            self.assertFalse(ok2, "Second mutex acquisition on the same name should return False")
+
+        # Release the held mutex
+        release_single_instance_mutex()
+
+        # Re-acquisition must succeed again after release
+        ok3 = acquire_single_instance_mutex(test_mutex)
+        self.assertTrue(ok3, "Re-acquisition after release must succeed")
+        release_single_instance_mutex()
+
+    def test_startup_approved_run_binary_writing(self):
+        """Verifies writing 12-byte enabled binary flag b'\\x02' + b'\\x00' * 11 to StartupApproved keys."""
+        from smart_download.services.startup_service import (
+            ENABLED_STARTUP_BINARY,
+            STARTUP_APPROVED_RUN_KEY,
+            STARTUP_APPROVED_FOLDER_KEY,
+            STARTUP_REG_KEY_NAME,
+        )
+        self.assertEqual(ENABLED_STARTUP_BINARY, b"\x02" + b"\x00" * 11)
+        self.assertEqual(len(ENABLED_STARTUP_BINARY), 12)
+
+        # Mock winreg to verify exact binary registration calls
+        mock_winreg = MagicMock()
+        mock_key = MagicMock()
+        mock_winreg.CreateKey.return_value.__enter__.return_value = mock_key
+        mock_winreg.REG_BINARY = 3
+        mock_winreg.REG_SZ = 1
+        mock_winreg.HKEY_CURRENT_USER = 0x80000001
+
+        with patch.dict("sys.modules", {"winreg": mock_winreg}):
+            with patch("smart_download.services.startup_service.winreg", mock_winreg), \
+                 patch("smart_download.services.startup_service.IS_WINDOWS", True), \
+                 patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+                 patch("smart_download.services.startup_service._create_startup_shortcut"), \
+                 patch("subprocess.run"):
+                from smart_download.services.startup_service import enable_startup
+                res = enable_startup(minimized=True)
+                self.assertTrue(res)
+
+                # Verify SetValueEx was called with ENABLED_STARTUP_BINARY and REG_BINARY
+                bin_calls = [
+                    call for call in mock_winreg.SetValueEx.call_args_list
+                    if len(call[0]) >= 5 and call[0][4] == ENABLED_STARTUP_BINARY
+                ]
+                self.assertGreaterEqual(len(bin_calls), 2, "Expected SetValueEx calls for both Run and StartupFolder with binary flag")
+                for c in bin_calls:
+                    self.assertEqual(c[0][3], mock_winreg.REG_BINARY)
+                    self.assertEqual(c[0][4], b"\x02" + b"\x00" * 11)
+
+    def test_startup_welcome_toast_lifecycle_and_actions(self):
+        """
+        Verifies StartupWelcomeToast:
+        1. Schedules hard-kill safety timer.
+        2. Hides and destroys cleanly on _close().
+        3. Calls parent_app.restore_window() when clicked.
+        """
+        import tkinter as tk
+        from smart_download.ui.modals.welcome_toast import StartupWelcomeToast
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            mock_app = MagicMock()
+            toast = StartupWelcomeToast(root, parent_app=mock_app, duration_ms=2000)
+            self.assertTrue(toast.winfo_exists())
+
+            # 1. Assert hard-kill job scheduled
+            self.assertIsNotNone(getattr(toast, "_hard_kill_job", None), "Hard kill safety timer must be scheduled")
+
+            # 2. Assert click calls parent_app.restore_window()
+            toast._on_click()
+            mock_app.restore_window.assert_called_once()
+            root.update()
+            self.assertFalse(toast.winfo_exists(), "Toast must be destroyed after _on_click()")
+
+            # Create another toast to test _close() cancellation and destroy
+            toast2 = StartupWelcomeToast(root, parent_app=mock_app, duration_ms=2000)
+            self.assertIsNotNone(toast2._hard_kill_job)
+            toast2._close()
+            root.update()
+            self.assertIsNone(toast2._hard_kill_job, "Hard kill job should be cleared on _close()")
+            self.assertFalse(toast2.winfo_exists(), "Toast must be destroyed after _close()")
+        finally:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def test_install_application_purges_stale_core_plugin_isolation(self):
+        """Verifies install_application mocks terminate_running_app and registry operations during tests."""
+        from smart_download.installer import install_application
+        from smart_download.services.core_patch_updater import get_core_plugin_dir
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dummy_plugin = os.path.join(tmp_dir, "core_plugin")
+            os.makedirs(dummy_plugin, exist_ok=True)
+            target_install = os.path.join(tmp_dir, "install_target")
+
+            with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin), \
+                 patch("smart_download.installer.installer_ops.terminate_running_app") as mock_term, \
+                 patch("smart_download.installer.installer_ops.register_startup_entries") as mock_reg_start, \
+                 patch("smart_download.installer.installer_ops.unregister_startup_entries") as mock_unreg_start, \
+                 patch("smart_download.installer.installer_ops.register_uninstall_entry") as mock_uninst:
+                res = install_application(
+                    target_dir=target_install,
+                    register_browser=False,
+                    create_desktop=False,
+                    create_start_menu=False,
+                    register_startup=False,
+                )
+                self.assertTrue(res.get("success"))
+                # Assert mocks intercepted calls
+                mock_term.assert_called_once()
+                mock_unreg_start.assert_called_once()
+                mock_reg_start.assert_not_called()
+                mock_uninst.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
 

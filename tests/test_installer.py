@@ -247,7 +247,11 @@ class TestWindowsInstallerLogic(unittest.TestCase):
                 f.write("legacy shortcut")
 
             with patch.object(installer, "get_desktop_dir", return_value=tmp_desktop), \
-                 patch.object(installer, "get_start_menu_programs_dir", return_value=tmp_start):
+                 patch.object(installer, "get_start_menu_programs_dir", return_value=tmp_start), \
+                 patch("smart_download.installer.installer_ops.terminate_running_app"), \
+                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
+                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
+                 patch("smart_download.installer.installer_ops.register_uninstall_entry"):
                 res = installer.install_application(
                     target_dir=tmp_target,
                     create_desktop=True,
@@ -272,32 +276,37 @@ class TestWindowsInstallerLogic(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             install_target = os.path.join(tmp_dir, "InstalledTurbo")
 
-            # Execute install into test folder
-            res = installer.install_application(
-                target_dir=install_target,
-                create_desktop=False,
-                create_start_menu=False,
-                register_browser=False,
-                progress_cb=_cb
-            )
-            self.assertTrue(res.get("success"))
-            self.assertTrue(os.path.isdir(install_target))
-            self.assertTrue(os.path.isfile(os.path.join(install_target, "SmartDownload.exe")))
-            self.assertFalse(os.path.isfile(os.path.join(install_target, "TurboDownloader.exe")), "TurboDownloader.exe must NOT be present in modern installation")
-            self.assertTrue(os.path.isfile(os.path.join(install_target, "app_icon.ico")))
-            self.assertTrue(len(progress_events) >= 5)
-            self.assertEqual(progress_events[-1][0], 1.0)
+            with patch("smart_download.installer.installer_ops.terminate_running_app"), \
+                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
+                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
+                 patch("smart_download.installer.installer_ops.register_uninstall_entry"), \
+                 patch("smart_download.installer.installer_ops.unregister_uninstall_entry"):
+                # Execute install into test folder
+                res = installer.install_application(
+                    target_dir=install_target,
+                    create_desktop=False,
+                    create_start_menu=False,
+                    register_browser=False,
+                    progress_cb=_cb
+                )
+                self.assertTrue(res.get("success"))
+                self.assertTrue(os.path.isdir(install_target))
+                self.assertTrue(os.path.isfile(os.path.join(install_target, "SmartDownload.exe")))
+                self.assertFalse(os.path.isfile(os.path.join(install_target, "TurboDownloader.exe")), "TurboDownloader.exe must NOT be present in modern installation")
+                self.assertTrue(os.path.isfile(os.path.join(install_target, "app_icon.ico")))
+                self.assertTrue(len(progress_events) >= 5)
+                self.assertEqual(progress_events[-1][0], 1.0)
 
-            # Execute uninstall
-            un_progress = []
-            un_res = installer.uninstall_application(
-                target_dir=install_target,
-                progress_cb=lambda p, m: un_progress.append((p, m))
-            )
-            self.assertTrue(un_res.get("success"))
-            self.assertTrue(len(un_progress) >= 4)
-            self.assertEqual(un_progress[-1][0], 1.0)
-            self.assertFalse(os.path.exists(install_target))
+                # Execute uninstall
+                un_progress = []
+                un_res = installer.uninstall_application(
+                    target_dir=install_target,
+                    progress_cb=lambda p, m: un_progress.append((p, m))
+                )
+                self.assertTrue(un_res.get("success"))
+                self.assertTrue(len(un_progress) >= 4)
+                self.assertEqual(un_progress[-1][0], 1.0)
+                self.assertFalse(os.path.exists(install_target))
 
     def test_installer_purges_legacy_turbodownloader_binaries(self):
         """Verifies that install_application actively deletes existing TurboDownloader.exe and turbo_downloader.exe."""
@@ -313,12 +322,16 @@ class TestWindowsInstallerLogic(unittest.TestCase):
 
             self.assertTrue(os.path.isfile(legacy1))
 
-            res = installer.install_application(
-                target_dir=install_target,
-                create_desktop=False,
-                create_start_menu=False,
-                register_browser=False,
-            )
+            with patch("smart_download.installer.installer_ops.terminate_running_app"), \
+                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
+                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
+                 patch("smart_download.installer.installer_ops.register_uninstall_entry"):
+                res = installer.install_application(
+                    target_dir=install_target,
+                    create_desktop=False,
+                    create_start_menu=False,
+                    register_browser=False,
+                )
             self.assertTrue(res.get("success"))
             self.assertTrue(os.path.isfile(os.path.join(install_target, "SmartDownload.exe")))
             self.assertFalse(os.path.isfile(legacy1))
@@ -358,7 +371,10 @@ class TestWindowsInstallerLogic(unittest.TestCase):
                     return orig_subprocess_run(cmd, *args, **kwargs)
 
                 with patch.object(installer, "get_startup_dir", return_value=tmp_startup), \
-                     patch("subprocess.run", side_effect=mock_subprocess_run):
+                     patch("subprocess.run", side_effect=mock_subprocess_run), \
+                     patch("smart_download.installer.installer_ops.terminate_running_app"), \
+                     patch("smart_download.installer.installer_ops.register_uninstall_entry"), \
+                     patch("smart_download.installer.installer_ops.unregister_uninstall_entry"):
 
                     res = installer.install_application(
                         target_dir=tmp_target,
@@ -453,7 +469,10 @@ class TestWindowsInstallerLogic(unittest.TestCase):
                 with open(fake_lnk, "wb") as f:
                     f.write(b"FAKE_LNK")
 
-                with patch.object(installer, "get_startup_dir", return_value=tmp_startup):
+                with patch.object(installer, "get_startup_dir", return_value=tmp_startup), \
+                     patch("smart_download.installer.installer_ops.terminate_running_app"), \
+                     patch("smart_download.installer.installer_ops.register_uninstall_entry"), \
+                     patch("smart_download.installer.installer_ops.unregister_uninstall_entry"):
                     res = installer.install_application(
                         target_dir=tmp_target,
                         create_desktop=False,
@@ -602,7 +621,7 @@ class TestStandaloneExeBuild(unittest.TestCase):
         exe_path = os.path.join(dist_dir, "SmartDownload.exe")
         if not os.path.exists(exe_path):
             self.skipTest(f"{exe_path} not found")
-        proc = subprocess.Popen([exe_path, "--minimized"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen([exe_path, "--minimized", "--force-new-instance"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             connected = False
             for _ in range(40):
@@ -655,7 +674,11 @@ class TestStandaloneExeBuild(unittest.TestCase):
                 f.write("stale")
 
             target_install = os.path.join(tmp_dir, "install_target")
-            with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin):
+            with patch("smart_download.services.core_patch_updater.get_core_plugin_dir", return_value=dummy_plugin), \
+                 patch("smart_download.installer.installer_ops.terminate_running_app"), \
+                 patch("smart_download.installer.installer_ops.register_startup_entries"), \
+                 patch("smart_download.installer.installer_ops.unregister_startup_entries"), \
+                 patch("smart_download.installer.installer_ops.register_uninstall_entry"):
                 install_application(
                     target_dir=target_install,
                     register_browser=False,

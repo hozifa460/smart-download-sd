@@ -23,7 +23,11 @@ from .startup_service import (
     disable_startup,
     get_startup_entry,
 )
-from .single_instance import notify_running_instance
+from .single_instance import (
+    notify_running_instance,
+    acquire_single_instance_mutex,
+    release_single_instance_mutex,
+)
 from .updater_service import (
     APP_VERSION,
     parse_version,
@@ -126,6 +130,8 @@ __all__ = [
     "disable_startup",
     "get_startup_entry",
     "notify_running_instance",
+    "acquire_single_instance_mutex",
+    "release_single_instance_mutex",
     "APP_VERSION",
     "parse_version",
     "is_newer_version",

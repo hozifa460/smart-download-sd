@@ -31,9 +31,7 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
     def _format_geometry(w: Optional[int], h: Optional[int], x: int, y: int) -> str:
         pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
         pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
-        if w is not None and h is not None:
-            return f"{int(w)}x{int(h)}{pos_x}{pos_y}"
-        return f"{pos_x}{pos_y}"
+        return f"{int(w)}x{int(h)}{pos_x}{pos_y}" if w is not None and h is not None else f"{pos_x}{pos_y}"
 
     def _setup_window(self):
         """Configures frameless window, centering, and dragging."""
@@ -75,8 +73,16 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                 hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
                 style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE) | WS_MINIMIZEBOX | WS_SYSMENU
                 ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
-                ex_style = (ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
-                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
+
+                if getattr(self, "_start_hidden", False):
+                    ex_style = (ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
+                    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
+                    self.root.withdraw()
+                else:
+                    ex_style = (ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+                    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
 
                 if os.path.isfile(ico_path):
                     try:
@@ -89,35 +95,37 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
                         hicon_lg = ctypes.windll.user32.LoadImageW(None, ico_path, 1, lg_cx, lg_cy, 0x10)
                         if hicon_lg: ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon_lg)
                     except Exception: pass
-
-                if getattr(self, "_start_hidden", False):
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
-                else:
-                    ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
             except Exception: pass
 
         if getattr(self, "_start_hidden", False):
             try: self.root.withdraw()
             except Exception: pass
 
-        # Draggable title bar coordinate tracking (Root-relative to prevent jitter)
+        self.root.bind("<Map>", self._on_window_map, add="+")
         self._drag_offset_x = 0
         self._drag_offset_y = 0
+
+    def _on_window_map(self, event=None):
+        """Ensures that if the OS maps the window while hidden, it restores taskbar visibility cleanly."""
+        if getattr(self, "_start_hidden", False) and getattr(event, "widget", None) == self.root:
+            self.restore_window()
 
     def restore_window(self):
         """Restores and brings the main window to foreground if hidden or minimized."""
         self._start_hidden = False
-        try: self.root.deiconify()
-        except Exception: pass
         if IS_WINDOWS:
             try:
                 hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+                cur_ex = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, (cur_ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW)
                 ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
                 ctypes.windll.user32.ShowWindow(hwnd, SW_SHOW)
                 ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0043)
                 ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0043)
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
             except Exception: pass
+        try: self.root.deiconify()
+        except Exception: pass
         try:
             self.root.lift()
             self.root.attributes("-topmost", True)
@@ -154,20 +162,14 @@ class WindowChromeMixin(ThemeControllerMixin, DispatchControllerMixin, WindowLif
 
         # App Title
         self.title_lbl = tk.Label(
-            title_bar,
-            text=tr("app_header"),
-            font=("Segoe UI", 10, "bold"),
-            bg=self.c_panel,
-            fg=self.c_accent
+            title_bar, text=tr("app_header"),
+            font=("Segoe UI", 10, "bold"), bg=self.c_panel, fg=self.c_accent
         )
         self.title_lbl.pack(side=tk.LEFT, padx=(6, 8))
 
         self.subtitle_lbl = tk.Label(
-            title_bar,
-            text=tr("app_subtitle"),
-            font=("Segoe UI", 8),
-            bg=self.c_panel,
-            fg=self.c_text_muted
+            title_bar, text=tr("app_subtitle"),
+            font=("Segoe UI", 8), bg=self.c_panel, fg=self.c_text_muted
         )
         self.subtitle_lbl.pack(side=tk.LEFT)
 

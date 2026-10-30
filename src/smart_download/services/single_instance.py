@@ -10,6 +10,47 @@ from typing import Optional
 from .browser.bridge_server import DEFAULT_BRIDGE_PORT
 from ..utils.url_utils import is_downloadable_url
 
+_SINGLE_INSTANCE_MUTEX_HANDLE = None
+
+
+def acquire_single_instance_mutex(mutex_name: str = "Local\\SmartDownload_SingleInstance_Mutex") -> bool:
+    """
+    Attempts to acquire a Win32 Named Mutex to guarantee that only one instance of the
+    application starts up. If another process already holds the mutex, returns False.
+    Returns True if successfully acquired or if not on Windows.
+    Stores the mutex handle globally to prevent garbage collection until process exit.
+    """
+    global _SINGLE_INSTANCE_MUTEX_HANDLE
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, mutex_name)
+        if not handle:
+            return True
+        last_error = kernel32.GetLastError()
+        ERROR_ALREADY_EXISTS = 183
+        if last_error == ERROR_ALREADY_EXISTS:
+            kernel32.CloseHandle(handle)
+            return False
+        _SINGLE_INSTANCE_MUTEX_HANDLE = handle
+        return True
+    except Exception:
+        return True
+
+
+def release_single_instance_mutex() -> None:
+    """Releases the Win32 Named Mutex handle if currently held."""
+    global _SINGLE_INSTANCE_MUTEX_HANDLE
+    if _SINGLE_INSTANCE_MUTEX_HANDLE:
+        try:
+            import ctypes
+            ctypes.windll.kernel32.CloseHandle(_SINGLE_INSTANCE_MUTEX_HANDLE)
+        except Exception:
+            pass
+        _SINGLE_INSTANCE_MUTEX_HANDLE = None
+
 def notify_running_instance(url: Optional[str] = None, show: bool = True) -> bool:
     """
     Checks if an existing instance of Turbo Downloader is running by probing the

@@ -5,7 +5,9 @@ import ctypes
 
 from smart_download.i18n import LocalizationManager, tr
 from smart_download.utils import _detach_photo_tk
-from smart_download.services import IS_WINDOWS, SW_HIDE
+from smart_download.services import (
+    IS_WINDOWS, SW_HIDE, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW
+)
 
 from .dialog_controller import DialogControllerMixin
 
@@ -180,6 +182,8 @@ class WindowLifecycleMixin(DialogControllerMixin):
         if IS_WINDOWS:
             try:
                 hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+                cur_ex = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, (cur_ex & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW)
                 ctypes.windll.user32.ShowWindow(hwnd, SW_HIDE)
             except Exception:
                 pass

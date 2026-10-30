@@ -130,7 +130,10 @@ from ..services.startup_service import (
     disable_startup,
     get_startup_entry,
 )
-from ..services.single_instance import notify_running_instance
+from ..services.single_instance import (
+    notify_running_instance,
+    acquire_single_instance_mutex,
+)
 from ..services.youtube_service import (
     YouTubeResolver,
     MediaResolver,
@@ -466,8 +469,19 @@ def main():
                                               "--minimized", "-minimized", "/minimized")
                               for arg in sys.argv[1:])
 
-    # Single-instance check: if already running, forward URL or wake window, then exit
-    if not any(arg in sys.argv for arg in ("--force-new-instance", "--multi-instance")):
+    # Single-instance check: acquire Win32 Named Mutex and handle IPC forwarding
+    if not any(arg in sys.argv for arg in ("--force-new-instance", "--multi-instance")) and not is_test_environment():
+        if not acquire_single_instance_mutex():
+            if start_in_background:
+                sys.exit(0)
+            else:
+                import time
+                for _ in range(12):
+                    if notify_running_instance(url=cli_url, show=True):
+                        break
+                    time.sleep(0.25)
+                sys.exit(0)
+
         if start_in_background:
             if notify_running_instance(url=cli_url, show=False):
                 sys.exit(0)

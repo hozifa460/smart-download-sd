@@ -169,7 +169,11 @@ from smart_download.services.startup_service import (
     disable_startup,
     get_startup_entry,
 )
-from smart_download.services.single_instance import notify_running_instance
+from smart_download.services.single_instance import (
+    notify_running_instance,
+    acquire_single_instance_mutex,
+    release_single_instance_mutex,
+)
 from smart_download.services.youtube_service import (
     YouTubeResolver,
     YouTubeFormatBuilderMixin,

@@ -28,6 +28,9 @@ STARTUP_REG_KEY_NAME = "SmartDownload"
 LEGACY_STARTUP_REG_KEY_NAME = "TurboDownloader"
 TASK_NAME = "SmartDownloadAutoStart"
 LEGACY_TASK_NAME = "TurboDownloaderAutoStart"
+STARTUP_APPROVED_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+STARTUP_APPROVED_FOLDER_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+ENABLED_STARTUP_BINARY = b"\x02" + b"\x00" * 11
 
 def get_startup_dir() -> str:
     inst = sys.modules.get("installer")
@@ -136,7 +139,7 @@ def register_startup_entries(exe_path: str, icon_path: str = "") -> Dict[str, bo
     abs_exe = os.path.abspath(clean_exe)
     cmd = f'"{abs_exe}" --minimized'
 
-    # 1. Register in HKCU Run Key
+    # 1. Register in HKCU Run Key and StartupApproved
     if HAS_WINREG:
         try:
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_REG_KEY) as key:
@@ -147,6 +150,27 @@ def register_startup_entries(exe_path: str, icon_path: str = "") -> Dict[str, bo
                 except (FileNotFoundError, OSError):
                     pass
             results["run_key"] = True
+        except Exception:
+            pass
+
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_RUN_KEY) as key:
+                winreg.SetValueEx(key, STARTUP_REG_KEY_NAME, 0, winreg.REG_BINARY, ENABLED_STARTUP_BINARY)
+                try:
+                    winreg.DeleteValue(key, LEGACY_STARTUP_REG_KEY_NAME)
+                except (FileNotFoundError, OSError):
+                    pass
+        except Exception:
+            pass
+
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_FOLDER_KEY) as key:
+                winreg.SetValueEx(key, f"{APP_NAME}.lnk", 0, winreg.REG_BINARY, ENABLED_STARTUP_BINARY)
+                for leg in (LEGACY_STARTUP_REG_KEY_NAME, "TurboDownloader.lnk", "Turbo Download Manager Pro.lnk"):
+                    try:
+                        winreg.DeleteValue(key, leg)
+                    except (FileNotFoundError, OSError):
+                        pass
         except Exception:
             pass
 
@@ -213,6 +237,26 @@ def unregister_startup_entries() -> Dict[str, bool]:
             results["run_key"] = True
         except FileNotFoundError:
             results["run_key"] = True
+        except Exception:
+            pass
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                for k_name in (STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME):
+                    try:
+                        winreg.DeleteValue(key, k_name)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_FOLDER_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                for k_name in (f"{APP_NAME}.lnk", STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME):
+                    try:
+                        winreg.DeleteValue(key, k_name)
+                    except Exception:
+                        pass
         except Exception:
             pass
 

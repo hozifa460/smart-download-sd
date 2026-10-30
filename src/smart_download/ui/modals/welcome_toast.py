@@ -61,6 +61,7 @@ class StartupWelcomeToast(_BaseToplevel):
 
         try:
             self.attributes("-topmost", True)
+            self.attributes("-alpha", 0.0)
         except Exception:
             pass
 
@@ -88,20 +89,6 @@ class StartupWelcomeToast(_BaseToplevel):
         pos_x = f"+{int(x)}" if int(x) >= 0 else f"{int(x)}"
         pos_y = f"+{int(y)}" if int(y) >= 0 else f"{int(y)}"
         self.geometry(f"{w}x{h}{pos_x}{pos_y}")
-
-        # Non-activating extended window styles (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
-        if sys.platform == "win32":
-            try:
-                self.update_idletasks()
-                hwnd = ctypes.windll.user32.GetParent(self.winfo_id()) or self.winfo_id()
-                GWL_EXSTYLE = -20
-                WS_EX_NOACTIVATE = 0x08000000
-                WS_EX_TOOLWINDOW = 0x00000080
-                WS_EX_TOPMOST = 0x00000008
-                cur_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, cur_style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST)
-            except Exception:
-                pass
 
         # Inner container
         self.inner = tk.Frame(self, bg=self.c_panel, padx=int(12 * self.dpi_scale), pady=int(10 * self.dpi_scale), cursor="hand2")
@@ -188,15 +175,20 @@ class StartupWelcomeToast(_BaseToplevel):
         self.btn_close.bind("<Button-1>", lambda e: self._close())
 
         # Bind click on all child elements to restore main app
-        for w in (self, self.inner, self.lbl_ico, self.text_frame, self.lbl_title, self.lbl_ar, self.lbl_en):
+        for w in (self, self.inner, self.lbl_ico, self.text_frame, self.lbl_title, self.lbl_ar, self.lbl_en, self.lbl_compat):
             w.bind("<Button-1>", self._on_click)
 
-        # Alpha fade-in
+        # Alpha fade-in & Win32 toolwindow extended styles
         try:
             self.attributes("-alpha", 0.0)
+            self._apply_toolwindow_style()
             self._fade_in()
         except Exception:
             pass
+
+        # Unconditional hard-kill safety timer
+        self._hard_kill_job = self.after(max(1000, int(self.duration_ms) + 1000), self._close)
+        self._track_job(self._hard_kill_job)
 
         # Auto-destroy timer
         if self.duration_ms > 0:
@@ -204,11 +196,36 @@ class StartupWelcomeToast(_BaseToplevel):
             self._track_job(job)
             self._dismiss_job = job
 
+    def _apply_toolwindow_style(self):
+        """Applies non-activating, toolwindow, topmost extended window styles on Windows."""
+        if sys.platform != "win32":
+            return
+        try:
+            self.update_idletasks()
+            w_id = self.winfo_id()
+            p_id = ctypes.windll.user32.GetParent(w_id)
+            top_hwnd = p_id if p_id else w_id
+            for h in set(filter(None, [w_id, p_id, top_hwnd])):
+                try:
+                    cur_style = ctypes.windll.user32.GetWindowLongW(h, -20)
+                    new_style = (cur_style & ~0x00040000) | 0x08000000 | 0x00000080 | 0x00000008
+                    ctypes.windll.user32.SetWindowLongW(h, -20, new_style)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _track_job(self, job_id):
         self._after_jobs.append(job_id)
 
     def _cancel_all_jobs(self):
-        for j in self._after_jobs:
+        if hasattr(self, "_hard_kill_job") and self._hard_kill_job:
+            try:
+                self.after_cancel(self._hard_kill_job)
+            except Exception:
+                pass
+            self._hard_kill_job = None
+        for j in list(self._after_jobs):
             try:
                 self.after_cancel(j)
             except Exception:
@@ -226,6 +243,7 @@ class StartupWelcomeToast(_BaseToplevel):
                 self.attributes("-alpha", 1.0)
             except Exception:
                 pass
+            self._apply_toolwindow_style()
         else:
             try:
                 self.attributes("-alpha", self._alpha)
@@ -263,11 +281,26 @@ class StartupWelcomeToast(_BaseToplevel):
         self._cancel_all_jobs()
         if self.parent_app and getattr(self.parent_app, "_bg_toast", None) is self:
             self.parent_app._bg_toast = None
+        hwnd = None
+        if sys.platform == "win32":
+            try:
+                hwnd = ctypes.windll.user32.GetParent(self.winfo_id()) or self.winfo_id()
+            except Exception:
+                pass
+        try:
+            self.withdraw()
+        except Exception:
+            pass
         try:
             if self.winfo_exists():
                 super().destroy()
         except Exception:
             pass
+        if sys.platform == "win32" and hwnd:
+            try:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)
+            except Exception:
+                pass
 
     def grab_set(self):
         pass
@@ -276,12 +309,4 @@ class StartupWelcomeToast(_BaseToplevel):
         pass
 
     def destroy(self):
-        self._closing = True
-        self._cancel_all_jobs()
-        if self.parent_app and getattr(self.parent_app, "_bg_toast", None) is self:
-            self.parent_app._bg_toast = None
-        try:
-            if self.winfo_exists():
-                super().destroy()
-        except Exception:
-            pass
+        self._close()

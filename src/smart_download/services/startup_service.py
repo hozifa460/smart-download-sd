@@ -55,6 +55,9 @@ STARTUP_REG_KEY_NAME = "SmartDownload"
 LEGACY_STARTUP_REG_KEY_NAME = "TurboDownloader"
 TASK_NAME = "SmartDownloadAutoStart"
 LEGACY_TASK_NAME = "TurboDownloaderAutoStart"
+STARTUP_APPROVED_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+STARTUP_APPROVED_FOLDER_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+ENABLED_STARTUP_BINARY = b"\x02" + b"\x00" * 11
 
 
 def get_installed_exe_path() -> Optional[str]:
@@ -217,24 +220,24 @@ def get_startup_command(minimized: bool = True) -> str:
         exe_path = os.path.abspath(str(sys.executable).strip('"'))
         return f'"{exe_path}"{flag}'
 
-    # Check installed location first
+    # Check installed location first (%LOCALAPPDATA%\Programs\SmartDownload\SmartDownload.exe)
     installed_exe = get_installed_exe_path()
     if installed_exe:
         return f'"{installed_exe}"{flag}'
 
     # Prioritize compiled standalone binary in dist/ directory or adjacent to script
-    base_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() and isinstance(__file__, str) else os.getcwd()
-    if os.path.basename(base_dir).lower() in ("services", "smart_download"):
-        cand_root = os.path.abspath(os.path.join(base_dir, "..", "..", ".."))
-        if os.path.isdir(cand_root):
-            base_dir = cand_root
-    for exe_name in ("SmartDownload.exe", "TurboDownloader.exe"):
-        dist_cand = os.path.join(base_dir, "dist", exe_name)
-        alt_cand = os.path.join(base_dir, exe_name)
-        if os.path.isfile(dist_cand):
-            return f'"{os.path.abspath(dist_cand)}"{flag}'
-        elif os.path.isfile(alt_cand):
-            return f'"{os.path.abspath(alt_cand)}"{flag}'
+    search_dirs = [os.getcwd()]
+    if "__file__" in globals() and isinstance(__file__, str):
+        b = os.path.dirname(os.path.abspath(__file__))
+        search_dirs.extend([b, os.path.abspath(os.path.join(b, "..")), os.path.abspath(os.path.join(b, "..", "..")), os.path.abspath(os.path.join(b, "..", "..", ".."))])
+    for sd in search_dirs:
+        for exe_name in ("SmartDownload.exe", "TurboDownloader.exe"):
+            cand = os.path.join(sd, "dist", exe_name)
+            if os.path.isfile(cand):
+                return f'"{os.path.abspath(cand)}"{flag}'
+            cand2 = os.path.join(sd, exe_name)
+            if os.path.isfile(cand2):
+                return f'"{os.path.abspath(cand2)}"{flag}'
 
     # Script mode fallback: prefer pythonw.exe if available so no console window flashes
     py_exe = str(sys.executable).strip('"')
@@ -242,6 +245,7 @@ def get_startup_command(minimized: bool = True) -> str:
     pyw_exe = os.path.join(py_dir, "pythonw.exe")
     if os.path.isfile(pyw_exe):
         py_exe = pyw_exe
+    base_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() and isinstance(__file__, str) else os.getcwd()
     script_path = os.path.abspath(os.path.join(base_dir, "turbo_downloader.py"))
     return f'"{py_exe}" "{script_path}"{flag}'
 
@@ -307,6 +311,28 @@ def enable_startup(minimized: bool = True) -> bool:
         reg_ok = True
     except (OSError, PermissionError):
         return False
+
+    # Windows 10/11 StartupApproved binary registration
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_RUN_KEY) as key:
+            winreg.SetValueEx(key, STARTUP_REG_KEY_NAME, 0, winreg.REG_BINARY, ENABLED_STARTUP_BINARY)
+            try:
+                winreg.DeleteValue(key, LEGACY_STARTUP_REG_KEY_NAME)
+            except (FileNotFoundError, OSError):
+                pass
+    except Exception:
+        pass
+
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_FOLDER_KEY) as key:
+            winreg.SetValueEx(key, "Smart Download (SD).lnk", 0, winreg.REG_BINARY, ENABLED_STARTUP_BINARY)
+            for leg in (LEGACY_STARTUP_REG_KEY_NAME, "TurboDownloader.lnk", "Turbo Download Manager Pro.lnk"):
+                try:
+                    winreg.DeleteValue(key, leg)
+                except (FileNotFoundError, OSError):
+                    pass
+    except Exception:
+        pass
 
     exe_path, args, script_path, working_dir = _parse_startup_cmd(cmd)
 
@@ -405,6 +431,26 @@ def disable_startup() -> bool:
             if os.path.isfile(p):
                 try:
                     os.remove(p)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 4. Clean up StartupApproved registry keys
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            for k in (STARTUP_REG_KEY_NAME, LEGACY_STARTUP_REG_KEY_NAME):
+                try:
+                    winreg.DeleteValue(key, k)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_APPROVED_FOLDER_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            for k in ("Smart Download (SD).lnk", LEGACY_STARTUP_REG_KEY_NAME, "SmartDownload.lnk", "TurboDownloader.lnk"):
+                try:
+                    winreg.DeleteValue(key, k)
                 except Exception:
                     pass
     except Exception:
