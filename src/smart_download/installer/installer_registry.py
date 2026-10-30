@@ -30,6 +30,7 @@ TASK_NAME = "SmartDownloadAutoStart"
 LEGACY_TASK_NAME = "TurboDownloaderAutoStart"
 STARTUP_APPROVED_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 STARTUP_APPROVED_FOLDER_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+EXPLORER_SERIALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize"
 ENABLED_STARTUP_BINARY = b"\x02" + b"\x00" * 11
 
 def get_startup_dir() -> str:
@@ -171,6 +172,15 @@ def register_startup_entries(exe_path: str, icon_path: str = "") -> Dict[str, bo
                         winreg.DeleteValue(key, leg)
                     except (FileNotFoundError, OSError):
                         pass
+        except Exception:
+            pass
+
+        # Disable Windows 10/11 Explorer's 10-second artificial startup delay
+        try:
+            reg_dword = getattr(winreg, "REG_DWORD", 4)
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, EXPLORER_SERIALIZE_KEY) as key:
+                winreg.SetValueEx(key, "StartupDelayInMSec", 0, reg_dword, 0)
+                winreg.SetValueEx(key, "WaitForIdleState", 0, reg_dword, 0)
         except Exception:
             pass
 

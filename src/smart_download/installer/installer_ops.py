@@ -174,6 +174,9 @@ def find_payload_sources() -> Dict[str, str]:
         cand_hm = os.path.join(b, "host_manifest.py")
         if os.path.isfile(cand_hm) and "host_manifest.py" not in sources:
             sources["host_manifest.py"] = cand_hm
+        cand_ff = os.path.join(b, "ffmpeg.exe")
+        if os.path.isfile(cand_ff) and "ffmpeg.exe" not in sources:
+            sources["ffmpeg.exe"] = cand_ff
 
     return sources
 
@@ -314,6 +317,8 @@ def install_application(
         _copy_file_with_retry(sources["register_browser.py"], os.path.join(target_dir, "register_browser.py"))
     if "host_manifest.py" in sources:
         _copy_file_with_retry(sources["host_manifest.py"], os.path.join(target_dir, "host_manifest.py"))
+    if "ffmpeg.exe" in sources:
+        _copy_file_with_retry(sources["ffmpeg.exe"], os.path.join(target_dir, "ffmpeg.exe"))
 
     # 5. Place uninstaller executable
     uninstaller_dest = os.path.join(target_dir, "Uninstall.exe")

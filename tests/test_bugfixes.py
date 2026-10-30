@@ -3564,7 +3564,93 @@ class TestStartupAndWelcomeToastBugfixes(unittest.TestCase):
             mock_exit.assert_not_called()
             self.assertEqual(mock_notify.call_count, 8)
 
+    def test_enable_startup_disables_explorer_serialize_delay(self):
+        """Verifies enable_startup sets StartupDelayInMSec=0 and WaitForIdleState=0 in Explorer\\Serialize."""
+        from smart_download.services.startup_service import enable_startup, EXPLORER_SERIALIZE_KEY
+
+        mock_winreg = MagicMock()
+        mock_key = MagicMock()
+        created_keys = []
+
+        def fake_create_key(root, subkey):
+            created_keys.append(subkey)
+            cm = MagicMock()
+            cm.__enter__.return_value = mock_key
+            return cm
+
+        mock_winreg.CreateKey.side_effect = fake_create_key
+        mock_winreg.REG_DWORD = 4
+        mock_winreg.REG_SZ = 1
+        mock_winreg.REG_BINARY = 3
+
+        with patch("smart_download.services.startup_service.winreg", mock_winreg), \
+             patch("smart_download.services.startup_service.IS_WINDOWS", True), \
+             patch("smart_download.services.startup_service.get_startup_command", return_value='"C:\\SmartDownload.exe" --minimized'), \
+             patch("subprocess.run"):
+            res = enable_startup(minimized=True)
+            self.assertTrue(res)
+            self.assertIn(EXPLORER_SERIALIZE_KEY, created_keys)
+
+            calls = mock_winreg.SetValueEx.call_args_list
+            values_set = {c[0][1]: (c[0][3], c[0][4]) for c in calls if len(c[0]) >= 5}
+            self.assertIn("StartupDelayInMSec", values_set)
+            self.assertEqual(values_set["StartupDelayInMSec"], (4, 0))
+            self.assertIn("WaitForIdleState", values_set)
+            self.assertEqual(values_set["WaitForIdleState"], (4, 0))
+
+    def test_register_startup_entries_disables_explorer_serialize_delay(self):
+        """Verifies register_startup_entries sets StartupDelayInMSec=0 and WaitForIdleState=0 in Explorer\\Serialize."""
+        from smart_download.installer.installer_registry import register_startup_entries, EXPLORER_SERIALIZE_KEY
+
+        mock_winreg = MagicMock()
+        mock_key = MagicMock()
+        created_keys = []
+
+        def fake_create_key(root, subkey):
+            created_keys.append(subkey)
+            cm = MagicMock()
+            cm.__enter__.return_value = mock_key
+            return cm
+
+        mock_winreg.CreateKey.side_effect = fake_create_key
+        mock_winreg.REG_DWORD = 4
+        mock_winreg.REG_SZ = 1
+        mock_winreg.REG_BINARY = 3
+
+        with patch("smart_download.installer.installer_registry.HAS_WINREG", True), \
+             patch("smart_download.installer.installer_registry.winreg", mock_winreg), \
+             patch("smart_download.installer.installer_registry.get_startup_dir", return_value="C:\\FakeStartup"), \
+             patch("subprocess.run"):
+            res = register_startup_entries("C:\\FakePath\\SmartDownload.exe")
+            self.assertTrue(res["run_key"])
+            self.assertIn(EXPLORER_SERIALIZE_KEY, created_keys)
+
+            calls = mock_winreg.SetValueEx.call_args_list
+            values_set = {c[0][1]: (c[0][3], c[0][4]) for c in calls if len(c[0]) >= 5}
+            self.assertIn("StartupDelayInMSec", values_set)
+            self.assertEqual(values_set["StartupDelayInMSec"], (4, 0))
+            self.assertIn("WaitForIdleState", values_set)
+            self.assertEqual(values_set["WaitForIdleState"], (4, 0))
+
+    def test_find_ffmpeg_bin_checks_executable_dir_and_dist(self):
+        """Verifies find_ffmpeg_bin checks executable dir and dist folder."""
+        from smart_download.services.youtube_models import find_ffmpeg_bin
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dist_dir = os.path.join(tmpdir, "dist")
+            os.makedirs(dist_dir, exist_ok=True)
+            fake_ffmpeg = os.path.join(dist_dir, "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg")
+            with open(fake_ffmpeg, "wb") as f:
+                f.write(b"fake ffmpeg")
+
+            with patch("sys.executable", os.path.join(tmpdir, "SmartDownload.exe")), \
+                 patch("shutil.which", return_value=None):
+                found = find_ffmpeg_bin()
+                self.assertIsNotNone(found)
+                self.assertEqual(os.path.abspath(found), os.path.abspath(fake_ffmpeg))
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

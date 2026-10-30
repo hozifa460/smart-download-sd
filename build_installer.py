@@ -183,6 +183,17 @@ def build_app(rebuild: bool = False):
     verify_exe_startup(exe_path)
 
     clean_stale_dist_artifacts()
+    try:
+        from smart_download.services.youtube_models import find_ffmpeg_bin
+        ffmpeg_bin = find_ffmpeg_bin()
+        if ffmpeg_bin and os.path.isfile(ffmpeg_bin):
+            dist_ffmpeg = os.path.join(DIST_DIR, "ffmpeg.exe")
+            if os.path.abspath(ffmpeg_bin) != os.path.abspath(dist_ffmpeg):
+                shutil.copy2(ffmpeg_bin, dist_ffmpeg)
+                print(f"[+] Copied FFmpeg next to standalone binary: {dist_ffmpeg}")
+    except Exception as e:
+        print(f"[-] Note: Could not copy FFmpeg to dist ({e})")
+
     print(f"[+] SmartDownload.exe successfully built: {os.path.getsize(exe_path):,} bytes")
     return exe_path
 
@@ -248,6 +259,10 @@ def prepare_payload():
         if ffmpeg_bin and os.path.isfile(ffmpeg_bin):
             shutil.copy2(ffmpeg_bin, os.path.join(PAYLOAD_DIR, "ffmpeg.exe"))
             print(f"[+] Bundled FFmpeg into payload: {ffmpeg_bin}")
+            dist_ffmpeg = os.path.join(DIST_DIR, "ffmpeg.exe")
+            if os.path.abspath(ffmpeg_bin) != os.path.abspath(dist_ffmpeg):
+                shutil.copy2(ffmpeg_bin, dist_ffmpeg)
+                print(f"[+] Copied FFmpeg next to standalone binary: {dist_ffmpeg}")
     except Exception as e:
         print(f"[-] Note: FFmpeg bundling skipped ({e})")
 

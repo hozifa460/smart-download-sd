@@ -231,12 +231,15 @@ class ModernFramelessGUI(
                                for arg in sys.argv[1:])
         self._start_hidden: bool = bool(start_hidden)
         self._was_started_hidden: bool = bool(start_hidden)
-        if get_setting("startup_enabled", None) is True and not is_startup_enabled():
-            try:
-                enable_startup(minimized=True)
-            except Exception:
-                pass
         self._startup_enabled: bool = bool(is_startup_enabled())
+        if get_setting("startup_enabled", None) is True and not self._startup_enabled:
+            def _async_enable_startup():
+                try:
+                    enable_startup(minimized=True)
+                    self._startup_enabled = True
+                except Exception:
+                    pass
+            threading.Thread(target=_async_enable_startup, daemon=True).start()
         self.minimize_to_tray: bool = bool(get_setting("minimize_to_tray", True))
         self.auto_categorize_folders: bool = bool(get_setting("auto_categorize_folders", True))
         self.history_manager = DownloadHistoryManager()
@@ -290,6 +293,21 @@ class ModernFramelessGUI(
         self.height = min(target_h, max(650, int(sh * 0.88)))
         self._setup_window()
         self._init_theme()
+
+        # Fast-Path: Initialize System Tray Manager and schedule background notification early
+        self.tray_manager = SystemTrayManager(self)
+        try:
+            self.tray_manager.start()
+        except Exception:
+            pass
+
+        self._bg_notify_job = None
+        if self._start_hidden and os.environ.get("SD_DISABLE_STARTUP_TOAST") != "1":
+            try:
+                self._bg_notify_job = self.root.after(80, self._show_background_startup_notification)
+            except Exception:
+                pass
+
         self._build_ui()
 
         if initial_url:
@@ -329,13 +347,6 @@ class ModernFramelessGUI(
         # Initialize Clipboard URL Sniffer (TDM-style auto detection)
         self._init_clipboard_sniffer()
 
-        # Initialize Windows System Tray Notification Area Manager
-        self.tray_manager = SystemTrayManager(self)
-        try:
-            self.tray_manager.start()
-        except Exception:
-            pass
-
         # Configure window close and destroy protocols
         try:
             self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -345,13 +356,6 @@ class ModernFramelessGUI(
 
         # Start periodic GUI refresh timer
         self._refresh_job = self.root.after(100, self._gui_refresh_tick)
-
-        self._bg_notify_job = None
-        if self._start_hidden and os.environ.get("SD_DISABLE_STARTUP_TOAST") != "1":
-            try:
-                self._bg_notify_job = self.root.after(400, self._show_background_startup_notification)
-            except Exception:
-                pass
 
         # Idempotent and non-blocking embedded browser self-registration
         if os.environ.get("SD_DISABLE_AUTO_REGISTER") != "1" and not is_test_environment():

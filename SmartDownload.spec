@@ -14,13 +14,7 @@ pystray_hidden = collect_submodules('pystray')
 sd_hidden = collect_submodules('smart_download')
 
 extra_binaries = []
-try:
-    from smart_download.services.youtube_models import find_ffmpeg_bin
-    ffmpeg_bin = find_ffmpeg_bin()
-    if ffmpeg_bin and os.path.isfile(ffmpeg_bin):
-        extra_binaries.append((ffmpeg_bin, '.'))
-except Exception:
-    pass
+
 
 a = Analysis(
     ['turbo_downloader.py'],

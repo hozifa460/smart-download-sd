@@ -328,11 +328,20 @@ def find_ffmpeg_bin() -> Optional[str]:
     exe_name = "ffmpeg.exe" if is_win else "ffmpeg"
 
     # 1. Bundled PyInstaller directory and runtime paths
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if hasattr(sys, "executable") else ""
+    cwd = os.getcwd()
+    file_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else ""
+    proj_root = os.path.dirname(os.path.dirname(os.path.dirname(file_dir))) if file_dir else ""
+
     app_dirs = [
         getattr(sys, "_MEIPASS", ""),
-        os.path.dirname(sys.executable) if hasattr(sys, "executable") else "",
-        os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else "",
-        os.getcwd(),
+        exe_dir,
+        os.path.join(exe_dir, "dist") if exe_dir else "",
+        cwd,
+        os.path.join(cwd, "dist"),
+        file_dir,
+        proj_root,
+        os.path.join(proj_root, "dist") if proj_root else "",
     ]
     for d in app_dirs:
         if d:
